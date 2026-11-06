@@ -19,14 +19,6 @@ android {
         debug {
             isMinifyEnabled = false
         }
-        release {
-            isMinifyEnabled = false
-        }
-    }
-
-    lint {
-        abortOnError = false
-        checkReleaseBuilds = false
     }
 
     compileOptions {
