@@ -2,21 +2,24 @@ package com.example.mmp
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.CutCornerShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -44,31 +46,55 @@ class MainActivity : ComponentActivity() {
 fun MMPApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val prefs = remember { context.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+    val prefs = remember { context.getSharedPreferences("mmp_prefs_v2", Context.MODE_PRIVATE) }
 
-    var themeConfig by remember { mutableStateOf(MMPThemeConfig()) }
+    var themeConfig by remember { mutableStateOf(StorageHelper.loadTheme(prefs)) }
     var deviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var recentTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var playlists by remember { mutableStateOf(listOf("Hyperpop Essentials", "Deconstructed Club")) }
-    val artistPlayCounts = remember { mutableStateMapOf<String, Int>() }
+    var recentTrackIds by remember { mutableStateOf(StorageHelper.loadRecentIds(prefs)) }
+    var playlists by remember { mutableStateOf(StorageHelper.loadPlaylists(prefs)) }
+    val artistPlayCounts = remember {
+        mutableStateMapOf<String, Int>().apply { putAll(StorageHelper.loadArtistCounts(prefs)) }
+    }
 
-    val requiredPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
     } else {
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
 
     var hasAudioPermission by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, requiredPermission) == PackageManager.PERMISSION_GRANTED)
+        mutableStateOf(ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED)
     }
+
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasAudioPermission = granted
-        if (granted) scope.launch { deviceTracks = scanDeviceMusic(context) }
+        if (granted) {
+            scope.launch { deviceTracks = scanDeviceMusic(context) }
+        }
     }
 
-    LaunchedEffect(hasAudioPermission) {
-        if (hasAudioPermission) deviceTracks = scanDeviceMusic(context)
+    // При старте проверяем права, сканируем треки и запрашиваем уведомления для шторки
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
+        hasAudioPermission = granted
+        if (granted) {
+            deviceTracks = scanDeviceMusic(context)
+        } else {
+            permissionLauncher.launch(audioPermission)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    // Восстанавливаем последние 5 треков по сохранённым в памяти ID
+    val recentTracks = remember(deviceTracks, recentTrackIds) {
+        val trackMap = deviceTracks.associateBy { it.id }
+        recentTrackIds.mapNotNull { trackMap[it] }
     }
 
     val mediaPlayer = remember { MediaPlayer() }
@@ -80,6 +106,22 @@ fun MMPApp() {
 
     var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds", 0)) }
 
+    fun syncMediaService(track: Track?, meta: DetailedMetadata, playing: Boolean) {
+        if (track == null) return
+        PlayerBridge.currentTitle = track.title
+        PlayerBridge.currentArtist = track.artist
+        PlayerBridge.currentBitmap = meta.coverArt
+        PlayerBridge.isPlaying = playing
+        val intent = Intent(context, MediaPlaybackService::class.java).setAction("ACTION_UPDATE")
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (_: Exception) {}
+    }
+
     fun playTrack(track: Track) {
         try {
             mediaPlayer.reset()
@@ -88,21 +130,74 @@ fun MMPApp() {
             mediaPlayer.start()
             currentTrack = track
             isPlaying = true
-            recentTracks = (listOf(track) + recentTracks.filter { it.id != track.id }).take(5)
+
+            // Сохраняем в последние 5 треков и статистику артистов
+            val updatedIds = (listOf(track.id) + recentTrackIds.filter { it != track.id }).take(5)
+            recentTrackIds = updatedIds
+            StorageHelper.saveRecentIds(prefs, updatedIds)
+
             artistPlayCounts[track.artist] = (artistPlayCounts[track.artist] ?: 0) + 1
-            scope.launch { currentMetadata = extractTrackMetadata(context, track) }
+            StorageHelper.saveArtistCounts(prefs, artistPlayCounts.toMap())
+
+            scope.launch {
+                val meta = extractTrackMetadata(context, track)
+                currentMetadata = meta
+                syncMediaService(track, meta, true)
+            }
+
             mediaPlayer.setOnCompletionListener {
                 val idx = deviceTracks.indexOfFirst { it.id == track.id }
-                if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1]) else isPlaying = false
+                if (idx != -1 && idx + 1 < deviceTracks.size) {
+                    playTrack(deviceTracks[idx + 1])
+                } else {
+                    isPlaying = false
+                    syncMediaService(currentTrack, currentMetadata, false)
+                }
             }
         } catch (e: Exception) {
             Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
         }
     }
 
+    fun togglePlayPause() {
+        if (currentTrack != null) {
+            if (isPlaying) {
+                mediaPlayer.pause()
+                isPlaying = false
+            } else {
+                mediaPlayer.start()
+                isPlaying = true
+            }
+            syncMediaService(currentTrack, currentMetadata, isPlaying)
+        } else if (deviceTracks.isNotEmpty()) {
+            playTrack(deviceTracks.first())
+        }
+    }
+
+    // Привязываем кнопки из системного уведомления в шторке
+    SideEffect {
+        PlayerBridge.onPlayPause = { togglePlayPause() }
+        PlayerBridge.onNext = {
+            currentTrack?.let { cur ->
+                val idx = deviceTracks.indexOfFirst { it.id == cur.id }
+                if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1])
+            }
+        }
+        PlayerBridge.onPrev = {
+            currentTrack?.let { cur ->
+                val idx = deviceTracks.indexOfFirst { it.id == cur.id }
+                if (idx > 0) playTrack(deviceTracks[idx - 1])
+            }
+        }
+    }
+
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
-            delay(1000L)
+            delay(500L)
+            if (mediaPlayer.isPlaying) {
+                currentPositionMs = mediaPlayer.currentPosition.toLong()
+            }
+            delay(500L)
             if (mediaPlayer.isPlaying) {
                 currentPositionMs = mediaPlayer.currentPosition.toLong()
                 listenedSecondsTotal += 1
@@ -111,15 +206,22 @@ fun MMPApp() {
         }
     }
 
-    DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
-
     var selectedBottomTab by remember { mutableStateOf(0) }
-    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var showCreateStep1Sheet by remember { mutableStateOf(false) }
+    var showCreateStep2Dialog by remember { mutableStateOf(false) }
+    var pendingPlaylistCoverUri by remember { mutableStateOf<String?>(null) }
 
-    val currentShape: Shape = remember(themeConfig.shapeStyle) {
-        if (themeConfig.shapeStyle.isCut) CutCornerShape(themeConfig.shapeStyle.cornerRadius.dp)
-        else RoundedCornerShape(themeConfig.shapeStyle.cornerRadius.dp)
+    val coverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {}
+            pendingPlaylistCoverUri = it.toString()
+        }
     }
+
+    val cardShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toCardShape() }
+    val expressiveShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toExpressiveShape() }
 
     val primaryColor = Color(themeConfig.primaryHex)
     val secondaryColor = Color(themeConfig.secondaryHex)
@@ -139,10 +241,25 @@ fun MMPApp() {
                 val loaded = MMPThemeConfig.fromJson(jsonStr)
                 if (loaded != null) {
                     themeConfig = loaded
-                    Toast.makeText(context, "Тема применена!", Toast.LENGTH_SHORT).show()
+                    StorageHelper.saveTheme(prefs, loaded)
+                    Toast.makeText(context, "Тема применена и сохранена!", Toast.LENGTH_SHORT).show()
                 }
             }
         }
+    }
+
+    fun requestIgnoreBatteryOptimizations() {
+        try {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            } else {
+                Toast.makeText(context, "Уже закреплено в фоне!", Toast.LENGTH_SHORT).show()
+            }
+        } catch (_: Exception) {}
     }
 
     MaterialTheme(
@@ -154,8 +271,14 @@ fun MMPApp() {
                 Box(modifier = Modifier.size(320.dp).align(Alignment.BottomEnd).offset(60.dp, (-80).dp).clip(CircleShape).background(secondaryColor.copy(0.22f)))
             }
 
-            Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 160.dp)) {
-                AnimatedContent(targetState = selectedBottomTab, label = "Tab") { tab ->
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 162.dp)) {
+                AnimatedContent(
+                    targetState = selectedBottomTab,
+                    transitionSpec = {
+                        fadeIn(tween(240)) + scaleIn(initialScale = 0.96f) togetherWith fadeOut(tween(180))
+                    },
+                    label = "MainTabTransition"
+                ) { tab ->
                     when (tab) {
                         0 -> HomeScreen(
                             recentTracks = recentTracks,
@@ -164,10 +287,15 @@ fun MMPApp() {
                             listenedMinutes = listenedSecondsTotal / 60,
                             listenedSeconds = listenedSecondsTotal % 60,
                             hasPermission = hasAudioPermission,
-                            currentShape = currentShape,
+                            cardShape = cardShape,
+                            expressiveShape = expressiveShape,
                             themeConfig = themeConfig,
-                            onRequestPermission = { permissionLauncher.launch(requiredPermission) },
-                            onThemeChange = { themeConfig = it },
+                            onRequestPermission = { permissionLauncher.launch(audioPermission) },
+                            onRequestBatteryIgnore = { requestIgnoreBatteryOptimizations() },
+                            onThemeChange = {
+                                themeConfig = it
+                                StorageHelper.saveTheme(prefs, it)
+                            },
                             onTrackClick = { playTrack(it) },
                             onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
                             onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
@@ -175,10 +303,9 @@ fun MMPApp() {
                         1 -> LibraryScreen(
                             tracks = deviceTracks,
                             playlists = playlists,
-                            hasPermission = hasAudioPermission,
-                            currentShape = currentShape,
+                            cardShape = cardShape,
+                            expressiveShape = expressiveShape,
                             primaryColor = primaryColor,
-                            onRequestPermission = { permissionLauncher.launch(requiredPermission) },
                             onRescanClick = { scope.launch { deviceTracks = scanDeviceMusic(context) } },
                             onTrackClick = { playTrack(it) }
                         )
@@ -187,66 +314,112 @@ fun MMPApp() {
             }
 
             Column(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp, 12.dp).navigationBarsPadding(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 MiniPlayerBar(
                     track = currentTrack,
                     metadata = currentMetadata,
                     isPlaying = isPlaying,
                     currentPosMs = currentPositionMs,
-                    shape = currentShape,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
                     primaryColor = primaryColor,
                     onBarClick = { if (currentTrack != null) showFullPlayerSheet = true },
-                    onPlayPause = {
-                        if (currentTrack != null) {
-                            if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
-                            else { mediaPlayer.start(); isPlaying = true }
-                        } else if (deviceTracks.isNotEmpty()) playTrack(deviceTracks.first())
-                    }
+                    onPlayPause = { togglePlayPause() }
                 )
 
                 FrostedDockBar(
                     selectedTab = selectedBottomTab,
-                    shape = currentShape,
+                    cardShape = cardShape,
                     primaryColor = primaryColor,
                     onTabSelected = { selectedBottomTab = it },
-                    onCreateClick = { showCreatePlaylistDialog = true }
+                    onCreateClick = { showCreateStep1Sheet = true }
                 )
             }
 
-            if (showFullPlayerSheet && currentTrack != null) {
-                FullPlayerDialog(
-                    track = currentTrack!!,
-                    metadata = currentMetadata,
-                    isPlaying = isPlaying,
-                    currentPosMs = currentPositionMs,
-                    shape = currentShape,
+            // Плавный выезд меню "Создать -> Плейлист"
+            AnimatedVisibility(
+                visible = showCreateStep1Sheet,
+                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
+                exit = fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 2 })
+            ) {
+                CreateMenuSheet(
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
                     primaryColor = primaryColor,
-                    onDismiss = { showFullPlayerSheet = false },
-                    onPlayPause = {
-                        if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
-                        else { mediaPlayer.start(); isPlaying = true }
-                    },
-                    onSeek = { newPos -> mediaPlayer.seekTo(newPos.toInt()); currentPositionMs = newPos },
-                    onNext = {
-                        val idx = deviceTracks.indexOfFirst { it.id == currentTrack!!.id }
-                        if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1])
-                    },
-                    onPrev = {
-                        val idx = deviceTracks.indexOfFirst { it.id == currentTrack!!.id }
-                        if (idx > 0) playTrack(deviceTracks[idx - 1])
+                    onDismiss = { showCreateStep1Sheet = false },
+                    onSelectPlaylist = {
+                        showCreateStep1Sheet = false
+                        pendingPlaylistCoverUri = null
+                        showCreateStep2Dialog = true
                     }
                 )
             }
 
-            if (showCreatePlaylistDialog) {
-                CreatePlaylistDialog(
-                    shape = currentShape,
+            // Диалог выбора обложки и названия плейлиста
+            if (showCreateStep2Dialog) {
+                CreatePlaylistDetailsDialog(
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
                     primaryColor = primaryColor,
-                    onDismiss = { showCreatePlaylistDialog = false },
-                    onCreate = { if (it.isNotBlank()) playlists = playlists + it; showCreatePlaylistDialog = false }
+                    selectedCoverUri = pendingPlaylistCoverUri,
+                    onPickCoverClick = { coverPickerLauncher.launch(arrayOf("image/*")) },
+                    onDismiss = { showCreateStep2Dialog = false },
+                    onCreate = { name, coverUri ->
+                        if (name.isNotBlank()) {
+                            val updated = playlists + PlaylistItem(name.trim(), coverUri)
+                            playlists = updated
+                            StorageHelper.savePlaylists(prefs, updated)
+                        }
+                        showCreateStep2Dialog = false
+                    }
                 )
+            }
+
+            // Плавное полноэкранное открытие плеера (как на фото №5)
+            AnimatedVisibility(
+                visible = showFullPlayerSheet && currentTrack != null,
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                ) + fadeIn(tween(250)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(260)
+                ) + fadeOut(tween(200))
+            ) {
+                currentTrack?.let { activeTrack ->
+                    FullScreenPlayerOverlay(
+                        track = activeTrack,
+                        metadata = currentMetadata,
+                        isPlaying = isPlaying,
+                        currentPosMs = currentPositionMs,
+                        cardShape = cardShape,
+                        expressiveShape = expressiveShape,
+                        primaryColor = primaryColor,
+                        secondaryColor = secondaryColor,
+                        bgColor = bgColor,
+                        onDismiss = { showFullPlayerSheet = false },
+                        onPlayPause = { togglePlayPause() },
+                        onSeek = { newPos ->
+                            mediaPlayer.seekTo(newPos.toInt())
+                            currentPositionMs = newPos
+                        },
+                        onNext = {
+                            val idx = deviceTracks.indexOfFirst { it.id == activeTrack.id }
+                            if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1])
+                        },
+                        onPrev = {
+                            val idx = deviceTracks.indexOfFirst { it.id == activeTrack.id }
+                            if (idx > 0) playTrack(deviceTracks[idx - 1])
+                        }
+                    )
+                }
             }
         }
     }
