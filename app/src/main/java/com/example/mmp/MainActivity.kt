@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// --- МОДЕЛИ ДАННЫХ И ТЕМЫ (.mmpui) ---
+
 enum class ShapeStyle(val label: String, val cornerRadius: Int, val isCut: Boolean = false) {
     EXPRESSIVE("Плавный (MD3)", 28),
     PILL("Пилюля", 50),
@@ -124,8 +126,11 @@ data class Track(
 data class DetailedMetadata(
     val coverArt: Bitmap? = null,
     val bitrateKbps: String = "—",
+    val sampleRateHz: String = "—",
     val formatName: String = "AUDIO"
 )
+
+// --- ФУНКЦИИ СКАНИРОВАНИЯ ПАМЯТИ ТЕЛЕФОНА И МЕТАДАННЫХ ---
 
 suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatchers.IO) {
     val trackList = mutableListOf<Track>()
@@ -168,7 +173,7 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
             val mime = cursor.getString(mimeCol) ?: "audio/mpeg"
             val size = cursor.getLong(sizeCol)
 
-            if (duration > 5000) {
+            if (duration > 5000) { // Пропускаем короткие звуки уведомлений (< 5 сек)
                 val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
                 trackList.add(Track(id, contentUri, title, artist, album, duration, mime, size))
             }
@@ -182,27 +187,43 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
     try {
         retriever.setDataSource(context, track.uri)
         val artBytes = retriever.embeddedPicture
-        val bitmap = if (artBytes != null) BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size) else null
+        val bitmap = if (artBytes != null) {
+            BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
+        } else null
+
         val bitrateRaw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull()
-        val bitrateStr = if (bitrateRaw != null) "${bitrateRaw / 1000} kbps" else "Lossless"
+        val bitrateStr = if (bitrateRaw != null) "${bitrateRaw / 1000} kbps" else "Lossless / VBR"
+
         val format = when {
             track.mimeType.contains("flac", true) -> "FLAC"
             track.mimeType.contains("wav", true) -> "WAV"
-            track.mimeType.contains("mp4", true) || track.mimeType.contains("m4a", true) -> "M4A"
+            track.mimeType.contains("mp4", true) || track.mimeType.contains("m4a", true) -> "M4A / AAC"
+            track.mimeType.contains("ogg", true) -> "OGG"
             else -> "MP3"
         }
-        DetailedMetadata(bitmap, bitrateStr, format)
+
+        DetailedMetadata(
+            coverArt = bitmap,
+            bitrateKbps = bitrateStr,
+            formatName = format
+        )
     } catch (e: Exception) {
         DetailedMetadata()
     } finally {
-        try { retriever.release() } catch (_: Exception) {}
+        try {
+            retriever.release()
+        } catch (_: Exception) {}
     }
 }
 
 fun formatMillis(ms: Long): String {
     val totalSec = (ms / 1000).coerceAtLeast(0)
-    return "%d:%02d".format(totalSec / 60, totalSec % 60)
+    val min = totalSec / 60
+    val sec = totalSec % 60
+    return "%d:%02d".format(min, sec)
 }
+
+// --- ГЛАВНЫЙ КОМПОНЕНТ ПРИЛОЖЕНИЯ ---
 
 @Composable
 fun MMPApp() {
@@ -210,12 +231,18 @@ fun MMPApp() {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
 
+    // Тема
     var themeConfig by remember { mutableStateOf(MMPThemeConfig()) }
+
+    // Список музыки из памяти телефона
     var deviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var recentTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var playlists by remember { mutableStateOf(listOf("Hyperpop Essentials", "Deconstructed Club")) }
+    var playlists by remember { mutableStateOf(listOf("Hyperpop Essentials", "Deconstructed Club", "Избранное")) }
+
+    // Статистика прослушиваний по артистам для карточки сведений
     val artistPlayCounts = remember { mutableStateMapOf<String, Int>() }
 
+    // Разрешение на доступ к файлам
     val requiredPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
     } else {
@@ -223,18 +250,29 @@ fun MMPApp() {
     }
 
     var hasAudioPermission by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, requiredPermission) == PackageManager.PERMISSION_GRANTED)
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, requiredPermission) == PackageManager.PERMISSION_GRANTED
+        )
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
         hasAudioPermission = granted
-        if (granted) scope.launch { deviceTracks = scanDeviceMusic(context) }
+        if (granted) {
+            scope.launch {
+                deviceTracks = scanDeviceMusic(context)
+            }
+        }
     }
 
     LaunchedEffect(hasAudioPermission) {
-        if (hasAudioPermission) deviceTracks = scanDeviceMusic(context)
+        if (hasAudioPermission) {
+            deviceTracks = scanDeviceMusic(context)
+        }
     }
 
+    // Реальный MediaPlayer
     val mediaPlayer = remember { MediaPlayer() }
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
@@ -242,7 +280,10 @@ fun MMPApp() {
     var currentPositionMs by remember { mutableStateOf(0L) }
     var showFullPlayerSheet by remember { mutableStateOf(false) }
 
-    var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds", 0)) }
+    // Подсчёт секунд прослушивания (сохраняется в память)
+    var listenedSecondsTotal by remember {
+        mutableStateOf(prefs.getInt("listened_seconds", 0))
+    }
 
     fun playTrack(track: Track) {
         try {
@@ -252,18 +293,32 @@ fun MMPApp() {
             mediaPlayer.start()
             currentTrack = track
             isPlaying = true
+
+            // Обновляем историю последних 5 треков
             recentTracks = (listOf(track) + recentTracks.filter { it.id != track.id }).take(5)
+
+            // Считаем статистику для артиста
             artistPlayCounts[track.artist] = (artistPlayCounts[track.artist] ?: 0) + 1
-            scope.launch { currentMetadata = extractTrackMetadata(context, track) }
+
+            // Загружаем метаданные и обложку
+            scope.launch {
+                currentMetadata = extractTrackMetadata(context, track)
+            }
+
             mediaPlayer.setOnCompletionListener {
                 val idx = deviceTracks.indexOfFirst { it.id == track.id }
-                if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1]) else isPlaying = false
+                if (idx != -1 && idx + 1 < deviceTracks.size) {
+                    playTrack(deviceTracks[idx + 1])
+                } else {
+                    isPlaying = false
+                }
             }
         } catch (e: Exception) {
-            Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Ошибка воспроизведения файла", Toast.LENGTH_SHORT).show()
         }
     }
 
+    // Таймер обновления ползунка и подсчёта минут прослушивания
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
             delay(1000L)
@@ -275,51 +330,130 @@ fun MMPApp() {
         }
     }
 
-    DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            mediaPlayer.release()
+        }
+    }
 
-    var selectedBottomTab by remember { mutableStateOf(0) }
+    // Навигация
+    var selectedBottomTab by remember { mutableStateOf(0) } // 0 - Главная, 1 - Медиатека
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
 
     val currentShape: Shape = remember(themeConfig.shapeStyle) {
-        if (themeConfig.shapeStyle.isCut) CutCornerShape(themeConfig.shapeStyle.cornerRadius.dp)
-        else RoundedCornerShape(themeConfig.shapeStyle.cornerRadius.dp)
+        if (themeConfig.shapeStyle.isCut) {
+            CutCornerShape(themeConfig.shapeStyle.cornerRadius.dp)
+        } else {
+            RoundedCornerShape(themeConfig.shapeStyle.cornerRadius.dp)
+        }
     }
 
     val primaryColor = Color(themeConfig.primaryHex)
     val secondaryColor = Color(themeConfig.secondaryHex)
     val bgColor = Color(themeConfig.bgHex)
 
-    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+    // Экспорт и импорт .mmpui
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
         uri?.let {
-            context.contentResolver.openOutputStream(it)?.use { out -> out.write(themeConfig.toJson().toByteArray()) }
-            Toast.makeText(context, "Тема .mmpui сохранена!", Toast.LENGTH_SHORT).show()
+            context.contentResolver.openOutputStream(it)?.use { out ->
+                out.write(themeConfig.toJson().toByteArray())
+            }
+            Toast.makeText(context, "Тема сохранена в .mmpui!", Toast.LENGTH_SHORT).show()
         }
     }
 
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
         uri?.let {
             val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { r -> r.readText() }
             content?.let { jsonStr ->
                 val loaded = MMPThemeConfig.fromJson(jsonStr)
                 if (loaded != null) {
                     themeConfig = loaded
-                    Toast.makeText(context, "Тема применена!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Тема ${loaded.themeName} загружена!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Неверный файл .mmpui", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
+    // Одиночный выбор любого аудиофайла напрямую через проводник
+    val pickSingleAudioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, it)
+                val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: "Локальный файл"
+                val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Неизвестен"
+                val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: "Память устройства"
+                val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 180000L
+                val customTrack = Track(System.currentTimeMillis(), it, title, artist, album, dur, "audio/*", 0L)
+                deviceTracks = listOf(customTrack) + deviceTracks
+                playTrack(customTrack)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Не удалось прочитать метаданные", Toast.LENGTH_SHORT).show()
+            } finally {
+                retriever.release()
+            }
+        }
+    }
+
     MaterialTheme(
-        colorScheme = darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)
+        colorScheme = darkColorScheme(
+            primary = primaryColor,
+            secondary = secondaryColor,
+            background = bgColor,
+            surface = bgColor.copy(alpha = 0.85f)
+        )
     ) {
-        Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
-            Box(modifier = Modifier.fillMaxSize().blur(themeConfig.blurIntensity.dp * 3)) {
-                Box(modifier = Modifier.size(280.dp).offset((-50).dp, 40.dp).clip(CircleShape).background(primaryColor.copy(0.28f)))
-                Box(modifier = Modifier.size(320.dp).align(Alignment.BottomEnd).offset(60.dp, (-80).dp).clip(CircleShape).background(secondaryColor.copy(0.22f)))
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(bgColor)
+        ) {
+            // Матовый блюр на фоне
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(themeConfig.blurIntensity.dp * 3)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(280.dp)
+                        .offset(x = (-50).dp, y = 40.dp)
+                        .clip(CircleShape)
+                        .background(primaryColor.copy(alpha = 0.28f))
+                )
+                Box(
+                    modifier = Modifier
+                        .size(320.dp)
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 60.dp, y = (-80).dp)
+                        .clip(CircleShape)
+                        .background(secondaryColor.copy(alpha = 0.22f))
+                )
             }
 
-            Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 160.dp)) {
-                AnimatedContent(targetState = selectedBottomTab, label = "Tab") { tab ->
+            // Основной экран
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(bottom = 160.dp)
+            ) {
+                AnimatedContent(
+                    targetState = selectedBottomTab,
+                    transitionSpec = {
+                        fadeIn(tween(300)) + scaleIn(initialScale = 0.95f) togetherWith fadeOut(tween(200))
+                    },
+                    label = "MainTabTransition"
+                ) { tab ->
                     when (tab) {
                         0 -> HomeScreen(
                             recentTracks = recentTracks,
@@ -333,7 +467,7 @@ fun MMPApp() {
                             onRequestPermission = { permissionLauncher.launch(requiredPermission) },
                             onThemeChange = { themeConfig = it },
                             onTrackClick = { playTrack(it) },
-                            onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
+                            onExportTheme = { exportLauncher.launch("${themeConfig.themeName.replace(" ", "_")}.mmpui") },
                             onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
                         )
                         1 -> LibraryScreen(
@@ -343,113 +477,30 @@ fun MMPApp() {
                             currentShape = currentShape,
                             primaryColor = primaryColor,
                             onRequestPermission = { permissionLauncher.launch(requiredPermission) },
-                            onRescanClick = { scope.launch { deviceTracks = scanDeviceMusic(context) } },
+                            onRescanClick = {
+                                scope.launch {
+                                    deviceTracks = scanDeviceMusic(context)
+                                    Toast.makeText(context, "Найдено треков: ${deviceTracks.size}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onPickFileClick = { pickSingleAudioLauncher.launch(arrayOf("audio/*")) },
                             onTrackClick = { playTrack(it) }
                         )
                     }
                 }
             }
 
+            // Нижний блок: Мини-плеер (с метаданными) + Док-панель
             Column(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp, 12.dp).navigationBarsPadding(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 MiniPlayerBar(
                     track = currentTrack,
                     metadata = currentMetadata,
                     isPlaying = isPlaying,
-                    currentPosMs = currentPositionMs,
-                    shape = currentShape,
-                    primaryColor = primaryColor,
-                    onBarClick = { if (currentTrack != null) showFullPlayerSheet = true },
-                    onPlayPause = {
-                        if (currentTrack != null) {
-                            if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
-                            else { mediaPlayer.start(); isPlaying = true }
-                        } else if (deviceTracks.isNotEmpty()) playTrack(deviceTracks.first())
-                    }
-                )
-
-                FrostedDockBar(
-                    selectedTab = selectedBottomTab,
-                    shape = currentShape,
-                    primaryColor = primaryColor,
-                    onTabSelected = { selectedBottomTab = it },
-                    onCreateClick = { showCreatePlaylistDialog = true }
-                )
-            }
-
-            if (showFullPlayerSheet && currentTrack != null) {
-                FullPlayerDialog(
-                    track = currentTrack!!,
-                    metadata = currentMetadata,
-                    isPlaying = isPlaying,
-                    currentPosMs = currentPositionMs,
-                    shape = currentShape,
-                    primaryColor = primaryColor,
-                    onDismiss = { showFullPlayerSheet = false },
-                    onPlayPause = {
-                        if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
-                        else { mediaPlayer.start(); isPlaying = true }
-                    },
-                    onSeek = { newPos -> mediaPlayer.seekTo(newPos.toInt()); currentPositionMs = newPos },
-                    onNext = {
-                        val idx = deviceTracks.indexOfFirst { it.id == currentTrack!!.id }
-                        if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1])
-                    },
-                    onPrev = {
-                        val idx = deviceTracks.indexOfFirst { it.id == currentTrack!!.id }
-                        if (idx > 0) playTrack(deviceTracks[idx - 1])
-                    }
-                )
-            }
-
-            if (showCreatePlaylistDialog) {
-                CreatePlaylistDialog(
-                    shape = currentShape,
-                    primaryColor = primaryColor,
-                    onDismiss = { showCreatePlaylistDialog = false },
-                    onCreate = { if (it.isNotBlank()) playlists = playlists + it; showCreatePlaylistDialog = false }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun HomeScreen(
-    recentTracks: List<Track>,
-    allTracksCount: Int,
-    artistPlayCounts: Map<String, Int>,
-    listenedMinutes: Int,
-    listenedSeconds: Int,
-    hasPermission: Boolean,
-    currentShape: Shape,
-    themeConfig: MMPThemeConfig,
-    onRequestPermission: () -> Unit,
-    onThemeChange: (MMPThemeConfig) -> Unit,
-    onTrackClick: (Track) -> Unit,
-    onExportTheme: () -> Unit,
-    onImportTheme: () -> Unit
-) {
-    var activeSubTab by remember { mutableStateOf(0) }
-    val primaryColor = Color(themeConfig.primaryHex)
-
-    val insightText = remember(artistPlayCounts.toMap()) {
-        val total = artistPlayCounts.values.sum()
-        val top = artistPlayCounts.maxByOrNull { it.value }
-        if (total > 0 && top != null) "Артист ${top.key} играл ${((top.value.toFloat() / total) * 100).toInt()}% твоей музыки!"
-        else "Артист SOPHIE играл 57% твоей музыки!"
-    }
-
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("MMP", fontSize = 34.sp, fontWeight = FontWeight.Black, color = Color.White, letterSpacing = 2.sp)
-            Box(
-                modifier = Modifier.clip(currentShape).background(primaryColor.copy(0.2f)).border(1.dp, primaryColor.copy(0.5f), currentShape).padding(14.dp, 8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.GraphicEq, contentDescription = null, tint = primaryColor, modifier = Modifier.size(18.dp))
-    }
-}
+                    currentPosMs = curr
