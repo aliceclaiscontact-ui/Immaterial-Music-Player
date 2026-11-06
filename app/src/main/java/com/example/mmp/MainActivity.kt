@@ -451,8 +451,5 @@ fun HomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.GraphicEq, contentDescription = null, tint = primaryColor, modifier = Modifier.size(18.dp))
-        cat << 'EOF' > build.gradle.kts
-plugins {
-    id("com.android.application") version "8.2.2" apply false
-    id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+    }
 }
