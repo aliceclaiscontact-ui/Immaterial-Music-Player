@@ -375,24 +375,14 @@ fun SoundCloudScreen(
     var statusMessage by remember { mutableStateOf("Введи артиста или трек (например, SOPHIE, Arca, Aphex Twin) для поиска в SoundCloud") }
     val scope = rememberCoroutineScope()
 
-    val triggerSearch: (String) -> Unit = { q ->
-        if (q.isNotBlank()) {
-            isSearching = true
-            statusMessage = ""
-            scope.launch {
-                val found = SoundCloudClient.searchTracks(q.trim())
-                isSearching = false
-                results = found
-                if (found.isEmpty()) {
-                    statusMessage = "Ничего не найдено или не удалось подключиться к SoundCloud"
-                }
-            }
-        }
-    }
-
     LaunchedEffect(Unit) {
         if (results.isEmpty()) {
-            triggerSearch("SOPHIE")
+            isSearching = true
+            scope.launch {
+                val found = SoundCloudClient.searchTracks("SOPHIE")
+                isSearching = false
+                results = found
+            }
         }
     }
 
@@ -418,7 +408,20 @@ fun SoundCloudScreen(
                 modifier = Modifier.weight(1f)
             )
             Button(
-                onClick = { triggerSearch(query) },
+                onClick = {
+                    if (query.isNotBlank()) {
+                        isSearching = true
+                        statusMessage = ""
+                        scope.launch {
+                            val found = SoundCloudClient.searchTracks(query.trim())
+                            isSearching = false
+                            results = found
+                            if (found.isEmpty()) {
+                                statusMessage = "Ничего не найдено или не удалось подключиться к SoundCloud"
+                            }
+                        }
+                    }
+                },
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
                 modifier = Modifier.height(52.dp)
