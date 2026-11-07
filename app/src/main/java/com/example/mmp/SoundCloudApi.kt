@@ -28,6 +28,7 @@ object SoundCloudClient {
             requestMethod = "GET"
             connectTimeout = 8000
             readTimeout = 8000
+            instanceFollowRedirects = true
             setRequestProperty("User-Agent", USER_AGENT)
             setRequestProperty("Accept", "*/*")
         }
@@ -36,7 +37,6 @@ object SoundCloudClient {
 
     suspend fun getOrExtractClientId(): String = withContext(Dispatchers.IO) {
         if (!cachedClientId.isNullOrBlank()) return@withContext cachedClientId!!
-
         try {
             val html = httpGet("https://soundcloud.com/discover")
             val scriptRegex = Regex("""https://[a-zA-Z0-9\-_.]+\.sndcdn\.com/assets/[^"']+\.js""")
@@ -83,32 +83,26 @@ object SoundCloudClient {
 
                 val media = item.optJSONObject("media")
                 val transcodings = media?.optJSONArray("transcodings")
-                var chosenUrl: String? = null
+                var selectedStreamUrl: String? = null
 
                 if (transcodings != null) {
-                    var progressiveCandidate: String? = null
-                    var hlsCandidate: String? = null
-
+                    // Ищем strictly progressive MP3
                     for (t in 0 until transcodings.length()) {
                         val tr = transcodings.getJSONObject(t)
                         val format = tr.optJSONObject("format")?.optString("protocol", "") ?: ""
-                        val trUrl = tr.optString("url", "")
-
-                        if (trUrl.isNotBlank()) {
-                            if (format == "progressive") {
-                                progressiveCandidate = trUrl
-                                break
-                            } else if (format == "hls" && hlsCandidate == null) {
-                                hlsCandidate = trUrl
-                            }
+                        val mime = tr.optString("mime_type", "")
+                        if (format == "progressive" || mime.contains("mpeg")) {
+                            selectedStreamUrl = tr.optString("url", "")
+                            if (selectedStreamUrl.isNotBlank()) break
                         }
                     }
-                    // Отдаём приоритет прямому MP3 (progressive), чтобы MediaPlayer не захлебнулся на HLS
-                    chosenUrl = progressiveCandidate ?: hlsCandidate
+                    if (selectedStreamUrl.isNullOrBlank() && transcodings.length() > 0) {
+                        selectedStreamUrl = transcodings.getJSONObject(0).optString("url", "")
+                    }
                 }
 
-                if (id != 0L && !chosenUrl.isNullOrBlank()) {
-                    result.add(SoundCloudTrack(id, title, artist, artwork, duration, chosenUrl))
+                if (id != 0L && !selectedStreamUrl.isNullOrBlank()) {
+                    result.add(SoundCloudTrack(id, title, artist, artwork, duration, selectedStreamUrl))
                 }
             }
             result
@@ -125,19 +119,17 @@ object SoundCloudClient {
         try {
             val resp = httpGet(target)
             val json = JSONObject(resp)
-            val direct = json.optString("url", "")
+            var direct = json.optString("url", "")
             if (direct.isBlank()) return@withContext null
 
-            // Если получен m3u8 (HLS), берём из плейлиста прямой стрим-URL
+            // Разворачиваем HLS в первый чанк, если нет progressive
             if (direct.contains(".m3u8")) {
-                try {
-                    val m3u8Content = httpGet(direct)
-                    val lines = m3u8Content.lines()
-                    val mediaUrl = lines.firstOrNull { it.startsWith("http") && !it.startsWith("#") }
-                    if (!mediaUrl.isNullOrBlank()) return@withContext mediaUrl
-                } catch (_: Throwable) {}
+                val m3u8Content = httpGet(direct)
+                val subUrl = m3u8Content.lines().firstOrNull { it.startsWith("http") && !it.startsWith("#") }
+                if (!subUrl.isNullOrBlank()) {
+                    direct = subUrl
+                }
             }
-
             direct
         } catch (_: Throwable) {
             null

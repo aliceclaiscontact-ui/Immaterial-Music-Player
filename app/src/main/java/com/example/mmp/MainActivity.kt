@@ -621,15 +621,19 @@ fun MMPApp() {
                             textColor = textColor,
                             surfaceColor = surfaceColor,
                             onPlaySoundCloudTrack = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
-                                Toast.makeText(context, "Подключаемся к SoundCloud: ${scTrack.title}...", Toast.LENGTH_SHORT).show()
+                                val progUrl = scTrack.streamProgressiveUrl
+                                if (progUrl == null) {
+                                    Toast.makeText(context, "Нет ссылки на поток", Toast.LENGTH_SHORT).show()
+                                    return@SoundCloudScreen
+                                }
+                                Toast.makeText(context, "Загрузка потока...", Toast.LENGTH_SHORT).show()
                                 scope.launch {
                                     val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
-                                    if (directUrl != null) {
+                                    if (!directUrl.isNullOrBlank()) {
                                         val playable = SoundCloudClient.toTrack(scTrack, directUrl)
                                         playTrack(playable, listOf(playable))
                                     } else {
-                                        Toast.makeText(context, "Не удалось получить аудиопоток SoundCloud", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Поток недоступен для воспроизведения", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
