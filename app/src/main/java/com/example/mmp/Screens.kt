@@ -432,7 +432,7 @@ fun LibraryScreen(
     // Если открыта страница Автора (в стиле Apple Music по фото)
     if (openedArtist != null) {
         val artistTracks = remember(openedArtist, tracks) {
-            tracks.filter { it.artist.equals(openedArtist, ignoreCase = true) }
+            tracks.filter { it.artist == openedArtist }
         }
         ArtistDetailScreen(
             artistName = openedArtist!!,
