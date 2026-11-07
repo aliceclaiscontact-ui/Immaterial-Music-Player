@@ -336,7 +336,7 @@ fun HomeScreen(
                     }
 
                     // Топ-10 самых прослушиваемых треков с количеством прослушек
-                    val top10Tracks = remember(activeTrackPlays, allTracks) {
+                    val top10Tracks = run {
                         val map = allTracks.associateBy { it.id }
                         activeTrackPlays.entries
                             .sortedByDescending { it.value }
@@ -630,7 +630,7 @@ fun LibraryScreen(
                     }
                 }
                 2 -> {
-                    val artists = remember(tracks) { tracks.groupBy { it.artist } }
+                    val artists = run { tracks.groupBy { it.artist } }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
                         items(artists.keys.toList()) { artist ->
                             val artistTrackList = artists[artist] ?: emptyList()
@@ -662,7 +662,7 @@ fun LibraryScreen(
                 }
                 else -> {
                     // Раздел Альбомы с миниатюрой обложки слева
-                    val albums = remember(tracks) { tracks.groupBy { it.album } }
+                    val albums = run { tracks.groupBy { it.album } }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
                         items(albums.keys.toList()) { album ->
                             val albumTrackList = albums[album] ?: emptyList()
