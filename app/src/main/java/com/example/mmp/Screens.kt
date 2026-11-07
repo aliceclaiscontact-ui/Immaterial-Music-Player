@@ -375,16 +375,17 @@ fun SoundCloudScreen(
     var statusMessage by remember { mutableStateOf("Введи артиста или трек (например, SOPHIE, Arca, Aphex Twin) для поиска в SoundCloud") }
     val scope = rememberCoroutineScope()
 
-    fun triggerSearch(q: String) {
-        if (q.isBlank()) return
-        isSearching = true
-        statusMessage = ""
-        scope.launch {
-            val found = SoundCloudClient.searchTracks(q.trim())
-            isSearching = false
-            results = found
-            if (found.isEmpty()) {
-                statusMessage = "Ничего не найдено или не удалось подключиться к SoundCloud"
+    val triggerSearch: (String) -> Unit = { q ->
+        if (q.isNotBlank()) {
+            isSearching = true
+            statusMessage = ""
+            scope.launch {
+                val found = SoundCloudClient.searchTracks(q.trim())
+                isSearching = false
+                results = found
+                if (found.isEmpty()) {
+                    statusMessage = "Ничего не найдено или не удалось подключиться к SoundCloud"
+                }
             }
         }
     }
