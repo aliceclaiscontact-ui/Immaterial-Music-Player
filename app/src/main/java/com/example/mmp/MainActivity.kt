@@ -140,7 +140,7 @@ fun MMPApp() {
         try {
             val intent = Intent(context, MediaPlaybackService::class.java).setAction("ACTION_UPDATE")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
-        } catch (_: Throwable) {}
+        } catch (e: Throwable) {}
     }
 
     val focusChangeListener = remember {
@@ -148,30 +148,30 @@ fun MMPApp() {
             when (focusChange) {
                 AudioManager.AUDIOFOCUS_LOSS -> {
                     wasPlayingBeforeFocusLoss = false
-                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
+                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (e: Throwable) {}
                     isPlaying = false
                     syncMediaService(currentTrack, currentMetadata, false)
                 }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                     if (isPlaying) {
                         wasPlayingBeforeFocusLoss = true
-                        try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
+                        try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (e: Throwable) {}
                         isPlaying = false
                         syncMediaService(currentTrack, currentMetadata, false)
                     }
                 }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    try { exoPlayer.setVolume(0.25f) } catch (_: Throwable) {}
+                    try { exoPlayer.setVolume(0.25f) } catch (e: Throwable) {}
                 }
                 AudioManager.AUDIOFOCUS_GAIN -> {
-                    try { exoPlayer.setVolume(1.0f) } catch (_: Throwable) {}
+                    try { exoPlayer.setVolume(1.0f) } catch (e: Throwable) {}
                     if (wasPlayingBeforeFocusLoss && currentTrack != null && isMediaPlayerPrepared) {
                         wasPlayingBeforeFocusLoss = false
                         try {
                             exoPlayer.play()
                             isPlaying = true
                             syncMediaService(currentTrack, currentMetadata, true)
-                        } catch (_: Throwable) {}
+                        } catch (e: Throwable) {}
                     }
                 }
             }
@@ -195,14 +195,14 @@ fun MMPApp() {
                 @Suppress("DEPRECATION")
                 audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             }
-        } catch (_: Throwable) { true }
+        } catch (e: Throwable) { true }
     }
 
     DisposableEffect(context) {
         val noisyReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && isPlaying) {
-                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
+                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (e: Throwable) {}
                     isPlaying = false
                     syncMediaService(currentTrack, currentMetadata, false)
                 }
@@ -210,7 +210,7 @@ fun MMPApp() {
         }
         context.registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
         onDispose {
-            try { context.unregisterReceiver(noisyReceiver) } catch (_: Throwable) {}
+            try { context.unregisterReceiver(noisyReceiver) } catch (e: Throwable) {}
         }
     }
 
@@ -331,10 +331,6 @@ fun MMPApp() {
                     Toast.makeText(context, "Ошибка потока ExoPlayer: ${error.errorCodeName}", Toast.LENGTH_SHORT).show()
                 }
             })
-                 catch (_: Throwable) {
-                    isPlaying = false
-                
-            }
         } catch (e: Throwable) {
             isPlaying = false
             Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
@@ -359,7 +355,7 @@ fun MMPApp() {
                 exoPlayer.seekTo(0L)
                 currentPositionMs = 0L
                 return
-            } catch (_: Throwable) {}
+            } catch (e: Throwable) {}
         }
         if (currentQueue.isEmpty()) currentQueue = deviceTracks
         val idx = currentQueue.indexOfFirst { it.id == cur.id }
@@ -378,7 +374,7 @@ fun MMPApp() {
                 return
             }
             if (isPlaying) {
-                try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
+                try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (e: Throwable) {}
                 isPlaying = false
                 StorageHelper.saveLastPlayedState(prefs, cur, currentPositionMs)
                 syncMediaService(cur, currentMetadata, false)
@@ -386,7 +382,7 @@ fun MMPApp() {
                 try {
                     requestAudioFocus()
                     val dur = cur.durationMs
-                    val pos = try { exoPlayer.currentPosition } catch (_: Throwable) { 0L }
+                    val pos = try { exoPlayer.currentPosition } catch (e: Throwable) { 0L }
                     if (dur > 0 && pos >= dur - 800L) {
                         exoPlayer.seekTo(0L)
                         currentPositionMs = 0L
@@ -394,7 +390,7 @@ fun MMPApp() {
                     exoPlayer.play()
                     isPlaying = true
                     syncMediaService(cur, currentMetadata, true)
-                } catch (_: Throwable) {
+                } catch (e: Throwable) {
                     playTrack(cur)
                 }
             }
@@ -435,7 +431,7 @@ fun MMPApp() {
             delay(1000L)
             sleepTimerRemainingSec -= 1
             if (sleepTimerRemainingSec == 0 && isPlaying) {
-                try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
+                try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (e: Throwable) {}
                 isPlaying = false
                 syncMediaService(currentTrack, currentMetadata, false)
                 Toast.makeText(context, "Таймер сна остановил музыку", Toast.LENGTH_SHORT).show()
@@ -446,8 +442,8 @@ fun MMPApp() {
     LaunchedEffect(isPlaying, currentTrack) {
         while (isPlaying && currentTrack != null) {
             delay(1000L)
-            if (isMediaPlayerPrepared && (try { exoPlayer.isPlaying } catch (_: Throwable) { false })) {
-                currentPositionMs = try { exoPlayer.currentPosition } catch (_: Throwable) { currentPositionMs }
+            if (isMediaPlayerPrepared && (try { exoPlayer.isPlaying } catch (e: Throwable) { false })) {
+                currentPositionMs = try { exoPlayer.currentPosition } catch (e: Throwable) { currentPositionMs }
                 listenedSecondsTotal += 1
                 currentTrackPlayedSeconds += 1
                 val trk = currentTrack!!
@@ -475,7 +471,7 @@ fun MMPApp() {
         }
     }
 
-    DisposableEffect(Unit) { onDispose { try { exoPlayer.release() } catch (_: Throwable) {} } }
+    DisposableEffect(Unit) { onDispose { try { exoPlayer.release() } catch (e: Throwable) {} } }
 
     var selectedBottomTab by remember { mutableStateOf(0) }
     var showCreateStep1Sheet by remember { mutableStateOf(false) }
@@ -485,14 +481,14 @@ fun MMPApp() {
 
     val coverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
-            try { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Throwable) {}
+            try { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Throwable) {}
             pendingPlaylistCoverUri = it.toString()
         }
     }
 
     val tagCoverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
-            try { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Throwable) {}
+            try { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Throwable) {}
             pendingTagCoverUri = it.toString()
         }
     }
@@ -526,7 +522,7 @@ fun MMPApp() {
     fun requestIgnoreBatteryOptimizations() {
         prefs.edit().putBoolean("battery_opt_dismissed", true).apply()
         isBatteryIgnored = true
-        try { if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) { context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${context.packageName}") }) } } catch (_: Throwable) {}
+        try { if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) { context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${context.packageName}") }) } } catch (e: Throwable) {}
     }
 
     MaterialTheme(colorScheme = if (isLightMode) lightColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor) else darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)) {
@@ -686,7 +682,7 @@ fun MMPApp() {
                         onSeek = { newPos ->
                             currentPositionMs = newPos
                             if (isMediaPlayerPrepared) {
-                                try { exoPlayer.seekTo(newPos) } catch (_: Throwable) {}
+                                try { exoPlayer.seekTo(newPos) } catch (e: Throwable) {}
                             }
                         },
                         onNext = { playNextTrack() },
