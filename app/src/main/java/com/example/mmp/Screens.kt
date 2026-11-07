@@ -33,6 +33,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -369,109 +370,178 @@ fun SoundCloudScreen(
     primaryColor: Color,
     textColor: Color,
     surfaceColor: Color,
-    onPlaySoundCloudTrack: (SoundCloudTrack) -> Unit
+    likedScTracks: List<Track>,
+    onPlaySoundCloudTrack: (SoundCloudTrack) -> Unit,
+    onPlaySavedScTrack: (Track) -> Unit,
+    onDownloadScTrack: (SoundCloudTrack) -> Unit,
+    onToggleLikeScTrack: (SoundCloudTrack) -> Unit,
+    onAddScToPlaylist: (SoundCloudTrack) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<SoundCloudTrack>>(emptyList()) }
-    var statusMessage by remember { mutableStateOf("Введи артиста или трек (например, SOPHIE, Arca, Aphex Twin) для поиска в SoundCloud") }
+    var activeTab by remember { mutableIntStateOf(0) } // 0 = Поиск, 1 = Понравившееся из SoundCloud
+    var statusMessage by remember { mutableStateOf("Введите имя, автора или название альбома") }
     val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        if (results.isEmpty()) {
-            isSearching = true
-            val found = SoundCloudClient.searchTracks("SOPHIE")
-            isSearching = false
-            results = found
-        }
-    }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(modifier = Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.Filled.CloudQueue, null, tint = primaryColor, modifier = Modifier.size(30.dp))
-            Text("SoundCloud", fontSize = 28.sp, fontWeight = FontWeight.Black, color = textColor)
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("Поиск треков в SoundCloud...", color = textColor.copy(0.5f)) },
-                singleLine = true,
-                shape = cardShape,
-                modifier = Modifier.weight(1f)
-            )
-            Button(
-                onClick = {
-                    if (query.isNotBlank()) {
-                        isSearching = true
-                        statusMessage = ""
-                        scope.launch {
-                            val found = SoundCloudClient.searchTracks(query.trim())
-                            isSearching = false
-                            results = found
-                            if (found.isEmpty()) {
-                                statusMessage = "Ничего не найдено или не удалось подключиться к SoundCloud"
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(Icons.Filled.CloudQueue, null, tint = primaryColor, modifier = Modifier.size(30.dp))
+                Text("SoundCloud", fontSize = 28.sp, fontWeight = FontWeight.Black, color = textColor)
+            }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            ExpressiveFilterPill("Поиск в сети", activeTab == 0, primaryColor, textColor) { activeTab = 0 }
+            ExpressiveFilterPill("Понравившееся (${likedScTracks.size})", activeTab == 1, primaryColor, textColor) { activeTab = 1 }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (activeTab == 0) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Введите имя, автора или название альбома", color = textColor.copy(0.5f), fontSize = 13.sp) },
+                    singleLine = true,
+                    shape = cardShape,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = {
+                        if (query.isNotBlank()) {
+                            isSearching = true
+                            statusMessage = ""
+                            scope.launch {
+                                val found = SoundCloudClient.searchTracks(query.trim())
+                                isSearching = false
+                                results = found
+                                if (found.isEmpty()) {
+                                    statusMessage = "Ничего не найдено в SoundCloud"
+                                }
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                    modifier = Modifier.height(52.dp)
+                ) {
+                    Icon(Icons.Filled.Search, null, tint = Color.Black)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            if (isSearching) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = primaryColor)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("Ищем в SoundCloud...", color = textColor.copy(0.7f), fontSize = 13.sp)
+                    }
+                }
+            } else if (results.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                        Icon(Icons.Filled.CloudQueue, null, tint = primaryColor.copy(0.45f), modifier = Modifier.size(56.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(statusMessage, color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                    items(results, key = { it.id }) { scTrack ->
+                        val isLiked = likedScTracks.any { kotlin.math.abs(it.id) == kotlin.math.abs(scTrack.id) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(cardShape)
+                                .background(surfaceColor)
+                                .clickable { onPlaySoundCloudTrack(scTrack) }
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val dummyTrack = remember(scTrack) {
+                                Track(
+                                    id = -scTrack.id,
+                                    uri = Uri.EMPTY,
+                                    title = scTrack.title,
+                                    artist = scTrack.artist,
+                                    album = "SoundCloud",
+                                    durationMs = scTrack.durationMs,
+                                    mimeType = "audio/mpeg",
+                                    sizeBytes = 0L,
+                                    customCoverUri = scTrack.artworkUrl
+                                )
+                            }
+                            TrackCoverThumb(dummyTrack, expressiveShape, primaryColor, 50)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(scTrack.title, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${scTrack.artist} • ${formatTime(scTrack.durationMs)}", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1)
+                            }
+                            IconButton(onClick = { onToggleLikeScTrack(scTrack) }, modifier = Modifier.size(34.dp)) {
+                                Icon(
+                                    imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                    contentDescription = "В избранное SC",
+                                    tint = if (isLiked) primaryColor else textColor.copy(0.6f),
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                            IconButton(onClick = { onDownloadScTrack(scTrack) }, modifier = Modifier.size(34.dp)) {
+                                Icon(Icons.Filled.Download, "Скачать", tint = primaryColor, modifier = Modifier.size(19.dp))
+                            }
+                            IconButton(onClick = { onAddScToPlaylist(scTrack) }, modifier = Modifier.size(34.dp)) {
+                                Icon(Icons.Filled.Add, "В плейлист", tint = textColor.copy(0.75f), modifier = Modifier.size(19.dp))
                             }
                         }
                     }
-                },
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                modifier = Modifier.height(52.dp)
-            ) {
-                Icon(Icons.Filled.Search, null, tint = Color.Black)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        if (isSearching) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = primaryColor)
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Загружаем треки из SoundCloud...", color = textColor.copy(0.7f), fontSize = 13.sp)
                 }
             }
-        } else if (results.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(statusMessage, color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
-            }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
-                items(results, key = { it.id }) { scTrack ->
-                    val dummyTrack = remember(scTrack) {
-                        Track(
-                            id = scTrack.id,
-                            uri = Uri.EMPTY,
-                            title = scTrack.title,
-                            artist = scTrack.artist,
-                            album = "SoundCloud",
-                            durationMs = scTrack.durationMs,
-                            mimeType = "audio/mpeg",
-                            sizeBytes = 0L,
-                            customCoverUri = scTrack.artworkUrl
+            if (likedScTracks.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Нажми ❤️ рядом с треком в поиске SoundCloud, чтобы сохранить его сюда", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                    items(likedScTracks, key = { it.id }) { savedTrack ->
+                        TrackListItem(
+                            track = savedTrack,
+                            cardShape = cardShape,
+                            expressiveShape = expressiveShape,
+                            primaryColor = primaryColor,
+                            textColor = textColor,
+                            surfaceColor = surfaceColor,
+                            badgeText = "SC ❤️",
+                            showCoverThumb = true,
+                            onAddToPlaylist = {
+                                onAddScToPlaylist(
+                                    SoundCloudTrack(
+                                        id = kotlin.math.abs(savedTrack.id),
+                                        title = savedTrack.title,
+                                        artist = savedTrack.artist,
+                                        artworkUrl = savedTrack.customCoverUri,
+                                        durationMs = savedTrack.durationMs,
+                                        streamProgressiveUrl = savedTrack.filePath.ifBlank { savedTrack.uri.toString() }
+                                    )
+                                )
+                            },
+                            onClick = { onPlaySavedScTrack(savedTrack) }
                         )
                     }
-                    TrackListItem(
-                        track = dummyTrack,
-                        cardShape = cardShape,
-                        expressiveShape = expressiveShape,
-                        primaryColor = primaryColor,
-                        textColor = textColor,
-                        surfaceColor = surfaceColor,
-                        badgeText = "SC",
-                        showCoverThumb = true,
-                        onAddToPlaylist = null,
-                        onClick = { onPlaySoundCloudTrack(scTrack) }
-                    )
                 }
             }
         }
@@ -884,6 +954,8 @@ fun FullScreenPlayerOverlay(
     onAddToPlaylistClick: () -> Unit,
     onEditTagsClick: () -> Unit,
     onOpenSleepTimerClick: () -> Unit,
+    onOpenAudioFxClick: () -> Unit = {},
+    onDownloadCurrentScTrack: () -> Unit = {},
     onSearchOnlineLyricsClick: (String?) -> Unit,
     onOpenQueueClick: () -> Unit,
     onToggleShuffle: () -> Unit,
@@ -961,25 +1033,46 @@ fun FullScreenPlayerOverlay(
                         Text(track.artist, color = textColor.copy(0.72f), fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = onAddToPlaylistClick,
-                            modifier = Modifier.size(34.dp).clip(CircleShape).background(textColor.copy(0.14f))
+                    val isScStream = track.folderName == "SoundCloud" || track.uri.scheme == "http" || track.uri.scheme == "https"
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(textColor.copy(0.14f))
+                                .clickable { onAddToPlaylistClick() },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Filled.Add, "В плейлист", tint = primaryColor, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Filled.Add, "В плейлист", tint = primaryColor, modifier = Modifier.size(20.dp))
                         }
                         Box {
-                            IconButton(
-                                onClick = { showMoreMenu = true },
-                                modifier = Modifier.size(34.dp).clip(CircleShape).background(textColor.copy(0.14f))
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(textColor.copy(0.14f))
+                                    .clickable { showMoreMenu = true },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Filled.MoreVert, "Ещё", tint = textColor, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Filled.MoreVert, "Ещё", tint = textColor, modifier = Modifier.size(20.dp))
                             }
                             DropdownMenu(
                                 expanded = showMoreMenu,
                                 onDismissRequest = { showMoreMenu = false },
                                 modifier = Modifier.background(surfaceColor)
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("Настройка звука (Speed / Pitch / FX)", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = { Icon(Icons.Filled.GraphicEq, null, tint = primaryColor) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onOpenAudioFxClick()
+                                    }
+                                )
                                 DropdownMenuItem(
                                     text = { Text("Таймер сна (до 120 мин)", color = textColor, fontWeight = FontWeight.SemiBold) },
                                     leadingIcon = { Icon(Icons.Filled.Bedtime, null, tint = primaryColor) },
@@ -997,14 +1090,25 @@ fun FullScreenPlayerOverlay(
                                         showFullLyricsOverlay = true
                                     }
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Изменить сведения о треке", color = textColor, fontWeight = FontWeight.SemiBold) },
-                                    leadingIcon = { Icon(Icons.Filled.Edit, null, tint = primaryColor) },
-                                    onClick = {
-                                        showMoreMenu = false
-                                        onEditTagsClick()
-                                    }
-                                )
+                                if (isScStream) {
+                                    DropdownMenuItem(
+                                        text = { Text("Скачать трек в память", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                        leadingIcon = { Icon(Icons.Filled.Download, null, tint = primaryColor) },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            onDownloadCurrentScTrack()
+                                        }
+                                    )
+                                } else {
+                                    DropdownMenuItem(
+                                        text = { Text("Изменить сведения о треке", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                        leadingIcon = { Icon(Icons.Filled.Edit, null, tint = primaryColor) },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            onEditTagsClick()
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -1176,9 +1280,11 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
     onSearchLyricsByQuery: (String?) -> Unit
 ) {
     val lyricsList = metadata.lyrics
-    val activeLyricIndex = remember(currentPosMs, lyricsList) {
+    // Компенсация задержки аудиовыхода (+220 мс) для идеального попадания в бит
+    val syncedPosMs = currentPosMs + 220L
+    val activeLyricIndex = remember(syncedPosMs, lyricsList) {
         if (lyricsList.isEmpty()) -1
-        else lyricsList.indexOfLast { it.timeMs <= currentPosMs }.coerceAtLeast(0)
+        else lyricsList.indexOfLast { it.timeMs <= syncedPosMs }.coerceAtLeast(0)
     }
     val lyricListState = rememberLazyListState()
     var showManualSearchField by remember { mutableStateOf(false) }
@@ -1187,7 +1293,9 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
     LaunchedEffect(activeLyricIndex) {
         if (activeLyricIndex >= 0 && lyricsList.isNotEmpty()) {
             try {
-                lyricListState.animateScrollToItem((activeLyricIndex - 2).coerceAtLeast(0))
+                // Держим ровно 1 предыдущую строчку сверху, а текущую сразу под ней!
+                val targetIdx = (activeLyricIndex - 1).coerceAtLeast(0)
+                lyricListState.animateScrollToItem(index = targetIdx, scrollOffset = 0)
             } catch (_: Throwable) {}
         }
     }
@@ -1288,33 +1396,56 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                 } else {
                     LazyColumn(
                         state = lyricListState,
-                        verticalArrangement = Arrangement.spacedBy(18.dp),
-                        contentPadding = PaddingValues(vertical = 110.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(top = 18.dp, bottom = 260.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        itemsIndexed(lyricsList) { idx, line ->
+                        itemsIndexed(lyricsList, key = { idx, item -> "${idx}_${item.timeMs}" }) { idx, line ->
                             val isCurrent = idx == activeLyricIndex
                             val distance = abs(idx - activeLyricIndex)
                             val targetScale by animateFloatAsState(
-                                targetValue = if (isCurrent) 1.04f else 0.95f,
-                                animationSpec = tween(250),
+                                targetValue = if (isCurrent) 1.02f else 0.94f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
                                 label = "LyricScale"
                             )
-                            val blurDp = if (isCurrent) 0.dp else (distance * 1.3f).coerceAtMost(4f).dp
+                            val targetAlpha by animateFloatAsState(
+                                targetValue = when {
+                                    isCurrent -> 1f
+                                    idx == activeLyricIndex - 1 -> 0.48f
+                                    else -> (0.45f - distance * 0.06f).coerceIn(0.18f, 0.45f)
+                                },
+                                animationSpec = tween(320),
+                                label = "LyricAlpha"
+                            )
+                            val blurRadius by animateFloatAsState(
+                                targetValue = if (isCurrent) 0f else (distance * 1.35f).coerceAtMost(4.8f),
+                                animationSpec = tween(320),
+                                label = "LyricBlur"
+                            )
 
-                            Text(
-                                text = line.text,
-                                color = if (isCurrent) Color.White else Color.White.copy(0.38f),
-                                fontSize = if (isCurrent) 24.sp else 18.sp,
-                                fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
-                                lineHeight = 30.sp,
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .scale(targetScale)
-                                    .let { mod -> if (blurDp > 0.2.dp) mod.blur(blurDp) else mod }
+                                    .animateItemPlacement(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow))
                                     .clickable { onSeek(line.timeMs) }
-                                    .padding(vertical = 4.dp)
-                            )
+                                    // Важно: внутренний padding ДО blur + Unbounded, чтобы блюр никогда не обрезался рамкой!
+                                    .let { mod ->
+                                        if (blurRadius > 0.15f) mod.blur(blurRadius.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                                        else mod
+                                    }
+                                    .padding(vertical = 10.dp, horizontal = 8.dp)
+                            ) {
+                                Text(
+                                    text = line.text,
+                                    color = Color.White.copy(alpha = targetAlpha),
+                                    fontSize = if (isCurrent) 26.sp else 19.sp,
+                                    fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                                    lineHeight = if (isCurrent) 33.sp else 26.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .scale(targetScale)
+                                )
+                            }
                         }
                     }
                 }
@@ -1888,5 +2019,88 @@ fun CreatePlaylistDetailsDialog(cardShape: Shape, expressiveShape: Shape, primar
         },
         confirmButton = { Button(onClick = { onCreate(name, selectedCoverUri) }, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Создать", color = Color.Black, fontWeight = FontWeight.Bold) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = textColor.copy(0.7f)) } }
+    )
+}
+
+
+@Composable
+fun AudioFxDialog(
+    playbackSpeed: Float,
+    playbackPitch: Float,
+    bassBoostStrength: Int,
+    reverbPreset: Int,
+    cardShape: Shape,
+    primaryColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    onDismiss: () -> Unit,
+    onApplyFx: (Float, Float, Int, Int) -> Unit
+) {
+    var speed by remember { mutableFloatStateOf(playbackSpeed) }
+    var pitch by remember { mutableFloatStateOf(playbackPitch) }
+    var bass by remember { mutableIntStateOf(bassBoostStrength) }
+    var reverb by remember { mutableIntStateOf(reverbPreset) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = cardShape,
+        containerColor = surfaceColor,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.GraphicEq, null, tint = primaryColor)
+                Text("Тюнинг звука (ExoPlayer FX)", color = textColor, fontWeight = FontWeight.Black, fontSize = 18.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                // Быстрые пресеты
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    ExpressiveFilterPill("Обычный", speed == 1f && pitch == 1f, primaryColor, textColor) {
+                        speed = 1.0f; pitch = 1.0f; onApplyFx(1.0f, 1.0f, bass, reverb)
+                    }
+                    ExpressiveFilterPill("Slowed", speed == 0.85f && pitch == 0.85f, primaryColor, textColor) {
+                        speed = 0.85f; pitch = 0.85f; onApplyFx(0.85f, 0.85f, bass, reverb)
+                    }
+                    ExpressiveFilterPill("Nightcore", speed == 1.2f && pitch == 1.2f, primaryColor, textColor) {
+                        speed = 1.2f; pitch = 1.2f; onApplyFx(1.2f, 1.2f, bass, reverb)
+                    }
+                }
+
+                Column {
+                    Text("Скорость (Speed): ${String.format("%.2f", speed)}x", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Slider(
+                        value = speed,
+                        onValueChange = { speed = it; onApplyFx(speed, pitch, bass, reverb) },
+                        valueRange = 0.5f..1.75f,
+                        colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
+                    )
+                }
+
+                Column {
+                    Text("Тон / Питч (Pitch): ${String.format("%.2f", pitch)}x", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Slider(
+                        value = pitch,
+                        onValueChange = { pitch = it; onApplyFx(speed, pitch, bass, reverb) },
+                        valueRange = 0.5f..1.75f,
+                        colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
+                    )
+                }
+
+                Column {
+                    Text("Усиление баса (Bass Boost): ${(bass / 10)}%", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Slider(
+                        value = bass.toFloat(),
+                        onValueChange = { bass = it.toInt(); onApplyFx(speed, pitch, bass, reverb) },
+                        valueRange = 0f..1000f,
+                        colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) {
+                Text("Готово", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        }
     )
 }

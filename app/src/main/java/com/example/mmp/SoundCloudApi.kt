@@ -1,10 +1,15 @@
 package com.example.mmp
 
+import android.content.Context
+import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Environment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -21,6 +26,7 @@ data class SoundCloudTrack(
 object SoundCloudClient {
     private const val FALLBACK_CLIENT_ID = "2t9loNQH90kzJcsMmUEoeMGjVCvAc2hw"
     private var cachedClientId: String? = null
+    private val resolvedUrlCache = mutableMapOf<String, String>()
     private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     private fun httpGet(urlStr: String): String {
@@ -39,7 +45,7 @@ object SoundCloudClient {
         if (!cachedClientId.isNullOrBlank()) return@withContext cachedClientId!!
         try {
             val html = httpGet("https://soundcloud.com/discover")
-            val scriptRegex = Regex("""https://[a-zA-Z0-9\-_.]+\.sndcdn\.com/assets/[^"']+\.js""")
+            val scriptRegex = Regex("""https://[a-zA-Z0-9\-_.] +\.sndcdn\.com/assets/[^"']+\.js""".replace(" ", ""))
             val scriptUrls = scriptRegex.findAll(html).map { it.value }.toList()
 
             val clientRegex = Regex("""client_id[:=]["']([a-zA-Z0-9]{32})["']""")
@@ -60,7 +66,7 @@ object SoundCloudClient {
         FALLBACK_CLIENT_ID
     }
 
-    suspend fun searchTracks(query: String, limit: Int = 30): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
+    suspend fun searchTracks(query: String, limit: Int = 35): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
         val cid = getOrExtractClientId()
         val encodedQ = URLEncoder.encode(query, "UTF-8")
         val endpoint = "https://api-v2.soundcloud.com/search/tracks?q=$encodedQ&client_id=$cid&limit=$limit"
@@ -113,6 +119,11 @@ object SoundCloudClient {
     }
 
     suspend fun resolveStreamUrl(streamMetaUrl: String): String? = withContext(Dispatchers.IO) {
+        if (streamMetaUrl.startsWith("http") && (streamMetaUrl.contains(".mp3") || streamMetaUrl.contains(".m3u8") || streamMetaUrl.contains("cf-media.sndcdn.com") || streamMetaUrl.contains(" cf-hls-media.sndcdn.com"))) {
+            return@withContext streamMetaUrl
+        }
+        resolvedUrlCache[streamMetaUrl]?.let { return@withContext it }
+
         val cid = getOrExtractClientId()
         val sep = if (streamMetaUrl.contains("?")) "&" else "?"
         val target = "$streamMetaUrl${sep}client_id=$cid"
@@ -121,15 +132,65 @@ object SoundCloudClient {
             val resp = httpGet(target)
             val json = JSONObject(resp)
             val direct = json.optString("url", "")
-            if (direct.isNotBlank()) direct else null
+            if (direct.isNotBlank()) {
+                resolvedUrlCache[streamMetaUrl] = direct
+                direct
+            } else null
         } catch (_: Throwable) {
+            null
+        }
+    }
+
+    suspend fun downloadTrackToDevice(context: Context, title: String, artist: String, streamMetaOrDirectUrl: String): File? = withContext(Dispatchers.IO) {
+        try {
+            val direct = if (streamMetaOrDirectUrl.contains("api-v2.soundcloud.com")) {
+                resolveStreamUrl(streamMetaOrDirectUrl) ?: return@withContext null
+            } else {
+                streamMetaOrDirectUrl
+            }
+
+            val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "MMP_SoundCloud")
+            if (!musicDir.exists()) musicDir.mkdirs()
+
+            val safeName = "$artist - $title".replace(Regex("[\\\\/:*?\"<>|]"), "_").take(90)
+            val outFile = File(musicDir, "$safeName.mp3")
+
+            FileOutputStream(outFile).use { out ->
+                if (!direct.contains(".m3u8")) {
+                    val conn = (URL(direct).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 10000
+                        readTimeout = 10000
+                        setRequestProperty("User-Agent", USER_AGENT)
+                    }
+                    conn.inputStream.use { inp -> inp.copyTo(out) }
+                } else {
+                    var playlist = httpGet(direct)
+                    val subUrl = playlist.lines().map { it.trim() }.firstOrNull { it.startsWith("http") && it.contains(".m3u8") }
+                    if (!subUrl.isNullOrBlank()) {
+                        playlist = httpGet(subUrl)
+                    }
+                    val segments = playlist.lines().map { it.trim() }.filter { it.startsWith("http") && !it.startsWith("#") }
+                    for (seg in segments) {
+                        val conn = (URL(seg).openConnection() as HttpURLConnection).apply {
+                            connectTimeout = 8000
+                            readTimeout = 8000
+                            setRequestProperty("User-Agent", USER_AGENT)
+                        }
+                        conn.inputStream.use { inp -> inp.copyTo(out) }
+                    }
+                }
+            }
+
+            MediaScannerConnection.scanFile(context, arrayOf(outFile.absolutePath), arrayOf("audio/mpeg"), null)
+            outFile
+        } catch (e: Throwable) {
             null
         }
     }
 
     fun toTrack(scTrack: SoundCloudTrack, directHttpUri: String): Track {
         return Track(
-            id = scTrack.id,
+            id = if (scTrack.id > 0) -scTrack.id else scTrack.id,
             uri = Uri.parse(directHttpUri),
             title = scTrack.title,
             artist = scTrack.artist,
@@ -137,7 +198,7 @@ object SoundCloudClient {
             durationMs = scTrack.durationMs,
             mimeType = "audio/mpeg",
             sizeBytes = 0L,
-            filePath = "",
+            filePath = scTrack.streamProgressiveUrl ?: directHttpUri,
             folderPath = "SoundCloud",
             folderName = "SoundCloud",
             customCoverUri = scTrack.artworkUrl,

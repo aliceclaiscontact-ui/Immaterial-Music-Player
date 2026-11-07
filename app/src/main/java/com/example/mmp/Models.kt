@@ -38,7 +38,6 @@ enum class RepeatMode {
 
 enum class ShapeStyle(val label: String) {
     SQUIRCLE("Плавный (MD3)"),
-    PILL("Пилюля"),
     COOKIE("Клевер"),
     STAR("Звезда (Burst)"),
     FLOWER("Цветок (MD3)"),
@@ -51,7 +50,6 @@ enum class ShapeStyle(val label: String) {
 
 fun ShapeStyle.toCardShape(): Shape = when (this) {
     ShapeStyle.SQUIRCLE -> RoundedCornerShape(26.dp)
-    ShapeStyle.PILL -> RoundedCornerShape(28.dp)
     ShapeStyle.COOKIE -> RoundedCornerShape(30.dp)
     ShapeStyle.STAR -> RoundedCornerShape(22.dp)
     ShapeStyle.FLOWER -> RoundedCornerShape(28.dp)
@@ -64,7 +62,6 @@ fun ShapeStyle.toCardShape(): Shape = when (this) {
 
 fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
     ShapeStyle.SQUIRCLE -> RoundedCornerShape(28.dp)
-    ShapeStyle.PILL -> CircleShape
     ShapeStyle.SHARP -> RoundedCornerShape(8.dp)
     ShapeStyle.CYBER -> CutCornerShape(22)
     ShapeStyle.ARCH -> RoundedCornerShape(topStartPercent = 50, topEndPercent = 50, bottomStartPercent = 14, bottomEndPercent = 14)
@@ -765,4 +762,49 @@ suspend fun fetchLyricsFromLrclib(
     } catch (_: Throwable) {
         null
     }
+
+    fun saveSoundCloudTracks(prefs: SharedPreferences, tracks: List<Track>) {
+        val arr = JSONArray()
+        tracks.forEach { t ->
+            val obj = JSONObject()
+            obj.put("id", t.id)
+            obj.put("uri", t.uri.toString())
+            obj.put("title", t.title)
+            obj.put("artist", t.artist)
+            obj.put("album", t.album)
+            obj.put("durationMs", t.durationMs)
+            obj.put("customCoverUri", t.customCoverUri ?: "")
+            arr.put(obj)
+        }
+        prefs.edit().putString("saved_sc_tracks_v1", arr.toString()).apply()
+    }
+
+    fun loadSoundCloudTracks(prefs: SharedPreferences): List<Track> {
+        val raw = prefs.getString("saved_sc_tracks_v1", null) ?: return emptyList()
+        val list = mutableListOf<Track>()
+        try {
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    Track(
+                        id = o.optLong("id"),
+                        uri = Uri.parse(o.optString("uri")),
+                        title = o.optString("title", "SoundCloud Track"),
+                        artist = o.optString("artist", "SoundCloud"),
+                        album = o.optString("album", "SoundCloud"),
+                        durationMs = o.optLong("durationMs", 0L),
+                        mimeType = "audio/mpeg",
+                        sizeBytes = 0L,
+                        filePath = o.optString("uri"),
+                        folderPath = "SoundCloud",
+                        folderName = "SoundCloud",
+                        customCoverUri = o.optString("customCoverUri").takeIf { it.isNotBlank() }
+                    )
+                )
+            }
+        } catch (_: Throwable) {}
+        return list
+    }
+
 }

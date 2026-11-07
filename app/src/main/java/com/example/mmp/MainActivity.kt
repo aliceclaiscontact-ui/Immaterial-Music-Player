@@ -10,7 +10,9 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import android.media.audiofx.BassBoost
 import androidx.media3.exoplayer.ExoPlayer
 import android.net.Uri
 import android.os.Build
@@ -55,6 +57,20 @@ fun MMPApp() {
     val firstLaunchDate = remember { StorageHelper.getOrInitFirstLaunchDate(context, prefs) }
     var themeConfig by remember { mutableStateOf(StorageHelper.loadTheme(prefs)) }
     var rawDeviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var savedScTracks by remember { mutableStateOf(StorageHelper.loadSoundCloudTracks(prefs)) }
+    var likedScTracks by remember {
+        val rawLiked = prefs.getString("liked_sc_tracks_v1", null)
+        mutableStateOf(
+            if (rawLiked != null) StorageHelper.loadSoundCloudTracks(prefs).filter { rawLiked.contains(it.id.toString()) }
+            else emptyList()
+        )
+    }
+    var showAudioFxDialog by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
+    var playbackPitch by remember { mutableFloatStateOf(1.0f) }
+    var bassBoostStrength by remember { mutableIntStateOf(0) }
+    var reverbPreset by remember { mutableIntStateOf(0) }
+    val bassBoostEffect = remember { mutableStateOf<BassBoost?>(null) }
     var minDurationSec by remember { mutableStateOf(StorageHelper.loadMinDurationSec(prefs)) }
     var excludedFolders by remember { mutableStateOf(StorageHelper.loadExcludedFolders(prefs)) }
     var tagOverrides by remember { mutableStateOf(StorageHelper.loadTagOverrides(prefs)) }
@@ -270,6 +286,7 @@ fun MMPApp() {
             exoPlayer.clearMediaItems()
             val mediaItem = MediaItem.fromUri(track.uri)
             exoPlayer.setMediaItem(mediaItem)
+            exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
             if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
                 exoPlayer.seekTo(startOffsetMs)
             }
@@ -440,15 +457,19 @@ fun MMPApp() {
     }
 
     LaunchedEffect(isPlaying, currentTrack) {
+        var tickCounter = 0
         while (isPlaying && currentTrack != null) {
-            delay(1000L)
+            delay(40L)
             if (isMediaPlayerPrepared && (try { exoPlayer.isPlaying } catch (e: Throwable) { false })) {
-                currentPositionMs = try { exoPlayer.currentPosition } catch (e: Throwable) { currentPositionMs }
-                listenedSecondsTotal += 1
-                currentTrackPlayedSeconds += 1
-                val trk = currentTrack!!
-                val today = StorageHelper.getTodayDateString()
-                artistSecondsAllTime[trk.artist] = (artistSecondsAllTime[trk.artist] ?: 0) + 1
+                currentPositionMs = try { exoPlayer.currentPosition.coerceAtLeast(0L) } catch (e: Throwable) { currentPositionMs }
+                tickCounter += 1
+                if (tickCounter >= 25) {
+                    tickCounter = 0
+                    listenedSecondsTotal += 1
+                    currentTrackPlayedSeconds += 1
+                    val trk = currentTrack!!
+                    val today = StorageHelper.getTodayDateString()
+                    artistSecondsAllTime[trk.artist] = (artistSecondsAllTime[trk.artist] ?: 0) + 1
                 val todayRec = dailyStats.getOrPut(today) { DailyStatRecord() }
                 todayRec.artistSeconds[trk.artist] = (todayRec.artistSeconds[trk.artist] ?: 0) + 1
                 dailyStats[today] = todayRec
@@ -466,6 +487,7 @@ fun MMPApp() {
                     StorageHelper.saveArtistSeconds(prefs, artistSecondsAllTime.toMap())
                     StorageHelper.saveDailyStats(prefs, dailyStats.toMap())
                     StorageHelper.saveLastPlayedState(prefs, trk, currentPositionMs)
+                }
                 }
             }
         }
@@ -602,6 +624,7 @@ fun MMPApp() {
                             primaryColor = primaryColor,
                             textColor = textColor,
                             surfaceColor = surfaceColor,
+                            likedScTracks = likedScTracks,
                             onPlaySoundCloudTrack = { scTrack ->
                                 val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
                                 Toast.makeText(context, "Подключаемся к SoundCloud: ${scTrack.title}...", Toast.LENGTH_SHORT).show()
@@ -609,11 +632,64 @@ fun MMPApp() {
                                     val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
                                     if (directUrl != null) {
                                         val playable = SoundCloudClient.toTrack(scTrack, directUrl)
+                                        if (savedScTracks.none { it.id == playable.id }) {
+                                            val updated = savedScTracks + playable
+                                            savedScTracks = updated
+                                            StorageHelper.saveSoundCloudTracks(prefs, updated)
+                                        }
                                         playTrack(playable, listOf(playable))
                                     } else {
                                         Toast.makeText(context, "Не удалось получить аудиопоток SoundCloud", Toast.LENGTH_SHORT).show()
                                     }
                                 }
+                            },
+                            onPlaySavedScTrack = { savedTrk ->
+                                scope.launch {
+                                    val metaUrl = savedTrk.filePath.ifBlank { savedTrk.uri.toString() }
+                                    val freshDirect = if (metaUrl.contains("api-v2.soundcloud.com")) SoundCloudClient.resolveStreamUrl(metaUrl) else metaUrl
+                                    if (freshDirect != null) {
+                                        val readyTrack = savedTrk.copy(uri = Uri.parse(freshDirect))
+                                        playTrack(readyTrack, likedScTracks.ifEmpty { listOf(readyTrack) })
+                                    } else {
+                                        Toast.makeText(context, "Ошибка обновления ссылки SoundCloud", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            onDownloadScTrack = { scTrack ->
+                                val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
+                                Toast.makeText(context, "Скачиваем «${scTrack.title}» в память...", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    val file = SoundCloudClient.downloadTrackToDevice(context, scTrack.title, scTrack.artist, progUrl)
+                                    if (file != null) {
+                                        Toast.makeText(context, "Сохранено в Music/MMP_SoundCloud: ${file.name}", Toast.LENGTH_LONG).show()
+                                        rawDeviceTracks = scanDeviceMusic(context)
+                                    } else {
+                                        Toast.makeText(context, "Не удалось скачать трек", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            onToggleLikeScTrack = { scTrack ->
+                                val progUrl = scTrack.streamProgressiveUrl ?: ""
+                                val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
+                                if (savedScTracks.none { it.id == trkObj.id }) {
+                                    val upd = savedScTracks + trkObj
+                                    savedScTracks = upd
+                                    StorageHelper.saveSoundCloudTracks(prefs, upd)
+                                }
+                                val exists = likedScTracks.any { it.id == trkObj.id }
+                                val nextLiked = if (exists) likedScTracks.filterNot { it.id == trkObj.id } else likedScTracks + trkObj
+                                likedScTracks = nextLiked
+                                prefs.edit().putString("liked_sc_tracks_v1", nextLiked.joinToString(",") { it.id.toString() }).apply()
+                            },
+                            onAddScToPlaylist = { scTrack ->
+                                val progUrl = scTrack.streamProgressiveUrl ?: ""
+                                val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
+                                if (savedScTracks.none { it.id == trkObj.id }) {
+                                    val upd = savedScTracks + trkObj
+                                    savedScTracks = upd
+                                    StorageHelper.saveSoundCloudTracks(prefs, upd)
+                                }
+                                trackToAddToPlaylist = trkObj
                             }
                         )
                     }
@@ -666,12 +742,33 @@ fun MMPApp() {
                         textColor = textColor,
                         surfaceColor = surfaceColor,
                         onDismiss = { showFullPlayerSheet = false },
-                        onAddToPlaylistClick = { trackToAddToPlaylist = activeTrack },
+                        onAddToPlaylistClick = {
+                            if (activeTrack.folderName == "SoundCloud" && savedScTracks.none { it.id == activeTrack.id }) {
+                                val upd = savedScTracks + activeTrack
+                                savedScTracks = upd
+                                StorageHelper.saveSoundCloudTracks(prefs, upd)
+                            }
+                            trackToAddToPlaylist = activeTrack
+                        },
                         onEditTagsClick = {
                             pendingTagCoverUri = activeTrack.customCoverUri
                             trackToEditTags = activeTrack
                         },
                         onOpenSleepTimerClick = { showSleepTimerDialog = true },
+                        onOpenAudioFxClick = { showAudioFxDialog = true },
+                        onDownloadCurrentScTrack = {
+                            val srcUrl = activeTrack.filePath.ifBlank { activeTrack.uri.toString() }
+                            Toast.makeText(context, "Скачиваем «${activeTrack.title}»...", Toast.LENGTH_SHORT).show()
+                            scope.launch {
+                                val file = SoundCloudClient.downloadTrackToDevice(context, activeTrack.title, activeTrack.artist, srcUrl)
+                                if (file != null) {
+                                    Toast.makeText(context, "Трек сохранён: ${file.name}", Toast.LENGTH_LONG).show()
+                                    rawDeviceTracks = scanDeviceMusic(context)
+                                } else {
+                                    Toast.makeText(context, "Ошибка скачивания трека", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
                         onSearchOnlineLyricsClick = { customQuery ->
                             searchAndCacheOnlineLyrics(activeTrack, customQuery, true)
                         },
@@ -680,15 +777,51 @@ fun MMPApp() {
                         onToggleRepeat = { cycleRepeatMode() },
                         onPlayPause = { togglePlayPause() },
                         onSeek = { newPos ->
-                            currentPositionMs = newPos
+                            val safeMax = activeTrack.durationMs.coerceAtLeast(1000L)
+                            val clampedPos = newPos.coerceIn(0L, safeMax - 250L)
+                            currentPositionMs = clampedPos
                             if (isMediaPlayerPrepared) {
-                                try { exoPlayer.seekTo(newPos) } catch (e: Throwable) {}
+                                try {
+                                    val dur = exoPlayer.duration
+                                    val target = if (dur > 0L) clampedPos.coerceIn(0L, (dur - 200L).coerceAtLeast(0L)) else clampedPos
+                                    exoPlayer.seekTo(target)
+                                } catch (e: Throwable) {}
                             }
                         },
                         onNext = { playNextTrack() },
                         onPrev = { playPrevTrack() }
                     )
                 }
+            }
+
+            if (showAudioFxDialog) {
+                AudioFxDialog(
+                    playbackSpeed = playbackSpeed,
+                    playbackPitch = playbackPitch,
+                    bassBoostStrength = bassBoostStrength,
+                    reverbPreset = reverbPreset,
+                    cardShape = cardShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onDismiss = { showAudioFxDialog = false },
+                    onApplyFx = { spd, ptc, bass, rev ->
+                        playbackSpeed = spd
+                        playbackPitch = ptc
+                        bassBoostStrength = bass
+                        reverbPreset = rev
+                        try {
+                            exoPlayer.playbackParameters = PlaybackParameters(spd, ptc)
+                            val sessionId = exoPlayer.audioSessionId
+                            if (sessionId != 0) {
+                                if (bassBoostEffect.value == null) {
+                                    bassBoostEffect.value = BassBoost(0, sessionId).apply { enabled = true }
+                                }
+                                bassBoostEffect.value?.setStrength(bass.toShort())
+                            }
+                        } catch (_: Throwable) {}
+                    }
+                )
             }
 
             if (showSleepTimerDialog) {
