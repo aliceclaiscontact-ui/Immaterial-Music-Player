@@ -431,9 +431,7 @@ fun LibraryScreen(
 
     // Если открыта страница Автора (в стиле Apple Music по фото)
     if (openedArtist != null) {
-        val artistTracks = remember(openedArtist, tracks) {
-            tracks.filter { it.artist == openedArtist }
-        }
+        val artistTracks = tracks.filter { it.artist.equals(openedArtist, ignoreCase = true) }
         ArtistDetailScreen(
             artistName = openedArtist!!,
             artistTracks = artistTracks,
@@ -453,7 +451,7 @@ fun LibraryScreen(
     // Если открыт конкретный плейлист
     if (openedPlaylist != null) {
         val currentPl = playlists.find { it.name == openedPlaylist!!.name } ?: openedPlaylist!!
-        val plTracks = remember(currentPl, tracks) {
+        val plTracks = run {
             val map = tracks.associateBy { it.id }
             currentPl.trackIds.mapNotNull { map[it] }
         }
@@ -505,7 +503,7 @@ fun LibraryScreen(
 
     // Если открыт конкретный альбом
     if (openedAlbum != null) {
-        val albumTracks = remember(openedAlbum, tracks) {
+        val albumTracks = run {
             tracks.filter { it.album == openedAlbum }
         }
         BackHandler { openedAlbum = null }
@@ -605,7 +603,7 @@ fun LibraryScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                        val bmp = remember(pl.coverUri) {
+                                        val bmp = run {
                                             pl.coverUri?.let { uriStr ->
                                                 try {
                                                     context.contentResolver.openInputStream(Uri.parse(uriStr))?.use { BitmapFactory.decodeStream(it) }
@@ -736,7 +734,7 @@ fun ArtistDetailScreen(
         }
     }
 
-    val filteredTracks = remember(artistTracks, searchQuery) {
+    val filteredTracks = run {
         if (searchQuery.isBlank()) artistTracks
         else artistTracks.filter { it.title.contains(searchQuery, ignoreCase = true) }
     }
@@ -1765,7 +1763,7 @@ fun CreatePlaylistDetailsDialog(
 ) {
     var name by remember { mutableStateOf("") }
     val context = LocalContext.current
-    val coverBitmap = remember(selectedCoverUri) {
+    val coverBitmap = run {
         selectedCoverUri?.let {
             try {
                 context.contentResolver.openInputStream(Uri.parse(it))?.use { s -> BitmapFactory.decodeStream(s) }
