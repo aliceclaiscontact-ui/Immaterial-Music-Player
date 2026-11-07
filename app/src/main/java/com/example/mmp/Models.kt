@@ -9,16 +9,21 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.LruCache
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
@@ -27,30 +32,49 @@ import kotlin.math.sin
 enum class ShapeStyle(val label: String) {
     SQUIRCLE("Плавный (MD3)"),
     PILL("Пилюля"),
-    COOKIE("Клевер (Expressive)"),
+    COOKIE("Клевер"),
     STAR("Звезда (Burst)"),
+    FLOWER("Цветок (MD3)"),
+    HEXAGON("Шестиугольник"),
     HEART("Сердце"),
-    SHARP("Острый (Industrial)"),
+    ARCH("Арка"),
+    SHARP("Острый"),
     CYBER("Срезанный")
 }
 
-// Для карточек и плашек (чтобы текст внутри не обрезался фигурой сердца/звезды)
+// Форма для карточек и контейнеров (исправлен баг с гигантскими овалами при выборе Пилюли)
 fun ShapeStyle.toCardShape(): Shape = when (this) {
-    ShapeStyle.SQUIRCLE -> RoundedCornerShape(28.dp)
-    ShapeStyle.PILL -> RoundedCornerShape(50)
-    ShapeStyle.COOKIE -> RoundedCornerShape(34.dp)
-    ShapeStyle.STAR -> RoundedCornerShape(24.dp)
-    ShapeStyle.HEART -> RoundedCornerShape(30.dp)
+    ShapeStyle.SQUIRCLE -> RoundedCornerShape(26.dp)
+    ShapeStyle.PILL -> RoundedCornerShape(28.dp)
+    ShapeStyle.COOKIE -> RoundedCornerShape(30.dp)
+    ShapeStyle.STAR -> RoundedCornerShape(22.dp)
+    ShapeStyle.FLOWER -> RoundedCornerShape(28.dp)
+    ShapeStyle.HEXAGON -> CutCornerShape(14.dp)
+    ShapeStyle.HEART -> RoundedCornerShape(26.dp)
+    ShapeStyle.ARCH -> RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
     ShapeStyle.SHARP -> RoundedCornerShape(6.dp)
     ShapeStyle.CYBER -> CutCornerShape(16.dp)
 }
 
-// Настоящие фигуры MD3 Expressive для обложек, кнопок Play и превью
+// Выразительные формы MD3 для обложек, кнопок Play и превью
 fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
     ShapeStyle.SQUIRCLE -> RoundedCornerShape(28.dp)
     ShapeStyle.PILL -> CircleShape
     ShapeStyle.SHARP -> RoundedCornerShape(8.dp)
     ShapeStyle.CYBER -> CutCornerShape(22)
+    ShapeStyle.ARCH -> RoundedCornerShape(topStartPercent = 50, topEndPercent = 50, bottomStartPercent = 14, bottomEndPercent = 14)
+    ShapeStyle.HEXAGON -> GenericShape { size, _ ->
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val r = min(cx, cy)
+        for (i in 0 until 6) {
+            val angle = i * PI / 3 - PI / 2
+            val x = (cx + r * cos(angle)).toFloat()
+            val y = (cy + r * sin(angle)).toFloat()
+            if (i == 0) moveTo(x, y) else lineTo(x, y)
+        }
+        close()
+    }
     ShapeStyle.STAR -> GenericShape { size, _ ->
         val cx = size.width / 2f
         val cy = size.height / 2f
@@ -81,6 +105,21 @@ fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
         }
         close()
     }
+    ShapeStyle.FLOWER -> GenericShape { size, _ ->
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val baseR = min(cx, cy) * 0.86f
+        val amp = min(cx, cy) * 0.14f
+        val steps = 120
+        for (i in 0..steps) {
+            val t = i * 2 * PI / steps
+            val rad = baseR + amp * cos(6 * t)
+            val x = (cx + rad * cos(t)).toFloat()
+            val y = (cy + rad * sin(t)).toFloat()
+            if (i == 0) moveTo(x, y) else lineTo(x, y)
+        }
+        close()
+    }
     ShapeStyle.HEART -> GenericShape { size, _ ->
         val w = size.width
         val h = size.height
@@ -93,12 +132,19 @@ fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
     }
 }
 
+enum class ThemeMode(val label: String) {
+    DARK("Тёмная"),
+    LIGHT("Светлая"),
+    ADAPTIVE("Adaptive (Под обложку)")
+}
+
 data class MMPThemeConfig(
     val themeName: String = "Expressive Pink",
     val primaryHex: Long = 0xFFFF66C4,
     val secondaryHex: Long = 0xFF7B61FF,
     val bgHex: Long = 0xFF0D0D12,
     val shapeStyle: ShapeStyle = ShapeStyle.SQUIRCLE,
+    val themeMode: ThemeMode = ThemeMode.DARK,
     val blurIntensity: Float = 18f
 ) {
     fun toJson(): String {
@@ -108,6 +154,7 @@ data class MMPThemeConfig(
         json.put("secondaryHex", secondaryHex)
         json.put("bgHex", bgHex)
         json.put("shapeStyle", shapeStyle.name)
+        json.put("themeMode", themeMode.name)
         json.put("blurIntensity", blurIntensity.toDouble())
         return json.toString(4)
     }
@@ -118,12 +165,15 @@ data class MMPThemeConfig(
                 val json = JSONObject(jsonString)
                 val styleName = json.optString("shapeStyle", "SQUIRCLE")
                 val style = ShapeStyle.entries.find { it.name == styleName } ?: ShapeStyle.SQUIRCLE
+                val modeName = json.optString("themeMode", "DARK")
+                val mode = ThemeMode.entries.find { it.name == modeName } ?: ThemeMode.DARK
                 MMPThemeConfig(
                     themeName = json.optString("themeName", "Custom Theme"),
                     primaryHex = json.optLong("primaryHex", 0xFFFF66C4),
                     secondaryHex = json.optLong("secondaryHex", 0xFF7B61FF),
                     bgHex = json.optLong("bgHex", 0xFF0D0D12),
                     shapeStyle = style,
+                    themeMode = mode,
                     blurIntensity = json.optDouble("blurIntensity", 18.0).toFloat()
                 )
             } catch (e: Exception) {
@@ -135,7 +185,8 @@ data class MMPThemeConfig(
 
 data class PlaylistItem(
     val name: String,
-    val coverUri: String? = null
+    val coverUri: String? = null,
+    val trackIds: List<Long> = emptyList()
 )
 
 data class Track(
@@ -155,13 +206,69 @@ data class DetailedMetadata(
     val formatName: String = "AUDIO"
 )
 
+data class DailyStatRecord(
+    val artistSeconds: MutableMap<String, Int> = mutableMapOf(),
+    val trackPlays: MutableMap<Long, Int> = mutableMapOf()
+)
+
+object CoverCache {
+    private val cache = object : LruCache<Long, Bitmap>(40) {}
+    fun get(id: Long): Bitmap? = cache.get(id)
+    fun put(id: Long, bmp: Bitmap) { cache.put(id, bmp) }
+}
+
+fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
+    if (bitmap == null) return fallbackHex
+    return try {
+        val scaled = Bitmap.createScaledBitmap(bitmap, 16, 16, false)
+        var rSum = 0L
+        var gSum = 0L
+        var bSum = 0L
+        var count = 0L
+        for (x in 0 until 16) {
+            for (y in 0 until 16) {
+                val pixel = scaled.getPixel(x, y)
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+                val brightness = (r + g + b) / 3
+                if (brightness in 35..235) {
+                    rSum += r
+                    gSum += g
+                    bSum += b
+                    count++
+                }
+            }
+        }
+        if (count == 0L) return fallbackHex
+        val rAvg = (rSum / count).coerceIn(60, 255)
+        val gAvg = (gSum / count).coerceIn(60, 255)
+        val bAvg = (bSum / count).coerceIn(60, 255)
+        (0xFFL shl 24) or (rAvg shl 16) or (gAvg shl 8) or bAvg
+    } catch (_: Exception) {
+        fallbackHex
+    }
+}
+
 object StorageHelper {
+    fun getTodayDateString(): String {
+        return SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
+    }
+
+    fun getOrInitFirstListenDate(prefs: SharedPreferences): String {
+        val existing = prefs.getString("first_listen_date", null)
+        if (existing != null) return existing
+        val today = getTodayDateString()
+        prefs.edit().putString("first_listen_date", today).apply()
+        return today
+    }
+
     fun saveTheme(prefs: SharedPreferences, config: MMPThemeConfig) {
-        prefs.edit().putString("saved_theme", config.toJson()).apply()
+        prefs.edit().putString("saved_theme_v3", config.toJson()).apply()
     }
 
     fun loadTheme(prefs: SharedPreferences): MMPThemeConfig {
-        val raw = prefs.getString("saved_theme", null) ?: return MMPThemeConfig()
+        val raw = prefs.getString("saved_theme_v3", null) ?: return MMPThemeConfig()
         return MMPThemeConfig.fromJson(raw) ?: MMPThemeConfig()
     }
 
@@ -181,14 +288,15 @@ object StorageHelper {
         }
     }
 
-    fun saveArtistCounts(prefs: SharedPreferences, counts: Map<String, Int>) {
+    // Сохраняем секунды прослушивания каждого артиста (а не просто клики)
+    fun saveArtistSeconds(prefs: SharedPreferences, secondsMap: Map<String, Int>) {
         val obj = JSONObject()
-        counts.forEach { (k, v) -> obj.put(k, v) }
-        prefs.edit().putString("artist_play_counts", obj.toString()).apply()
+        secondsMap.forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString("artist_listen_seconds", obj.toString()).apply()
     }
 
-    fun loadArtistCounts(prefs: SharedPreferences): Map<String, Int> {
-        val raw = prefs.getString("artist_play_counts", null) ?: return emptyMap()
+    fun loadArtistSeconds(prefs: SharedPreferences): Map<String, Int> {
+        val raw = prefs.getString("artist_listen_seconds", null) ?: return emptyMap()
         return try {
             val obj = JSONObject(raw)
             val map = mutableMapOf<String, Int>()
@@ -199,29 +307,94 @@ object StorageHelper {
         }
     }
 
+    fun saveTrackPlayCounts(prefs: SharedPreferences, counts: Map<Long, Int>) {
+        val obj = JSONObject()
+        counts.forEach { (k, v) -> obj.put(k.toString(), v) }
+        prefs.edit().putString("track_play_counts_all", obj.toString()).apply()
+    }
+
+    fun loadTrackPlayCounts(prefs: SharedPreferences): Map<Long, Int> {
+        val raw = prefs.getString("track_play_counts_all", null) ?: return emptyMap()
+        return try {
+            val obj = JSONObject(raw)
+            val map = mutableMapOf<Long, Int>()
+            obj.keys().forEach { key ->
+                key.toLongOrNull()?.let { id -> map[id] = obj.optInt(key, 0) }
+            }
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun saveDailyStats(prefs: SharedPreferences, stats: Map<String, DailyStatRecord>) {
+        val root = JSONObject()
+        stats.forEach { (date, record) ->
+            val dateObj = JSONObject()
+            val artObj = JSONObject()
+            record.artistSeconds.forEach { (a, s) -> artObj.put(a, s) }
+            val trkObj = JSONObject()
+            record.trackPlays.forEach { (id, c) -> trkObj.put(id.toString(), c) }
+            dateObj.put("artists", artObj)
+            dateObj.put("tracks", trkObj)
+            root.put(date, dateObj)
+        }
+        prefs.edit().putString("daily_history_stats", root.toString()).apply()
+    }
+
+    fun loadDailyStats(prefs: SharedPreferences): MutableMap<String, DailyStatRecord> {
+        val raw = prefs.getString("daily_history_stats", null) ?: return mutableMapOf()
+        return try {
+            val root = JSONObject(raw)
+            val result = mutableMapOf<String, DailyStatRecord>()
+            root.keys().forEach { date ->
+                val dObj = root.getJSONObject(date)
+                val artMap = mutableMapOf<String, Int>()
+                val trkMap = mutableMapOf<Long, Int>()
+                dObj.optJSONObject("artists")?.let { aObj ->
+                    aObj.keys().forEach { k -> artMap[k] = aObj.optInt(k, 0) }
+                }
+                dObj.optJSONObject("tracks")?.let { tObj ->
+                    tObj.keys().forEach { k -> k.toLongOrNull()?.let { id -> trkMap[id] = tObj.optInt(k, 0) } }
+                }
+                result[date] = DailyStatRecord(artMap, trkMap)
+            }
+            result
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    // Без авто-плейлистов: по умолчанию список пустой
     fun savePlaylists(prefs: SharedPreferences, list: List<PlaylistItem>) {
         val arr = JSONArray()
         list.forEach { item ->
             val obj = JSONObject()
             obj.put("name", item.name)
             if (item.coverUri != null) obj.put("coverUri", item.coverUri)
+            val idsArr = JSONArray()
+            item.trackIds.forEach { idsArr.put(it) }
+            obj.put("trackIds", idsArr)
             arr.put(obj)
         }
-        prefs.edit().putString("saved_playlists_v2", arr.toString()).apply()
+        prefs.edit().putString("user_playlists_v3", arr.toString()).apply()
     }
 
     fun loadPlaylists(prefs: SharedPreferences): List<PlaylistItem> {
-        val raw = prefs.getString("saved_playlists_v2", null)
-            ?: return listOf(PlaylistItem("Hyperpop Essentials"), PlaylistItem("Deconstructed Club"))
+        val raw = prefs.getString("user_playlists_v3", null) ?: return emptyList()
         return try {
             val arr = JSONArray(raw)
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 val uri = obj.optString("coverUri", "").ifBlank { null }
-                PlaylistItem(obj.optString("name", "Плейлист"), uri)
+                val idsArr = obj.optJSONArray("trackIds")
+                val ids = if (idsArr != null) {
+                    (0 until idsArr.length()).map { idx -> idsArr.getLong(idx) }
+                } else emptyList()
+                PlaylistItem(obj.optString("name", "Плейлист"), uri, ids)
             }
         } catch (e: Exception) {
-            listOf(PlaylistItem("Hyperpop Essentials"))
+            emptyList()
         }
     }
 }
@@ -278,25 +451,93 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
     trackList
 }
 
+fun decodeSampledBitmap(bytes: ByteArray, reqMaxSide: Int = 512): Bitmap? {
+    return try {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        var inSampleSize = 1
+        val maxDim = maxOf(options.outWidth, options.outHeight)
+        if (maxDim > reqMaxSide) {
+            val halfDim = maxDim / 2
+            while ((halfDim / inSampleSize) >= reqMaxSide) {
+                inSampleSize *= 2
+            }
+        }
+        val decodeOptions = BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            this.inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
+    } catch (_: Throwable) {
+        null
+    }
+}
+
+suspend fun loadTrackThumbnail(context: Context, track: Track): Bitmap? = withContext(Dispatchers.IO) {
+    CoverCache.get(track.id)?.let { return@withContext it }
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(context, track.uri)
+        val artBytes = retriever.embeddedPicture
+        if (artBytes != null) {
+            val bmp = decodeSampledBitmap(artBytes, 256)
+            if (bmp != null) CoverCache.put(track.id, bmp)
+            bmp
+        } else null
+    } catch (_: Throwable) {
+        null
+    } finally {
+        try { retriever.release() } catch (_: Throwable) {}
+    }
+}
+
+// Исправлен расчёт битрейта (никаких 32 kbps вместо 320 kbps) и утечки памяти
 suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetadata = withContext(Dispatchers.IO) {
     val retriever = MediaMetadataRetriever()
     try {
         retriever.setDataSource(context, track.uri)
         val artBytes = retriever.embeddedPicture
-        val bitmap = if (artBytes != null) BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size) else null
-        val bitrateRaw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull()
-        val bitrateStr = if (bitrateRaw != null) "${bitrateRaw / 1000} kbps" else "Lossless"
+        val bitmap = if (artBytes != null) {
+            decodeSampledBitmap(artBytes, 600)?.also { CoverCache.put(track.id, it) }
+        } else null
+
+        val rawBitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L
+        val durationSec = (track.durationMs / 1000L).coerceAtLeast(1L)
+        val calculatedFromSizeKbps = if (track.sizeBytes > 0) ((track.sizeBytes * 8L) / (durationSec * 1000L)) else 0L
+
+        var kbps = when {
+            rawBitrate >= 64000L -> rawBitrate / 1000L
+            rawBitrate in 64L..1411L -> rawBitrate
+            else -> calculatedFromSizeKbps
+        }
+
+        // Если заголовок MP3 вернул заниженное значение (например, 32 kbps на 320 kbps файле), берём расчёт по размеру файла
+        if (kbps < 96L && calculatedFromSizeKbps >= 128L) {
+            kbps = calculatedFromSizeKbps
+        }
+
         val format = when {
             track.mimeType.contains("flac", true) -> "FLAC"
             track.mimeType.contains("wav", true) -> "WAV"
             track.mimeType.contains("mp4", true) || track.mimeType.contains("m4a", true) -> "M4A"
             else -> "MP3"
         }
+
+        val cleanKbps = when {
+            format == "MP3" && kbps in 290L..340L -> 320L
+            format == "MP3" && kbps in 235L..275L -> 256L
+            format == "MP3" && kbps in 175L..210L -> 192L
+            format == "MP3" && kbps in 115L..145L -> 128L
+            kbps <= 0L -> if (format == "FLAC" || format == "WAV") 999L else 320L
+            else -> kbps
+        }
+
+        val bitrateStr = if (cleanKbps == 999L) "Lossless" else "$cleanKbps kbps"
         DetailedMetadata(bitmap, bitrateStr, format)
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         DetailedMetadata()
     } finally {
-        try { retriever.release() } catch (_: Exception) {}
+        try { retriever.release() } catch (_: Throwable) {}
     }
 }
 

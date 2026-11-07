@@ -46,14 +46,30 @@ class MainActivity : ComponentActivity() {
 fun MMPApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val prefs = remember { context.getSharedPreferences("mmp_prefs_v2", Context.MODE_PRIVATE) }
+    val prefs = remember { context.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
 
+    val firstListenDate = remember { StorageHelper.getOrInitFirstListenDate(prefs) }
     var themeConfig by remember { mutableStateOf(StorageHelper.loadTheme(prefs)) }
     var deviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var recentTrackIds by remember { mutableStateOf(StorageHelper.loadRecentIds(prefs)) }
     var playlists by remember { mutableStateOf(StorageHelper.loadPlaylists(prefs)) }
-    val artistPlayCounts = remember {
-        mutableStateMapOf<String, Int>().apply { putAll(StorageHelper.loadArtistCounts(prefs)) }
+
+    val artistSecondsAllTime = remember {
+        mutableStateMapOf<String, Int>().apply { putAll(StorageHelper.loadArtistSeconds(prefs)) }
+    }
+    val trackPlaysAllTime = remember {
+        mutableStateMapOf<Long, Int>().apply { putAll(StorageHelper.loadTrackPlayCounts(prefs)) }
+    }
+    val dailyStats = remember {
+        mutableStateMapOf<String, DailyStatRecord>().apply { putAll(StorageHelper.loadDailyStats(prefs)) }
+    }
+
+    val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
+    var isBatteryIgnored by remember {
+        mutableStateOf(
+            prefs.getBoolean("battery_opt_dismissed", false) ||
+            powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        )
     }
 
     val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -75,7 +91,6 @@ fun MMPApp() {
         }
     }
 
-    // При старте проверяем права, сканируем треки и запрашиваем уведомления для шторки
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
         hasAudioPermission = granted
@@ -91,7 +106,6 @@ fun MMPApp() {
         }
     }
 
-    // Восстанавливаем последние 5 треков по сохранённым в памяти ID
     val recentTracks = remember(deviceTracks, recentTrackIds) {
         val trackMap = deviceTracks.associateBy { it.id }
         recentTrackIds.mapNotNull { trackMap[it] }
@@ -104,7 +118,11 @@ fun MMPApp() {
     var currentPositionMs by remember { mutableStateOf(0L) }
     var showFullPlayerSheet by remember { mutableStateOf(false) }
 
-    var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds", 0)) }
+    // Счётчик секунд текущего трека для правила 20 секунд
+    var currentTrackPlayedSeconds by remember { mutableStateOf(0) }
+    var currentTrackRecorded20Sec by remember { mutableStateOf(false) }
+
+    var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds_total", 0)) }
 
     fun syncMediaService(track: Track?, meta: DetailedMetadata, playing: Boolean) {
         if (track == null) return
@@ -119,25 +137,21 @@ fun MMPApp() {
             } else {
                 context.startService(intent)
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     fun playTrack(track: Track) {
         try {
+            isPlaying = false
             mediaPlayer.reset()
             mediaPlayer.setDataSource(context, track.uri)
             mediaPlayer.prepare()
             mediaPlayer.start()
             currentTrack = track
+            currentPositionMs = 0L
+            currentTrackPlayedSeconds = 0
+            currentTrackRecorded20Sec = false
             isPlaying = true
-
-            // Сохраняем в последние 5 треков и статистику артистов
-            val updatedIds = (listOf(track.id) + recentTrackIds.filter { it != track.id }).take(5)
-            recentTrackIds = updatedIds
-            StorageHelper.saveRecentIds(prefs, updatedIds)
-
-            artistPlayCounts[track.artist] = (artistPlayCounts[track.artist] ?: 0) + 1
-            StorageHelper.saveArtistCounts(prefs, artistPlayCounts.toMap())
 
             scope.launch {
                 val meta = extractTrackMetadata(context, track)
@@ -154,27 +168,29 @@ fun MMPApp() {
                     syncMediaService(currentTrack, currentMetadata, false)
                 }
             }
-        } catch (e: Exception) {
-            Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
+        } catch (e: Throwable) {
+            isPlaying = false
+            Toast.makeText(context, "Не удалось воспроизвести файл", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun togglePlayPause() {
-        if (currentTrack != null) {
-            if (isPlaying) {
-                mediaPlayer.pause()
-                isPlaying = false
-            } else {
-                mediaPlayer.start()
-                isPlaying = true
+        try {
+            if (currentTrack != null) {
+                if (isPlaying) {
+                    if (mediaPlayer.isPlaying) mediaPlayer.pause()
+                    isPlaying = false
+                } else {
+                    mediaPlayer.start()
+                    isPlaying = true
+                }
+                syncMediaService(currentTrack, currentMetadata, isPlaying)
+            } else if (deviceTracks.isNotEmpty()) {
+                playTrack(deviceTracks.first())
             }
-            syncMediaService(currentTrack, currentMetadata, isPlaying)
-        } else if (deviceTracks.isNotEmpty()) {
-            playTrack(deviceTracks.first())
-        }
+        } catch (_: Throwable) {}
     }
 
-    // Привязываем кнопки из системного уведомления в шторке
     SideEffect {
         PlayerBridge.onPlayPause = { togglePlayPause() }
         PlayerBridge.onNext = {
@@ -191,18 +207,52 @@ fun MMPApp() {
         }
     }
 
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            delay(500L)
-            if (mediaPlayer.isPlaying) {
-                currentPositionMs = mediaPlayer.currentPosition.toLong()
-            }
-            delay(500L)
-            if (mediaPlayer.isPlaying) {
-                currentPositionMs = mediaPlayer.currentPosition.toLong()
+    // Безопасный цикл обновления прогресса, статистики в минутах и правила 20 секунд
+    LaunchedEffect(isPlaying, currentTrack) {
+        while (isPlaying && currentTrack != null) {
+            delay(1000L)
+            val playingNow = try { mediaPlayer.isPlaying } catch (_: Throwable) { false }
+            if (playingNow) {
+                currentPositionMs = try { mediaPlayer.currentPosition.toLong() } catch (_: Throwable) { currentPositionMs }
                 listenedSecondsTotal += 1
-                prefs.edit().putInt("listened_seconds", listenedSecondsTotal).apply()
+                currentTrackPlayedSeconds += 1
+
+                val trk = currentTrack!!
+                val today = StorageHelper.getTodayDateString()
+
+                // Начисляем секунду артисту (общая и за сегодня)
+                artistSecondsAllTime[trk.artist] = (artistSecondsAllTime[trk.artist] ?: 0) + 1
+                val todayRec = dailyStats.getOrPut(today) { DailyStatRecord() }
+                todayRec.artistSeconds[trk.artist] = (todayRec.artistSeconds[trk.artist] ?: 0) + 1
+                dailyStats[today] = todayRec
+
+                // Если трек проиграл > 20 секунд — добавляем в Последние 5 треков и в Топ-10
+                if (currentTrackPlayedSeconds >= 20 && !currentTrackRecorded20Sec) {
+                    currentTrackRecorded20Sec = true
+                    val updatedRecent = (listOf(trk.id) + recentTrackIds.filter { it != trk.id }).take(5)
+                    recentTrackIds = updatedRecent
+                    StorageHelper.saveRecentIds(prefs, updatedRecent)
+
+                    trackPlaysAllTime[trk.id] = (trackPlaysAllTime[trk.id] ?: 0) + 1
+                    todayRec.trackPlays[trk.id] = (todayRec.trackPlays[trk.id] ?: 0) + 1
+                    dailyStats[today] = todayRec
+
+                    StorageHelper.saveTrackPlayCounts(prefs, trackPlaysAllTime.toMap())
+                }
+
+                // Сохраняем статистику каждые 5 секунд
+                if (listenedSecondsTotal % 5 == 0) {
+                    prefs.edit().putInt("listened_seconds_total", listenedSecondsTotal).apply()
+                    StorageHelper.saveArtistSeconds(prefs, artistSecondsAllTime.toMap())
+                    StorageHelper.saveDailyStats(prefs, dailyStats.toMap())
+                }
             }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try { mediaPlayer.release() } catch (_: Throwable) {}
         }
     }
 
@@ -210,12 +260,13 @@ fun MMPApp() {
     var showCreateStep1Sheet by remember { mutableStateOf(false) }
     var showCreateStep2Dialog by remember { mutableStateOf(false) }
     var pendingPlaylistCoverUri by remember { mutableStateOf<String?>(null) }
+    var trackToAddToPlaylist by remember { mutableStateOf<Track?>(null) }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
             try {
                 context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (_: Exception) {}
+            } catch (_: Throwable) {}
             pendingPlaylistCoverUri = it.toString()
         }
     }
@@ -223,9 +274,25 @@ fun MMPApp() {
     val cardShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toCardShape() }
     val expressiveShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toExpressiveShape() }
 
-    val primaryColor = Color(themeConfig.primaryHex)
+    // Поддержка Тёмной, Светлой и Adaptive темы (под цвет обложки)
+    val effectivePrimaryHex = remember(themeConfig.themeMode, themeConfig.primaryHex, currentMetadata.coverArt) {
+        if (themeConfig.themeMode == ThemeMode.ADAPTIVE && currentMetadata.coverArt != null) {
+            extractDominantColor(currentMetadata.coverArt, themeConfig.primaryHex)
+        } else {
+            themeConfig.primaryHex
+        }
+    }
+
+    val primaryColor by animateColorAsState(Color(effectivePrimaryHex), tween(500), label = "PrimaryAnim")
     val secondaryColor = Color(themeConfig.secondaryHex)
-    val bgColor = Color(themeConfig.bgHex)
+    val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT
+    val bgColor by animateColorAsState(
+        targetValue = if (isLightMode) Color(0xFFF6F5FA) else Color(0xFF0D0D12),
+        animationSpec = tween(400),
+        label = "BgAnim"
+    )
+    val textColor = if (isLightMode) Color(0xFF14141C) else Color.White
+    val surfaceColor = if (isLightMode) Color(0xFFE9E7F2) else Color(0xFF1A1A26)
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         uri?.let {
@@ -242,54 +309,63 @@ fun MMPApp() {
                 if (loaded != null) {
                     themeConfig = loaded
                     StorageHelper.saveTheme(prefs, loaded)
-                    Toast.makeText(context, "Тема применена и сохранена!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Тема применена!", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
     fun requestIgnoreBatteryOptimizations() {
+        prefs.edit().putBoolean("battery_opt_dismissed", true).apply()
+        isBatteryIgnored = true
         try {
-            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:${context.packageName}")
                 }
                 context.startActivity(intent)
-            } else {
-                Toast.makeText(context, "Уже закреплено в фоне!", Toast.LENGTH_SHORT).show()
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     MaterialTheme(
-        colorScheme = darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)
+        colorScheme = if (isLightMode) {
+            lightColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)
+        } else {
+            darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)
+        }
     ) {
         Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
             Box(modifier = Modifier.fillMaxSize().blur(themeConfig.blurIntensity.dp * 3)) {
-                Box(modifier = Modifier.size(280.dp).offset((-50).dp, 40.dp).clip(CircleShape).background(primaryColor.copy(0.28f)))
-                Box(modifier = Modifier.size(320.dp).align(Alignment.BottomEnd).offset(60.dp, (-80).dp).clip(CircleShape).background(secondaryColor.copy(0.22f)))
+                Box(modifier = Modifier.size(280.dp).offset((-50).dp, 40.dp).clip(CircleShape).background(primaryColor.copy(if (isLightMode) 0.18f else 0.28f)))
+                Box(modifier = Modifier.size(320.dp).align(Alignment.BottomEnd).offset(60.dp, (-80).dp).clip(CircleShape).background(secondaryColor.copy(if (isLightMode) 0.14f else 0.22f)))
             }
 
             Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 162.dp)) {
                 AnimatedContent(
                     targetState = selectedBottomTab,
                     transitionSpec = {
-                        fadeIn(tween(240)) + scaleIn(initialScale = 0.96f) togetherWith fadeOut(tween(180))
+                        fadeIn(tween(220)) togetherWith fadeOut(tween(160))
                     },
                     label = "MainTabTransition"
                 ) { tab ->
                     when (tab) {
                         0 -> HomeScreen(
+                            allTracks = deviceTracks,
                             recentTracks = recentTracks,
-                            allTracksCount = deviceTracks.size,
-                            artistPlayCounts = artistPlayCounts,
-                            listenedMinutes = listenedSecondsTotal / 60,
-                            listenedSeconds = listenedSecondsTotal % 60,
+                            artistSecondsAllTime = artistSecondsAllTime,
+                            trackPlaysAllTime = trackPlaysAllTime,
+                            dailyStats = dailyStats,
+                            listenedMinutesTotal = listenedSecondsTotal / 60,
+                            firstListenDate = firstListenDate,
                             hasPermission = hasAudioPermission,
+                            isBatteryIgnored = isBatteryIgnored,
                             cardShape = cardShape,
                             expressiveShape = expressiveShape,
                             themeConfig = themeConfig,
+                            primaryColor = primaryColor,
+                            textColor = textColor,
+                            surfaceColor = surfaceColor,
                             onRequestPermission = { permissionLauncher.launch(audioPermission) },
                             onRequestBatteryIgnore = { requestIgnoreBatteryOptimizations() },
                             onThemeChange = {
@@ -297,6 +373,7 @@ fun MMPApp() {
                                 StorageHelper.saveTheme(prefs, it)
                             },
                             onTrackClick = { playTrack(it) },
+                            onAddTrackToPlaylistClick = { trackToAddToPlaylist = it },
                             onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
                             onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
                         )
@@ -306,8 +383,12 @@ fun MMPApp() {
                             cardShape = cardShape,
                             expressiveShape = expressiveShape,
                             primaryColor = primaryColor,
+                            textColor = textColor,
+                            surfaceColor = surfaceColor,
+                            bgColor = bgColor,
                             onRescanClick = { scope.launch { deviceTracks = scanDeviceMusic(context) } },
-                            onTrackClick = { playTrack(it) }
+                            onTrackClick = { playTrack(it) },
+                            onAddTrackToPlaylistClick = { trackToAddToPlaylist = it }
                         )
                     }
                 }
@@ -329,6 +410,8 @@ fun MMPApp() {
                     cardShape = cardShape,
                     expressiveShape = expressiveShape,
                     primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
                     onBarClick = { if (currentTrack != null) showFullPlayerSheet = true },
                     onPlayPause = { togglePlayPause() }
                 )
@@ -337,9 +420,48 @@ fun MMPApp() {
                     selectedTab = selectedBottomTab,
                     cardShape = cardShape,
                     primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
                     onTabSelected = { selectedBottomTab = it },
                     onCreateClick = { showCreateStep1Sheet = true }
                 )
+            }
+
+            // Плавный выезд окна "В какой плейлист добавить?"
+            AnimatedVisibility(
+                visible = trackToAddToPlaylist != null,
+                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
+                exit = fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 2 })
+            ) {
+                trackToAddToPlaylist?.let { targetTrack ->
+                    AddToPlaylistSheet(
+                        track = targetTrack,
+                        playlists = playlists,
+                        cardShape = cardShape,
+                        expressiveShape = expressiveShape,
+                        primaryColor = primaryColor,
+                        textColor = textColor,
+                        surfaceColor = surfaceColor,
+                        onDismiss = { trackToAddToPlaylist = null },
+                        onSelectPlaylist = { selectedPl ->
+                            val updatedList = playlists.map { pl ->
+                                if (pl.name == selectedPl.name) {
+                                    val newIds = if (pl.trackIds.contains(targetTrack.id)) pl.trackIds else pl.trackIds + targetTrack.id
+                                    pl.copy(trackIds = newIds)
+                                } else pl
+                            }
+                            playlists = updatedList
+                            StorageHelper.savePlaylists(prefs, updatedList)
+                            Toast.makeText(context, "Добавлено в «${selectedPl.name}»!", Toast.LENGTH_SHORT).show()
+                            trackToAddToPlaylist = null
+                        },
+                        onCreateNewPlaylistClick = {
+                            trackToAddToPlaylist = null
+                            pendingPlaylistCoverUri = null
+                            showCreateStep2Dialog = true
+                        }
+                    )
+                }
             }
 
             // Плавный выезд меню "Создать -> Плейлист"
@@ -352,6 +474,8 @@ fun MMPApp() {
                     cardShape = cardShape,
                     expressiveShape = expressiveShape,
                     primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
                     onDismiss = { showCreateStep1Sheet = false },
                     onSelectPlaylist = {
                         showCreateStep1Sheet = false
@@ -361,18 +485,19 @@ fun MMPApp() {
                 )
             }
 
-            // Диалог выбора обложки и названия плейлиста
             if (showCreateStep2Dialog) {
                 CreatePlaylistDetailsDialog(
                     cardShape = cardShape,
                     expressiveShape = expressiveShape,
                     primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
                     selectedCoverUri = pendingPlaylistCoverUri,
                     onPickCoverClick = { coverPickerLauncher.launch(arrayOf("image/*")) },
                     onDismiss = { showCreateStep2Dialog = false },
                     onCreate = { name, coverUri ->
                         if (name.isNotBlank()) {
-                            val updated = playlists + PlaylistItem(name.trim(), coverUri)
+                            val updated = playlists + PlaylistItem(name.trim(), coverUri, emptyList())
                             playlists = updated
                             StorageHelper.savePlaylists(prefs, updated)
                         }
@@ -381,7 +506,7 @@ fun MMPApp() {
                 )
             }
 
-            // Плавное полноэкранное открытие плеера (как на фото №5)
+            // Полноэкранный плеер
             AnimatedVisibility(
                 visible = showFullPlayerSheet && currentTrack != null,
                 enter = slideInVertically(
@@ -404,11 +529,15 @@ fun MMPApp() {
                         primaryColor = primaryColor,
                         secondaryColor = secondaryColor,
                         bgColor = bgColor,
+                        textColor = textColor,
                         onDismiss = { showFullPlayerSheet = false },
+                        onAddToPlaylistClick = { trackToAddToPlaylist = activeTrack },
                         onPlayPause = { togglePlayPause() },
                         onSeek = { newPos ->
-                            mediaPlayer.seekTo(newPos.toInt())
-                            currentPositionMs = newPos
+                            try {
+                                mediaPlayer.seekTo(newPos.toInt())
+                                currentPositionMs = newPos
+                            } catch (_: Throwable) {}
                         },
                         onNext = {
                             val idx = deviceTracks.indexOfFirst { it.id == activeTrack.id }
