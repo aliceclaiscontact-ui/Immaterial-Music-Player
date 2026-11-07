@@ -265,10 +265,24 @@ fun MMPApp() {
             StorageHelper.saveLastPlayedState(prefs, track, startOffsetMs)
 
             mediaPlayer.reset()
+            mediaPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
             if (track.uri.scheme?.startsWith("http") == true) {
-                mediaPlayer.setDataSource(track.uri.toString())
+                val headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                mediaPlayer.setDataSource(context, track.uri, headers)
             } else {
                 mediaPlayer.setDataSource(context, track.uri)
+            }
+
+            mediaPlayer.setOnErrorListener { _, what, extra ->
+                isPlaying = false
+                isMediaPlayerPrepared = false
+                Toast.makeText(context, "Ошибка потока: $what / $extra", Toast.LENGTH_SHORT).show()
+                true
             }
 
             mediaPlayer.setOnPreparedListener { mp ->
