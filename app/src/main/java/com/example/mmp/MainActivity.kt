@@ -1,9 +1,14 @@
 package com.example.mmp
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
@@ -72,7 +77,6 @@ fun MMPApp() {
         if (granted) rawDeviceTracks = scanDeviceMusic(context) else permissionLauncher.launch(audioPermission)
     }
 
-    // Применяем фильтр папок, минимальной длительности (5-60 сек) и переопределения тегов
     val deviceTracks = remember(rawDeviceTracks, minDurationSec, excludedFolders, tagOverrides) {
         rawDeviceTracks
             .filter { it.durationMs >= minDurationSec * 1000L && !excludedFolders.contains(it.folderPath) }
@@ -85,9 +89,11 @@ fun MMPApp() {
     }
 
     val mediaPlayer = remember { MediaPlayer() }
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
     var isPlaying by remember { mutableStateOf(false) }
+    var wasPlayingBeforeFocusLoss by remember { mutableStateOf(false) }
     var currentPositionMs by remember { mutableStateOf(0L) }
     var showFullPlayerSheet by remember { mutableStateOf(false) }
     var currentTrackPlayedSeconds by remember { mutableStateOf(0) }
@@ -101,6 +107,12 @@ fun MMPApp() {
     var trackToEditTags by remember { mutableStateOf<Track?>(null) }
     var pendingTagCoverUri by remember { mutableStateOf<String?>(null) }
 
+    // Таймер сна и статус онлайн-поиска текстов
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
+    var sleepTimerRemainingSec by remember { mutableStateOf(0) }
+    var stopAfterCurrentTrack by remember { mutableStateOf(false) }
+    var isSearchingOnlineLyrics by remember { mutableStateOf(false) }
+
     var openedPlaylist by remember { mutableStateOf<PlaylistItem?>(null) }
     var openedArtist by remember { mutableStateOf<String?>(null) }
     var openedAlbum by remember { mutableStateOf<String?>(null) }
@@ -111,10 +123,116 @@ fun MMPApp() {
         PlayerBridge.currentArtist = track.artist
         PlayerBridge.currentBitmap = meta.coverArt
         PlayerBridge.isPlaying = playing
+        MMPWidgetProvider.updateAllWidgets(context)
         try {
             val intent = Intent(context, MediaPlaybackService::class.java).setAction("ACTION_UPDATE")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
         } catch (_: Throwable) {}
+    }
+
+    // Аудиофокус (пауза при звонке и приглушение при уведомлениях)
+    val focusChangeListener = remember {
+        AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    wasPlayingBeforeFocusLoss = false
+                    try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
+                    isPlaying = false
+                    syncMediaService(currentTrack, currentMetadata, false)
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    if (isPlaying) {
+                        wasPlayingBeforeFocusLoss = true
+                        try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
+                        isPlaying = false
+                        syncMediaService(currentTrack, currentMetadata, false)
+                    }
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    try { mediaPlayer.setVolume(0.25f, 0.25f) } catch (_: Throwable) {}
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    try { mediaPlayer.setVolume(1.0f, 1.0f) } catch (_: Throwable) {}
+                    if (wasPlayingBeforeFocusLoss && currentTrack != null) {
+                        wasPlayingBeforeFocusLoss = false
+                        try {
+                            mediaPlayer.start()
+                            isPlaying = true
+                            syncMediaService(currentTrack, currentMetadata, true)
+                        } catch (_: Throwable) {}
+                    }
+                }
+            }
+        }
+    }
+
+    fun requestAudioFocus(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    .setOnAudioFocusChangeListener(focusChangeListener)
+                    .build()
+                audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            }
+        } catch (_: Throwable) { true }
+    }
+
+    // Автопауза при отключении наушников / Bluetooth
+    DisposableEffect(context) {
+        val noisyReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && isPlaying) {
+                    try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
+                    isPlaying = false
+                    syncMediaService(currentTrack, currentMetadata, false)
+                }
+            }
+        }
+        context.registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        onDispose {
+            try { context.unregisterReceiver(noisyReceiver) } catch (_: Throwable) {}
+        }
+    }
+
+    // Поиск текста в базе LRCLIB и сохранение в память
+    fun searchAndCacheOnlineLyrics(track: Track, customQuery: String? = null, showFeedback: Boolean = false) {
+        scope.launch {
+            isSearchingOnlineLyrics = true
+            val foundLrc = fetchLyricsFromLrclib(track.artist, track.title, track.durationMs, customQuery)
+            isSearchingOnlineLyrics = false
+            if (!foundLrc.isNullOrBlank()) {
+                val updatedMap = tagOverrides.toMutableMap()
+                val existing = updatedMap[track.id]
+                updatedMap[track.id] = TrackTagOverride(
+                    title = existing?.title ?: track.title,
+                    artist = existing?.artist ?: track.artist,
+                    album = existing?.album ?: track.album,
+                    coverUri = existing?.coverUri ?: track.customCoverUri,
+                    lyrics = foundLrc
+                )
+                tagOverrides = updatedMap
+                StorageHelper.saveTagOverrides(prefs, updatedMap)
+                val parsed = parseLrcText(foundLrc)
+                if (currentTrack?.id == track.id) {
+                    currentTrack = applyOverridesToTrack(track, updatedMap)
+                    currentMetadata = currentMetadata.copy(lyrics = parsed)
+                }
+                if (showFeedback) {
+                    Toast.makeText(context, "Текст найден в базе LRCLIB и сохранён!", Toast.LENGTH_SHORT).show()
+                }
+            } else if (showFeedback) {
+                Toast.makeText(context, "Текст в базе LRCLIB не найден", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     fun playTrack(track: Track, newQueue: List<Track>? = null) {
@@ -129,10 +247,12 @@ fun MMPApp() {
         }
 
         try {
+            requestAudioFocus()
             isPlaying = false
             mediaPlayer.reset()
             mediaPlayer.setDataSource(context, track.uri)
             mediaPlayer.prepare()
+            mediaPlayer.setVolume(1.0f, 1.0f)
             mediaPlayer.start()
             currentTrack = track
             currentPositionMs = 0L
@@ -144,10 +264,23 @@ fun MMPApp() {
                 val meta = extractTrackMetadata(context, track)
                 currentMetadata = meta
                 syncMediaService(track, meta, true)
+                // Если у трека ещё нет локального текста — автоматически ищем в базе LRCLIB
+                if (meta.lyrics.isEmpty()) {
+                    searchAndCacheOnlineLyrics(track, null, false)
+                }
             }
 
             mediaPlayer.setOnCompletionListener {
                 try {
+                    if (stopAfterCurrentTrack) {
+                        stopAfterCurrentTrack = false
+                        isPlaying = false
+                        currentPositionMs = 0L
+                        try { mediaPlayer.seekTo(0) } catch (_: Throwable) {}
+                        syncMediaService(currentTrack, currentMetadata, false)
+                        return@setOnCompletionListener
+                    }
+
                     when (repeatMode) {
                         RepeatMode.ONE -> {
                             mediaPlayer.seekTo(0)
@@ -168,7 +301,6 @@ fun MMPApp() {
                             if (idx != -1 && idx + 1 < currentQueue.size) {
                                 playTrack(currentQueue[idx + 1])
                             } else {
-                                // БЕЗОПАСНАЯ ОСТАНОВКА В КОНЦЕ АЛЬБОМА БЕЗ ВЫЛЕТА ПРИ ПОВТОРНОМ PLAY
                                 isPlaying = false
                                 currentPositionMs = 0L
                                 try { mediaPlayer.seekTo(0) } catch (_: Throwable) {}
@@ -224,6 +356,7 @@ fun MMPApp() {
                 syncMediaService(cur, currentMetadata, false)
             } else {
                 try {
+                    requestAudioFocus()
                     val dur = cur.durationMs
                     val pos = try { mediaPlayer.currentPosition.toLong() } catch (_: Throwable) { 0L }
                     if (dur > 0 && pos >= dur - 800L) {
@@ -234,7 +367,6 @@ fun MMPApp() {
                     isPlaying = true
                     syncMediaService(cur, currentMetadata, true)
                 } catch (_: Throwable) {
-                    // Если плеер был сброшен или завершён — перезапускаем трек начисто без краша
                     playTrack(cur)
                 }
             }
@@ -268,6 +400,20 @@ fun MMPApp() {
         PlayerBridge.onPlayPause = { togglePlayPause() }
         PlayerBridge.onNext = { playNextTrack() }
         PlayerBridge.onPrev = { playPrevTrack() }
+    }
+
+    // Обратный отсчёт таймера сна
+    LaunchedEffect(sleepTimerRemainingSec) {
+        if (sleepTimerRemainingSec > 0) {
+            delay(1000L)
+            sleepTimerRemainingSec -= 1
+            if (sleepTimerRemainingSec == 0 && isPlaying) {
+                try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
+                isPlaying = false
+                syncMediaService(currentTrack, currentMetadata, false)
+                Toast.makeText(context, "Таймер сна остановил музыку", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     LaunchedEffect(isPlaying, currentTrack) {
@@ -461,16 +607,25 @@ fun MMPApp() {
                         currentPosMs = currentPositionMs,
                         isShuffleEnabled = isShuffleEnabled,
                         repeatMode = repeatMode,
+                        sleepTimerRemainingSec = sleepTimerRemainingSec,
+                        stopAfterCurrentTrack = stopAfterCurrentTrack,
+                        isSearchingOnlineLyrics = isSearchingOnlineLyrics,
+                        cardShape = cardShape,
                         expressiveShape = expressiveShape,
                         primaryColor = primaryColor,
                         secondaryColor = secondaryColor,
                         bgColor = bgColor,
                         textColor = textColor,
+                        surfaceColor = surfaceColor,
                         onDismiss = { showFullPlayerSheet = false },
                         onAddToPlaylistClick = { trackToAddToPlaylist = activeTrack },
                         onEditTagsClick = {
                             pendingTagCoverUri = activeTrack.customCoverUri
                             trackToEditTags = activeTrack
+                        },
+                        onOpenSleepTimerClick = { showSleepTimerDialog = true },
+                        onSearchOnlineLyricsClick = { customQuery ->
+                            searchAndCacheOnlineLyrics(activeTrack, customQuery, true)
                         },
                         onOpenQueueClick = { showQueueSheet = true },
                         onToggleShuffle = { toggleShuffle() },
@@ -481,6 +636,29 @@ fun MMPApp() {
                         onPrev = { playPrevTrack() }
                     )
                 }
+            }
+
+            if (showSleepTimerDialog) {
+                CurvedSleepTimerDialog(
+                    currentMinutes = (sleepTimerRemainingSec + 59) / 60,
+                    stopAfterCurrentTrack = stopAfterCurrentTrack,
+                    cardShape = cardShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onDismiss = { showSleepTimerDialog = false },
+                    onApplyTimer = { mins, stopEnd ->
+                        sleepTimerRemainingSec = mins * 60
+                        stopAfterCurrentTrack = stopEnd
+                        showSleepTimerDialog = false
+                        val msg = when {
+                            mins > 0 -> "Таймер сна запущен на $mins мин"
+                            stopEnd -> "Плеер остановится после конца трека"
+                            else -> "Таймер сна отключён"
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                )
             }
 
             if (showQueueSheet) {

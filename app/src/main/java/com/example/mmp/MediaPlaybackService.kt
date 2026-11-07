@@ -4,6 +4,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -12,6 +15,7 @@ import android.os.IBinder
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 
@@ -23,6 +27,59 @@ object PlayerBridge {
     var currentArtist: String = "Готов к воспроизведению"
     var currentBitmap: Bitmap? = null
     var isPlaying: Boolean = false
+}
+
+class MMPWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        updateAllWidgets(context)
+    }
+
+    companion object {
+        fun updateAllWidgets(context: Context) {
+            try {
+                val manager = AppWidgetManager.getInstance(context)
+                val ids = manager.getAppWidgetIds(ComponentName(context, MMPWidgetProvider::class.java))
+                if (ids.isEmpty()) return
+
+                val views = RemoteViews(context.packageName, R.layout.mmp_widget)
+                views.setTextViewText(R.id.widget_title, PlayerBridge.currentTitle)
+                views.setTextViewText(R.id.widget_artist, PlayerBridge.currentArtist)
+
+                if (PlayerBridge.currentBitmap != null) {
+                    views.setImageViewBitmap(R.id.widget_cover, PlayerBridge.currentBitmap)
+                } else {
+                    views.setImageViewResource(R.id.widget_cover, android.R.drawable.ic_media_play)
+                }
+
+                val playIcon = if (PlayerBridge.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+                views.setImageViewResource(R.id.widget_play_pause, playIcon)
+
+                val openAppIntent = PendingIntent.getActivity(
+                    context, 10, Intent(context, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                val prevPending = PendingIntent.getService(
+                    context, 11, Intent(context, MediaPlaybackService::class.java).setAction("ACTION_PREV"),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                val togglePending = PendingIntent.getService(
+                    context, 12, Intent(context, MediaPlaybackService::class.java).setAction("ACTION_TOGGLE"),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                val nextPending = PendingIntent.getService(
+                    context, 13, Intent(context, MediaPlaybackService::class.java).setAction("ACTION_NEXT"),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+
+                views.setOnClickPendingIntent(R.id.widget_root, openAppIntent)
+                views.setOnClickPendingIntent(R.id.widget_prev, prevPending)
+                views.setOnClickPendingIntent(R.id.widget_play_pause, togglePending)
+                views.setOnClickPendingIntent(R.id.widget_next, nextPending)
+
+                manager.updateAppWidget(ids, views)
+            } catch (_: Throwable) {}
+        }
+    }
 }
 
 class MediaPlaybackService : Service() {
@@ -53,6 +110,7 @@ class MediaPlaybackService : Service() {
             "ACTION_UPDATE" -> updateNotification()
         }
         updateNotification()
+        MMPWidgetProvider.updateAllWidgets(this)
         return START_STICKY
     }
 

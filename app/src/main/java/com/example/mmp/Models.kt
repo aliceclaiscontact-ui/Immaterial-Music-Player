@@ -621,3 +621,69 @@ fun formatMillis(ms: Long): String {
     val totalSec = (ms / 1000).coerceAtLeast(0)
     return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }
+
+// Поиск синхронизированных текстов песен в онлайн-базе LRCLIB
+suspend fun fetchLyricsFromLrclib(
+    artist: String,
+    title: String,
+    durationMs: Long,
+    customQuery: String? = null
+): String? = withContext(Dispatchers.IO) {
+    try {
+        val cleanTitle = title
+            .replace(Regex("""\s*\(.*?\)\s*"""), " ")
+            .replace(Regex("""\s*\[.*?]\s*"""), " ")
+            .trim()
+        val cleanArtist = if (artist.contains("Неизвестный", ignoreCase = true)) "" else artist.trim()
+
+        // 1. Точный запрос по артисту и названию, если не задан ручной поисковый запрос
+        if (customQuery.isNullOrBlank() && cleanArtist.isNotEmpty()) {
+            val durSec = (durationMs / 1000L).coerceAtLeast(1L)
+            val exactUrl = "https://lrclib.net/api/get?artist_name=" +
+                java.net.URLEncoder.encode(cleanArtist, "UTF-8") +
+                "&track_name=" + java.net.URLEncoder.encode(cleanTitle, "UTF-8") +
+                "&duration=$durSec"
+            val conn = (java.net.URL(exactUrl).openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 6000
+                readTimeout = 6000
+                setRequestProperty("User-Agent", "MMP-Android/2.5 (https://github.com/aliceclaiscontact-ui)")
+            }
+            if (conn.responseCode == 200) {
+                val resp = conn.inputStream.bufferedReader().use { it.readText() }
+                val obj = JSONObject(resp)
+                val synced = obj.optString("syncedLyrics", "").takeIf { it.isNotBlank() && it != "null" }
+                val plain = obj.optString("plainLyrics", "").takeIf { it.isNotBlank() && it != "null" }
+                if (synced != null) return@withContext synced
+                if (plain != null) return@withContext plain
+            }
+        }
+
+        // 2. Поиск по базе LRCLIB (/api/search)
+        val query = customQuery?.takeIf { it.isNotBlank() } ?: "$cleanArtist$cleanTitle".trim()
+        val searchUrl = "https://lrclib.net/api/search?q=" + java.net.URLEncoder.encode(query, "UTF-8")
+        val searchConn = (java.net.URL(searchUrl).openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 6000
+            readTimeout = 6000
+            setRequestProperty("User-Agent", "MMP-Android/2.5 (https://github.com/aliceclaiscontact-ui)")
+        }
+        if (searchConn.responseCode == 200) {
+            val resp = searchConn.inputStream.bufferedReader().use { it.readText() }
+            val arr = JSONArray(resp)
+            var fallbackPlain: String? = null
+            for (i in 0 until arr.length()) {
+                val item = arr.getJSONObject(i)
+                val synced = item.optString("syncedLyrics", "").takeIf { it.isNotBlank() && it != "null" }
+                if (synced != null) return@withContext synced
+                if (fallbackPlain == null) {
+                    fallbackPlain = item.optString("plainLyrics", "").takeIf { it.isNotBlank() && it != "null" }
+                }
+            }
+            return@withContext fallbackPlain
+        }
+        null
+    } catch (_: Throwable) {
+        null
+    }
+}

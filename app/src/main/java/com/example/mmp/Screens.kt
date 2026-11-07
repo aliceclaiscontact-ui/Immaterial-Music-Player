@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -32,10 +33,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -49,7 +54,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 @Composable
 fun TrackCoverThumb(track: Track, shape: Shape, primaryColor: Color, sizeDp: Int = 48) {
@@ -152,9 +162,7 @@ fun HomeScreen(
                         }
                     }
                     item {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).padding(16.dp)
-                        ) {
+                        Box(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).padding(16.dp)) {
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                     Column(modifier = Modifier.weight(1f)) {
@@ -255,9 +263,6 @@ fun HomeScreen(
     }
 }
 
-// -----------------------------------------------------
-// ЧИСТЫЙ ДИЗАЙН ПЛЕЙЛИСТА И АЛЬБОМА (БЕЗ ГРАДИЕНТА И ЛИШНИХ КНОПОК)
-// -----------------------------------------------------
 @Composable
 fun CleanHeaderLayout(
     title: String,
@@ -293,27 +298,12 @@ fun CleanHeaderLayout(
 
     LazyColumn(modifier = Modifier.fillMaxSize().background(bgColor)) {
         item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(bgColor)
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.size(40.dp).clip(CircleShape).background(surfaceColor)
-                ) {
+            Column(modifier = Modifier.fillMaxWidth().background(bgColor).padding(horizontal = 20.dp, vertical = 14.dp)) {
+                IconButton(onClick = onBack, modifier = Modifier.size(40.dp).clip(CircleShape).background(surfaceColor)) {
                     Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp))
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .size(210.dp)
-                        .clip(expressiveShape)
-                        .background(surfaceColor)
-                        .align(Alignment.CenterHorizontally),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
                     if (heroBitmap != null) Image(heroBitmap!!.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                     else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks.map { it.id }, tracks, primaryColor, 210)
                     else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(90.dp))
@@ -324,48 +314,25 @@ fun CleanHeaderLayout(
                 Text(subtitle, color = textColor.copy(0.65f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(14.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = {
                             onToggleShuffle()
-                            if (!isContextPlaying && tracks.isNotEmpty()) {
-                                onPlayContext(tracks.shuffled(), tracks.random())
-                            }
+                            if (!isContextPlaying && tracks.isNotEmpty()) onPlayContext(tracks.shuffled(), tracks.random())
                         },
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
-                            .background(if (isShuffleEnabled) primaryColor.copy(0.22f) else surfaceColor)
+                        modifier = Modifier.size(46.dp).clip(CircleShape).background(if (isShuffleEnabled) primaryColor.copy(0.22f) else surfaceColor)
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (isShuffleEnabled) primaryColor else textColor.copy(0.75f),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Icon(Icons.Filled.Shuffle, "Shuffle", tint = if (isShuffleEnabled) primaryColor else textColor.copy(0.75f), modifier = Modifier.size(24.dp))
                     }
                     Spacer(modifier = Modifier.width(14.dp))
                     Box(
-                        modifier = Modifier
-                            .size(58.dp)
-                            .clip(CircleShape)
-                            .background(primaryColor)
-                            .clickable {
-                                if (isContextPlaying) onTogglePlay()
-                                else if (tracks.isNotEmpty()) onPlayContext(tracks, tracks.first())
-                            },
+                        modifier = Modifier.size(58.dp).clip(CircleShape).background(primaryColor).clickable {
+                            if (isContextPlaying) onTogglePlay()
+                            else if (tracks.isNotEmpty()) onPlayContext(tracks, tracks.first())
+                        },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = if (isContextPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = "Play",
-                            tint = Color.Black,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Icon(if (isContextPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(32.dp))
                     }
                 }
             }
@@ -383,9 +350,6 @@ fun CleanHeaderLayout(
     }
 }
 
-// -----------------------------------------------------
-// СТРАНИЦА АВТОРА В СТИЛЕ APPLE MUSIC С РАЗМЫТИЕМ И ЖИВЫМ PLAY/PAUSE
-// -----------------------------------------------------
 @Composable
 fun AppleMusicArtistScreen(
     artistName: String,
@@ -422,71 +386,37 @@ fun AppleMusicArtistScreen(
         item {
             Box(modifier = Modifier.fillMaxWidth().height(410.dp)) {
                 if (heroBitmap != null) {
-                    // Фоновый размытый слой для мягкого свечения
-                    Image(
-                        bitmap = heroBitmap!!.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().blur(28.dp),
-                        alpha = 0.7f
-                    )
-                    // Чёткий портрет поверх
-                    Image(
-                        bitmap = heroBitmap!!.asImageBitmap(),
-                        contentDescription = artistName,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    Image(bitmap = heroBitmap!!.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp), alpha = 0.7f)
+                    Image(bitmap = heroBitmap!!.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 } else {
                     Box(modifier = Modifier.fillMaxSize().background(surfaceColor), contentAlignment = Alignment.Center) {
                         Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(110.dp))
                     }
                 }
-                // Плавный уход в цвет фона снизу как в Apple Music
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Black.copy(0.25f), Color.Transparent, bgColor.copy(0.88f), bgColor)
-                            )
-                        )
+                    modifier = Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(colors = listOf(Color.Black.copy(0.25f), Color.Transparent, bgColor.copy(0.88f), bgColor))
+                    )
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 18.dp, start = 16.dp, end = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 18.dp, start = 16.dp, end = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack, modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(0.45f))) {
                         Icon(Icons.Filled.ArrowBackIosNew, "Назад", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                 }
 
-                Column(
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(artistName, color = textColor, fontSize = 38.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(modifier = Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = {
-                                onToggleShuffle()
-                                if (artistTracks.isNotEmpty()) onPlayContext(artistTracks.shuffled(), artistTracks.random())
-                            }
-                        ) {
+                        IconButton(onClick = { onToggleShuffle(); if (artistTracks.isNotEmpty()) onPlayContext(artistTracks.shuffled(), artistTracks.random()) }) {
                             Icon(Icons.Filled.Shuffle, "Shuffle", tint = if (isShuffleEnabled) primaryColor else textColor, modifier = Modifier.size(28.dp))
                         }
                         Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(CircleShape)
-                                .background(primaryColor)
-                                .clickable {
-                                    if (isArtistPlaying) onTogglePlay()
-                                    else if (artistTracks.isNotEmpty()) onPlayContext(artistTracks, artistTracks.first())
-                                },
+                            modifier = Modifier.size(56.dp).clip(CircleShape).background(primaryColor).clickable {
+                                if (isArtistPlaying) onTogglePlay()
+                                else if (artistTracks.isNotEmpty()) onPlayContext(artistTracks, artistTracks.first())
+                            },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(34.dp))
@@ -645,9 +575,6 @@ fun LibraryScreen(
     }
 }
 
-// -----------------------------------------------------
-// МИНИ-ПЛЕЕР С ЖЕСТАМИ (СВАЙП ВЛЕВО/ВПРАВО = ТРЕК, СВАЙП ВВЕРХ = ОТКРЫТЬ ПЛЕЕР)
-// -----------------------------------------------------
 @Composable
 fun MiniPlayerBar(
     track: Track?,
@@ -717,7 +644,9 @@ fun MiniPlayerBar(
 }
 
 // -----------------------------------------------------
-// ПОЛНОЭКРАННЫЙ ПЛЕЕР С КАРАОКЕ (.LRC + БЛЮР), РАБОЧИМ REPEAT (1 / ALL), SHUFFLE, РЕДАКТОРОМ ТЕГОВ И ОЧЕРЕДЬЮ
+// ПОЛНОЭКРАННЫЙ ПЛЕЕР:
+// - Рядом с названием только "+" и "⋮" (три точки)
+// - Внизу: слева Очередь, посередине Громкость, справа Три полоски с нотой (открывает Полноэкранный Текст с мини-мини-плеером)
 // -----------------------------------------------------
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -728,14 +657,21 @@ fun FullScreenPlayerOverlay(
     currentPosMs: Long,
     isShuffleEnabled: Boolean,
     repeatMode: RepeatMode,
+    sleepTimerRemainingSec: Int,
+    stopAfterCurrentTrack: Boolean,
+    isSearchingOnlineLyrics: Boolean,
+    cardShape: Shape,
     expressiveShape: Shape,
     primaryColor: Color,
     secondaryColor: Color,
     bgColor: Color,
     textColor: Color,
+    surfaceColor: Color,
     onDismiss: () -> Unit,
     onAddToPlaylistClick: () -> Unit,
     onEditTagsClick: () -> Unit,
+    onOpenSleepTimerClick: () -> Unit,
+    onSearchOnlineLyricsClick: (String?) -> Unit,
     onOpenQueueClick: () -> Unit,
     onToggleShuffle: () -> Unit,
     onToggleRepeat: () -> Unit,
@@ -744,120 +680,67 @@ fun FullScreenPlayerOverlay(
     onNext: () -> Unit,
     onPrev: () -> Unit
 ) {
-    BackHandler { onDismiss() }
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVol = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
     var currentVol by remember { mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()) }
-    var showLyricsView by remember { mutableStateOf(false) }
 
-    val lyricsList = metadata.lyrics
-    val activeLyricIndex = remember(currentPosMs, lyricsList) {
-        if (lyricsList.isEmpty()) -1
-        else lyricsList.indexOfLast { it.timeMs <= currentPosMs }.coerceAtLeast(0)
-    }
-    val lyricListState = rememberLazyListState()
+    var showFullLyricsOverlay by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
 
-    LaunchedEffect(activeLyricIndex, showLyricsView) {
-        if (showLyricsView && activeLyricIndex >= 0) {
-            try {
-                lyricListState.animateScrollToItem((activeLyricIndex - 2).coerceAtLeast(0))
-            } catch (_: Throwable) {}
-        }
+    BackHandler {
+        if (showFullLyricsOverlay) showFullLyricsOverlay = false else onDismiss()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(bgColor).clickable(enabled = true, onClick = {})) {
-        if (metadata.coverArt != null) Image(metadata.coverArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(75.dp), alpha = 0.38f)
-        else Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(primaryColor.copy(0.28f), secondaryColor.copy(0.18f), bgColor))))
+        if (metadata.coverArt != null) {
+            Image(metadata.coverArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(75.dp), alpha = 0.38f)
+        } else {
+            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(primaryColor.copy(0.28f), secondaryColor.copy(0.18f), bgColor))))
+        }
 
         Column(
             modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Box(modifier = Modifier.fillMaxWidth().clickable { onDismiss() }.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
-                Box(modifier = Modifier.width(44.dp).height(5.dp).clip(CircleShape).background(textColor.copy(0.35f)))
-            }
-
-            // Переключение между Обложкой и Анимированным Текстом песни (с блюром и скейлом)
-            AnimatedContent(
-                targetState = showLyricsView,
-                transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(240)) },
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                label = "CoverOrLyrics"
-            ) { isLyrics ->
-                if (!isLyrics) {
-                    val coverScale by animateFloatAsState(if (isPlaying) 1f else 0.92f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "")
+            // Ручка закрытия сверху + индикатор таймера сна, если он активен
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.fillMaxWidth().clickable { onDismiss() }.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.width(44.dp).height(5.dp).clip(CircleShape).background(textColor.copy(0.35f)))
+                }
+                if (sleepTimerRemainingSec > 0 || stopAfterCurrentTrack) {
+                    val timerText = if (stopAfterCurrentTrack) "Таймер: до конца трека" else "Таймер сна: ${sleepTimerRemainingSec / 60}м ${sleepTimerRemainingSec % 60}с"
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding((1f - coverScale).dp * 100)
-                            .clip(expressiveShape)
-                            .background(textColor.copy(0.08f))
-                            .border(1.dp, textColor.copy(0.18f), expressiveShape)
-                            .clickable { showLyricsView = true },
-                        contentAlignment = Alignment.Center
+                            .clip(RoundedCornerShape(50))
+                            .background(primaryColor.copy(0.2f))
+                            .clickable { onOpenSleepTimerClick() }
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
                     ) {
-                        if (metadata.coverArt != null) Image(metadata.coverArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(105.dp))
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(Color.Black.copy(0.35f))
-                            .border(1.dp, textColor.copy(0.14f), RoundedCornerShape(28.dp))
-                            .padding(18.dp)
-                    ) {
-                        if (lyricsList.isEmpty()) {
-                            Column(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.Center,
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(Icons.Filled.Lyrics, null, tint = primaryColor, modifier = Modifier.size(48.dp))
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text("Для этого трека ещё нет текста (.lrc)", color = textColor, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text("Нажми на карандаш ✎ рядом с названием трека, чтобы вставить текст или таймкоды [00:12.00]", color = textColor.copy(0.65f), fontSize = 12.sp, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                OutlinedButton(onClick = onEditTagsClick, shape = RoundedCornerShape(50)) {
-                                    Text("Добавить текст", color = primaryColor, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        } else {
-                            LazyColumn(
-                                state = lyricListState,
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                                contentPadding = PaddingValues(vertical = 70.dp),
-                                modifier = Modifier.fillMaxSize()
-                            ) {
-                                itemsIndexed(lyricsList) { idx, line ->
-                                    val isCurrent = idx == activeLyricIndex
-                                    val distance = abs(idx - activeLyricIndex)
-                                    val targetScale by animateFloatAsState(if (isCurrent) 1.06f else 0.94f, tween(300), label = "")
-                                    val blurDp = if (isCurrent) 0.dp else (distance * 1.4f).coerceAtMost(4.5f).dp
-
-                                    Text(
-                                        text = line.text,
-                                        color = if (isCurrent) textColor else textColor.copy(0.42f),
-                                        fontSize = if (isCurrent) 22.sp else 17.sp,
-                                        fontWeight = if (isCurrent) FontWeight.Black else FontWeight.SemiBold,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .scale(targetScale)
-                                            .blur(blurDp)
-                                            .clickable { onSeek(line.timeMs) }
-                                            .padding(vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
+                        Text(timerText, color = primaryColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
+            // Большая обложка
+            val coverScale by animateFloatAsState(if (isPlaying) 1f else 0.92f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "")
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .padding((1f - coverScale).dp * 100)
+                    .clip(expressiveShape)
+                    .background(textColor.copy(0.08f))
+                    .border(1.dp, textColor.copy(0.18f), expressiveShape)
+                    .clickable { showFullLyricsOverlay = true },
+                contentAlignment = Alignment.Center
+            ) {
+                if (metadata.coverArt != null) Image(metadata.coverArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(105.dp))
+            }
+
+            // Название трека и ТОЛЬКО 2 аккуратные кнопки: "+" и "⋮"
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -865,34 +748,56 @@ fun FullScreenPlayerOverlay(
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(track.artist, color = textColor.copy(0.72f), fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        IconButton(
-                            onClick = { showLyricsView = !showLyricsView },
-                            modifier = Modifier.size(32.dp).clip(CircleShape).background(if (showLyricsView) primaryColor else textColor.copy(0.14f))
-                        ) {
-                            Icon(Icons.Filled.Lyrics, "Текст песни", tint = if (showLyricsView) Color.Black else textColor, modifier = Modifier.size(16.dp))
-                        }
-                        IconButton(
-                            onClick = onEditTagsClick,
-                            modifier = Modifier.size(32.dp).clip(CircleShape).background(textColor.copy(0.14f))
-                        ) {
-                            Icon(Icons.Filled.Edit, "Изменить сведения", tint = textColor, modifier = Modifier.size(16.dp))
-                        }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(
                             onClick = onAddToPlaylistClick,
-                            modifier = Modifier.size(32.dp).clip(CircleShape).background(textColor.copy(0.14f))
+                            modifier = Modifier.size(34.dp).clip(CircleShape).background(textColor.copy(0.14f))
                         ) {
                             Icon(Icons.Filled.Add, "В плейлист", tint = primaryColor, modifier = Modifier.size(18.dp))
                         }
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.size(32.dp).clip(CircleShape).background(textColor.copy(0.14f))
-                        ) {
-                            Icon(Icons.Filled.KeyboardArrowDown, "Свернуть", tint = textColor, modifier = Modifier.size(18.dp))
+                        Box {
+                            IconButton(
+                                onClick = { showMoreMenu = true },
+                                modifier = Modifier.size(34.dp).clip(CircleShape).background(textColor.copy(0.14f))
+                            ) {
+                                Icon(Icons.Filled.MoreVert, "Ещё", tint = textColor, modifier = Modifier.size(18.dp))
+                            }
+                            DropdownMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false },
+                                modifier = Modifier.background(surfaceColor)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Таймер сна (до 120 мин)", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = { Icon(Icons.Filled.Bedtime, null, tint = primaryColor) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onOpenSleepTimerClick()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Найти текст в базе LRCLIB", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = { Icon(Icons.Filled.CloudDownload, null, tint = primaryColor) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onSearchOnlineLyricsClick(null)
+                                        showFullLyricsOverlay = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Изменить сведения о треке", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = { Icon(Icons.Filled.Edit, null, tint = primaryColor) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onEditTagsClick()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
+
                 Spacer(modifier = Modifier.height(10.dp))
                 val safeDur = track.durationMs.coerceAtLeast(1L)
                 Slider(
@@ -915,21 +820,13 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            // Кнопки управления: Shuffle, Prev, Play/Pause, Next, Repeat (с 3 состояниями и цифрой 1)
+            // Ряд управления воспроизведением: Shuffle, Prev, Play/Pause, Next, Repeat (1 / ALL)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
                     onClick = onToggleShuffle,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(if (isShuffleEnabled) primaryColor.copy(0.22f) else Color.Transparent)
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(if (isShuffleEnabled) primaryColor.copy(0.22f) else Color.Transparent)
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Shuffle,
-                        contentDescription = "Shuffle",
-                        tint = if (isShuffleEnabled) primaryColor else textColor.copy(0.55f),
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Filled.Shuffle, "Shuffle", tint = if (isShuffleEnabled) primaryColor else textColor.copy(0.55f), modifier = Modifier.size(24.dp))
                 }
 
                 IconButton(onClick = onPrev, modifier = Modifier.size(54.dp)) {
@@ -947,7 +844,6 @@ fun FullScreenPlayerOverlay(
                     Icon(Icons.Filled.FastForward, null, tint = textColor, modifier = Modifier.size(40.dp))
                 }
 
-                // Кнопка Repeat: OFF -> серый, ALL -> primaryColor, ONE -> контрастный цвет + бейдж 1 поверх
                 val repeatAccent = when (repeatMode) {
                     RepeatMode.OFF -> textColor.copy(0.55f)
                     RepeatMode.ALL -> primaryColor
@@ -975,12 +871,7 @@ fun FullScreenPlayerOverlay(
                     )
                     if (repeatMode == RepeatMode.ONE) {
                         Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(3.dp)
-                                .size(14.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF00F5D4)),
+                            modifier = Modifier.align(Alignment.TopEnd).padding(3.dp).size(14.dp).clip(CircleShape).background(Color(0xFF00F5D4)),
                             contentAlignment = Alignment.Center
                         ) {
                             Text("1", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
@@ -989,8 +880,20 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(Icons.Filled.VolumeDown, null, tint = textColor.copy(0.6f), modifier = Modifier.size(20.dp))
+            // НИЖНИЙ РЯД: Слева — Очередь, Посередине — Ползунок громкости, Справа — Три полоски с нотой (QueueMusic -> Текст)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                IconButton(
+                    onClick = onOpenQueueClick,
+                    modifier = Modifier.size(40.dp).clip(CircleShape).background(textColor.copy(0.1f))
+                ) {
+                    Icon(Icons.Filled.PlaylistPlay, "Очередь", tint = primaryColor, modifier = Modifier.size(24.dp))
+                }
+
+                Icon(Icons.Filled.VolumeDown, null, tint = textColor.copy(0.6f), modifier = Modifier.size(18.dp))
                 Slider(
                     value = currentVol,
                     onValueChange = { currentVol = it; audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, it.toInt(), 0) },
@@ -998,18 +901,447 @@ fun FullScreenPlayerOverlay(
                     colors = SliderDefaults.colors(thumbColor = textColor, activeTrackColor = textColor.copy(0.85f), inactiveTrackColor = textColor.copy(0.22f)),
                     modifier = Modifier.weight(1f)
                 )
-                Icon(Icons.Filled.VolumeUp, null, tint = textColor.copy(0.6f), modifier = Modifier.size(20.dp))
-                IconButton(onClick = onOpenQueueClick) {
-                    Icon(Icons.Filled.QueueMusic, "Очередь", tint = primaryColor, modifier = Modifier.size(26.dp))
+                Icon(Icons.Filled.VolumeUp, null, tint = textColor.copy(0.6f), modifier = Modifier.size(18.dp))
+
+                IconButton(
+                    onClick = { showFullLyricsOverlay = true },
+                    modifier = Modifier.size(40.dp).clip(CircleShape).background(if (showFullLyricsOverlay) primaryColor else textColor.copy(0.1f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.QueueMusic,
+                        contentDescription = "Текст песни",
+                        tint = if (showFullLyricsOverlay) Color.Black else primaryColor,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
+            }
+        }
+
+        // ПЛАВНОЕ ПОЛНОЭКРАННОЕ ОКНО С ТЕКСТОМ И ПРЯМОУГОЛЬНЫМ МИНИ-МИНИ-ПЛЕЕРОМ СНИЗУ (КАК В APPLE MUSIC)
+        AnimatedVisibility(
+            visible = showFullLyricsOverlay,
+            enter = fadeIn(tween(280)) + slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+            ),
+            exit = fadeOut(tween(220)) + slideOutVertically(targetOffsetY = { it }, animationSpec = tween(250))
+        ) {
+            FullScreenLyricsOverlayWithMiniPlayer(
+                track = track,
+                metadata = metadata,
+                isPlaying = isPlaying,
+                currentPosMs = currentPosMs,
+                isSearchingOnlineLyrics = isSearchingOnlineLyrics,
+                cardShape = cardShape,
+                primaryColor = primaryColor,
+                secondaryColor = secondaryColor,
+                bgColor = bgColor,
+                textColor = textColor,
+                surfaceColor = surfaceColor,
+                onClose = { showFullLyricsOverlay = false },
+                onPlayPause = onPlayPause,
+                onNext = onNext,
+                onPrev = onPrev,
+                onSeek = onSeek,
+                onSearchLyricsByQuery = { query -> onSearchOnlineLyricsClick(query) }
+            )
+        }
+    }
+}
+
+// -----------------------------------------------------
+// ПОЛНОЭКРАННЫЙ КАРАОКЕ-ТЕКСТ + ПРЯМОУГОЛЬНЫЙ МИНИ-МИНИ-ПЛЕЕР СНИЗУ + ПОИСК ПО БАЗЕ LRCLIB
+// -----------------------------------------------------
+@Composable
+fun FullScreenLyricsOverlayWithMiniPlayer(
+    track: Track,
+    metadata: DetailedMetadata,
+    isPlaying: Boolean,
+    currentPosMs: Long,
+    isSearchingOnlineLyrics: Boolean,
+    cardShape: Shape,
+    primaryColor: Color,
+    secondaryColor: Color,
+    bgColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    onClose: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onSearchLyricsByQuery: (String?) -> Unit
+) {
+    val lyricsList = metadata.lyrics
+    val activeLyricIndex = remember(currentPosMs, lyricsList) {
+        if (lyricsList.isEmpty()) -1
+        else lyricsList.indexOfLast { it.timeMs <= currentPosMs }.coerceAtLeast(0)
+    }
+    val lyricListState = rememberLazyListState()
+    var showManualSearchField by remember { mutableStateOf(false) }
+    var manualQuery by remember(track.id) { mutableStateOf("${track.artist} ${track.title}") }
+
+    LaunchedEffect(activeLyricIndex) {
+        if (activeLyricIndex >= 0 && lyricsList.isNotEmpty()) {
+            try {
+                lyricListState.animateScrollToItem((activeLyricIndex - 2).coerceAtLeast(0))
+            } catch (_: Throwable) {}
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(bgColor).clickable(enabled = true, onClick = {})) {
+        if (metadata.coverArt != null) {
+            Image(
+                bitmap = metadata.coverArt.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().blur(85.dp),
+                alpha = 0.45f
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(primaryColor.copy(0.32f), secondaryColor.copy(0.2f), bgColor))))
+        }
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.4f)))
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Шапка окна текста: кнопка поиска в базе LRCLIB и закрытие
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(
+                        onClick = { showManualSearchField = !showManualSearchField },
+                        modifier = Modifier.size(38.dp).clip(CircleShape).background(Color.White.copy(0.14f))
+                    ) {
+                        Icon(Icons.Filled.Search, "Поиск текста в базе", tint = primaryColor, modifier = Modifier.size(20.dp))
+                    }
+                    Text("Синхронный текст (LRCLIB)", color = Color.White.copy(0.85f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(38.dp).clip(CircleShape).background(Color.White.copy(0.14f))
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowDown, "Закрыть", tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+            }
+
+            AnimatedVisibility(visible = showManualSearchField) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = manualQuery,
+                        onValueChange = { manualQuery = it },
+                        placeholder = { Text("Артист и название трека...") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = { onSearchLyricsByQuery(manualQuery) },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                    ) {
+                        Text("Найти", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Основная область караоке-текста с плавным блюром и увеличением активной строчки
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                if (isSearchingOnlineLyrics) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = primaryColor)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Ищем синхронизированный текст в базе LRCLIB...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                } else if (lyricsList.isEmpty()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                        Icon(Icons.Filled.QueueMusic, null, tint = primaryColor, modifier = Modifier.size(54.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Текст для «${track.title}» пока не загружен", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { onSearchLyricsByQuery(null) },
+                            shape = RoundedCornerShape(50),
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                        ) {
+                            Icon(Icons.Filled.CloudDownload, null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Найти в базе LRCLIB", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        state = lyricListState,
+                        verticalArrangement = Arrangement.spacedBy(18.dp),
+                        contentPadding = PaddingValues(vertical = 110.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        itemsIndexed(lyricsList) { idx, line ->
+                            val isCurrent = idx == activeLyricIndex
+                            val distance = abs(idx - activeLyricIndex)
+                            val targetScale by animateFloatAsState(
+                                targetValue = if (isCurrent) 1.05f else 0.94f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+                                label = "LyricScale"
+                            )
+                            val blurDp = if (isCurrent) 0.dp else (distance * 1.5f).coerceAtMost(5f).dp
+
+                            Text(
+                                text = line.text,
+                                color = if (isCurrent) Color.White else Color.White.copy(0.38f),
+                                fontSize = if (isCurrent) 25.sp else 19.sp,
+                                fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                                lineHeight = 30.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .scale(targetScale)
+                                    .blur(blurDp)
+                                    .clickable { onSeek(line.timeMs) }
+                                    .padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ПРЯМОУГОЛЬНЫЙ МИНИ-МИНИ-ПЛЕЕР СНИЗУ (КАК В APPLE MUSIC)
+            val safeDur = track.durationMs.coerceAtLeast(1L)
+            val progressFraction = (currentPosMs.toFloat() / safeDur.toFloat()).coerceIn(0f, 1f)
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color(0xFF1A1A26).copy(0.92f))
+                    .border(1.dp, Color.White.copy(0.16f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(primaryColor.copy(0.25f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (metadata.coverArt != null) {
+                                Image(metadata.coverArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            } else {
+                                Icon(Icons.Filled.MusicNote, null, tint = primaryColor)
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(track.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${track.artist} • ${formatMillis(currentPosMs)}", color = Color.White.copy(0.65f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(onClick = onPrev, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.FastRewind, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        }
+                        IconButton(
+                            onClick = onPlayPause,
+                            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(primaryColor)
+                        ) {
+                            Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(24.dp))
+                        }
+                        IconButton(onClick = onNext, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.FastForward, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { progressFraction },
+                    color = primaryColor,
+                    trackColor = Color.White.copy(0.18f),
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50))
+                )
             }
         }
     }
 }
 
 // -----------------------------------------------------
-// НАСТРОЙКИ С РАБОЧИМ РАЗДЕЛОМ «МЕДИАТЕКА» (ФИЛЬТР 5–60 СЕК И ВЫБОР ПАПОК)
+// ИЗОГНУТЫЙ (ДУГОВОЙ) ТАЙМЕР СНА ДО 120 МИНУТ
 // -----------------------------------------------------
+@Composable
+fun CurvedSleepTimerDialog(
+    currentMinutes: Int,
+    stopAfterCurrentTrack: Boolean,
+    cardShape: Shape,
+    primaryColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    onDismiss: () -> Unit,
+    onApplyTimer: (Int, Boolean) -> Unit
+) {
+    var selectedMinutes by remember { mutableStateOf(currentMinutes.coerceIn(0, 120)) }
+    var stopEndTrack by remember { mutableStateOf(stopAfterCurrentTrack) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = cardShape,
+        containerColor = surfaceColor,
+        title = {
+            Text("Таймер сна", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Проведи по дуге, чтобы выбрать время (максимум 120 минут)",
+                    color = textColor.copy(0.65f),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Изогнутый дуговой слайдер (от 135° до 405°, размах 270°)
+                Box(
+                    modifier = Modifier.size(220.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectDragGestures { change, _ ->
+                                    change.consume()
+                                    val cx = size.width / 2f
+                                    val cy = size.height / 2f
+                                    val dx = change.position.x - cx
+                                    val dy = change.position.y - cy
+                                    var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+                                    if (angle < 0f) angle += 360f
+                                    val rel = (angle - 135f + 360f) % 360f
+                                    val clamped = if (rel > 315f) 0f else rel.coerceIn(0f, 270f)
+                                    selectedMinutes = ((clamped / 270f) * 120f).roundToInt().coerceIn(0, 120)
+                                }
+                            }
+                    ) {
+                        val strokePx = 18.dp.toPx()
+                        val arcDiameter = size.minDimension - strokePx * 2
+                        val topLeft = Offset((size.width - arcDiameter) / 2f, (size.height - arcDiameter) / 2f)
+                        val sweep = (selectedMinutes / 120f) * 270f
+
+                        drawArc(
+                            color = textColor.copy(alpha = 0.14f),
+                            startAngle = 135f,
+                            sweepAngle = 270f,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = Size(arcDiameter, arcDiameter),
+                            style = Stroke(width = strokePx, cap = StrokeCap.Round)
+                        )
+
+                        drawArc(
+                            color = primaryColor,
+                            startAngle = 135f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = Size(arcDiameter, arcDiameter),
+                            style = Stroke(width = strokePx, cap = StrokeCap.Round)
+                        )
+
+                        val thumbRad = Math.toRadians((135f + sweep).toDouble())
+                        val radius = arcDiameter / 2f
+                        val thumbX = size.width / 2f + (radius * cos(thumbRad)).toFloat()
+                        val thumbY = size.height / 2f + (radius * sin(thumbRad)).toFloat()
+
+                        drawCircle(
+                            color = Color.White,
+                            radius = 12.dp.toPx(),
+                            center = Offset(thumbX, thumbY)
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Bedtime, null, tint = primaryColor, modifier = Modifier.size(26.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (selectedMinutes == 0) "Выкл" else "$selectedMinutes мин",
+                            color = textColor,
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                // Быстрые кнопки выбора
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    listOf(0, 15, 30, 60, 120).forEach { preset ->
+                        ExpressiveFilterPill(
+                            text = if (preset == 0) "Выкл" else "${preset}м",
+                            selected = selectedMinutes == preset,
+                            primaryColor = primaryColor,
+                            textColor = textColor
+                        ) {
+                            selectedMinutes = preset
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(textColor.copy(0.06f))
+                        .clickable { stopEndTrack = !stopEndTrack }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Остановить после конца трека", color = textColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Switch(
+                        checked = stopEndTrack,
+                        onCheckedChange = { stopEndTrack = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onApplyTimer(selectedMinutes, stopEndTrack) },
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+            ) {
+                Text("Запустить", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена", color = textColor.copy(0.7f))
+            }
+        }
+    )
+}
+
 @Composable
 fun SettingsCategoryItem(icon: ImageVector, title: String, subtitle: String, textColor: Color, primaryColor: Color, onClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 12.dp, horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1050,9 +1382,7 @@ fun SettingsAndThemeEditor(
     var customGreen by remember { mutableStateOf(((themeConfig.primaryHex shr 8) and 0xFF).toFloat()) }
     var customBlue by remember { mutableStateOf((themeConfig.primaryHex and 0xFF).toFloat()) }
 
-    val foldersMap = remember(allRawTracks) {
-        allRawTracks.groupBy { it.folderPath }
-    }
+    val foldersMap = remember(allRawTracks) { allRawTracks.groupBy { it.folderPath } }
 
     AnimatedContent(targetState = activeSettingsMenu, label = "") { menu ->
         when (menu) {
@@ -1088,9 +1418,7 @@ fun SettingsAndThemeEditor(
                         }
                     }
                     item {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)
-                        ) {
+                        Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Пропускать короткие аудио", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                 Text("Короче $minDurationSec сек", color = primaryColor, fontWeight = FontWeight.Black, fontSize = 14.sp)
@@ -1114,12 +1442,7 @@ fun SettingsAndThemeEditor(
                         val folderName = list.firstOrNull()?.folderName ?: folderPath
                         val isEnabled = !excludedFolders.contains(folderPath)
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(cardShape)
-                                .background(surfaceColor)
-                                .clickable { onToggleFolderExclusion(folderPath) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onToggleFolderExclusion(folderPath) }.padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -1127,11 +1450,7 @@ fun SettingsAndThemeEditor(
                                 Text(folderName, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text("$folderPath • ${list.size} аудио", color = textColor.copy(0.55f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            Switch(
-                                checked = isEnabled,
-                                onCheckedChange = { onToggleFolderExclusion(folderPath) },
-                                colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
-                            )
+                            Switch(checked = isEnabled, onCheckedChange = { onToggleFolderExclusion(folderPath) }, colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor))
                         }
                     }
                     item { Spacer(modifier = Modifier.height(40.dp)) }
@@ -1163,9 +1482,7 @@ fun SettingsAndThemeEditor(
                                 Box(modifier = Modifier.size(46.dp).clip(expressiveShape).background(Color(hex)).border(if (themeConfig.primaryHex == hex) 3.dp else 0.dp, textColor, expressiveShape).clickable { onThemeChange(themeConfig.copy(themeName = name, primaryHex = hex)) })
                             }
                             item {
-                                ExpressiveFilterPill("Свой RGB", showCustomColorPicker, primaryColor, textColor) {
-                                    showCustomColorPicker = !showCustomColorPicker
-                                }
+                                ExpressiveFilterPill("Свой RGB", showCustomColorPicker, primaryColor, textColor) { showCustomColorPicker = !showCustomColorPicker }
                             }
                         }
                         AnimatedVisibility(visible = showCustomColorPicker) {
@@ -1209,9 +1526,6 @@ fun SettingsAndThemeEditor(
     }
 }
 
-// -----------------------------------------------------
-// ДИАЛОГ РЕДАКТИРОВАНИЯ СВЕДЕНИЙ О ТРЕКЕ (НАЗВАНИЕ, АРТИСТ, АЛЬБОМ, ОБЛОЖКА, ТЕКСТ .LRC)
-// -----------------------------------------------------
 @Composable
 fun EditTrackTagsDialog(
     track: Track,
@@ -1244,92 +1558,28 @@ fun EditTrackTagsDialog(
         containerColor = surfaceColor,
         title = { Text("Изменить сведения о треке", color = textColor, fontWeight = FontWeight.Black, fontSize = 18.sp) },
         text = {
-            LazyColumn(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
-            ) {
+            LazyColumn(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
                 item {
-                    Box(
-                        modifier = Modifier
-                            .size(96.dp)
-                            .clip(expressiveShape)
-                            .background(primaryColor.copy(0.2f))
-                            .border(1.dp, primaryColor, expressiveShape)
-                            .clickable { onPickCoverClick() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (coverBitmap != null) {
-                            Image(coverBitmap.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        } else {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Filled.AddPhotoAlternate, null, tint = primaryColor)
-                                Text("Обложка", color = textColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                    Box(modifier = Modifier.size(96.dp).clip(expressiveShape).background(primaryColor.copy(0.2f)).border(1.dp, primaryColor, expressiveShape).clickable { onPickCoverClick() }, contentAlignment = Alignment.Center) {
+                        if (coverBitmap != null) Image(coverBitmap.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.AddPhotoAlternate, null, tint = primaryColor); Text("Обложка", color = textColor, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                     }
                 }
-                item {
-                    OutlinedTextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        label = { Text("Название трека") },
-                        singleLine = true,
-                        shape = cardShape,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                item {
-                    OutlinedTextField(
-                        value = artist,
-                        onValueChange = { artist = it },
-                        label = { Text("Исполнитель") },
-                        singleLine = true,
-                        shape = cardShape,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                item {
-                    OutlinedTextField(
-                        value = album,
-                        onValueChange = { album = it },
-                        label = { Text("Альбом") },
-                        singleLine = true,
-                        shape = cardShape,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                item {
-                    OutlinedTextField(
-                        value = lyrics,
-                        onValueChange = { lyrics = it },
-                        label = { Text("Текст песни или .lrc ([00:12.00]Строка)") },
-                        minLines = 3,
-                        maxLines = 6,
-                        shape = cardShape,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                item { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Название трека") }, singleLine = true, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(value = artist, onValueChange = { artist = it }, label = { Text("Исполнитель") }, singleLine = true, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(value = album, onValueChange = { album = it }, label = { Text("Альбом") }, singleLine = true, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(value = lyrics, onValueChange = { lyrics = it }, label = { Text("Текст песни или .lrc ([00:12.00]Строка)") }, minLines = 3, maxLines = 6, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
             }
         },
         confirmButton = {
-            Button(
-                onClick = { onSave(title.trim(), artist.trim(), album.trim(), effectiveCoverUri, lyrics.ifBlank { null }) },
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
-            ) {
+            Button(onClick = { onSave(title.trim(), artist.trim(), album.trim(), effectiveCoverUri, lyrics.ifBlank { null }) }, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) {
                 Text("Сохранить", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена", color = textColor.copy(0.7f)) }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = textColor.copy(0.7f)) } }
     )
 }
 
-// -----------------------------------------------------
-// УПРАВЛЕНИЕ ОЧЕРЕДЬЮ (ПЕРЕМЕЩЕНИЕ ВВЕРХ/ВНИЗ, УДАЛЕНИЕ ИЗ ОЧЕРЕДИ)
-// -----------------------------------------------------
 @Composable
 fun QueueManagementSheet(
     queue: List<Track>,
@@ -1344,17 +1594,7 @@ fun QueueManagementSheet(
     onRemoveTrack: (Int) -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.6f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
-                .navigationBarsPadding()
-                .clip(cardShape)
-                .background(surfaceColor)
-                .border(1.dp, textColor.copy(0.15f), cardShape)
-                .clickable(enabled = false, onClick = {})
-                .padding(18.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.15f), cardShape).clickable(enabled = false, onClick = {}).padding(18.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Очередь воспроизведения (${queue.size})", color = textColor, fontWeight = FontWeight.Black, fontSize = 18.sp)
                 IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, null, tint = textColor) }
@@ -1364,12 +1604,7 @@ fun QueueManagementSheet(
                 itemsIndexed(queue) { index, trk ->
                     val isCurrent = currentTrack?.id == trk.id
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isCurrent) primaryColor.copy(0.2f) else textColor.copy(0.05f))
-                            .clickable { onSelectTrack(trk) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (isCurrent) primaryColor.copy(0.2f) else textColor.copy(0.05f)).clickable { onSelectTrack(trk) }.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -1378,19 +1613,9 @@ fun QueueManagementSheet(
                             Text(trk.artist, color = textColor.copy(0.6f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Row {
-                            if (index > 0) {
-                                IconButton(onClick = { onMoveTrack(index, index - 1) }, modifier = Modifier.size(28.dp)) {
-                                    Icon(Icons.Filled.KeyboardArrowUp, null, tint = textColor.copy(0.75f))
-                                }
-                            }
-                            if (index < queue.size - 1) {
-                                IconButton(onClick = { onMoveTrack(index, index + 1) }, modifier = Modifier.size(28.dp)) {
-                                    Icon(Icons.Filled.KeyboardArrowDown, null, tint = textColor.copy(0.75f))
-                                }
-                            }
-                            IconButton(onClick = { onRemoveTrack(index) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Filled.DeleteOutline, null, tint = textColor.copy(0.6f), modifier = Modifier.size(18.dp))
-                            }
+                            if (index > 0) IconButton(onClick = { onMoveTrack(index, index - 1) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowUp, null, tint = textColor.copy(0.75f)) }
+                            if (index < queue.size - 1) IconButton(onClick = { onMoveTrack(index, index + 1) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowDown, null, tint = textColor.copy(0.75f)) }
+                            IconButton(onClick = { onRemoveTrack(index) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.DeleteOutline, null, tint = textColor.copy(0.6f), modifier = Modifier.size(18.dp)) }
                         }
                     }
                 }
