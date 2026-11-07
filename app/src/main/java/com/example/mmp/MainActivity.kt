@@ -80,6 +80,12 @@ fun MMPApp() {
     var currentTrackRecorded20Sec by remember { mutableStateOf(false) }
     var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds_total", 0)) }
 
+    // НОВАЯ ЛОГИКА: ОЧЕРЕДЬ
+    var currentQueue by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var openedPlaylist by remember { mutableStateOf<PlaylistItem?>(null) }
+    var openedArtist by remember { mutableStateOf<String?>(null) }
+    var openedAlbum by remember { mutableStateOf<String?>(null) }
+
     fun syncMediaService(track: Track?, meta: DetailedMetadata, playing: Boolean) {
         if (track == null) return
         PlayerBridge.currentTitle = track.title; PlayerBridge.currentArtist = track.artist; PlayerBridge.currentBitmap = meta.coverArt; PlayerBridge.isPlaying = playing
@@ -89,16 +95,19 @@ fun MMPApp() {
         } catch (_: Throwable) {}
     }
 
-    fun playTrack(track: Track) {
+    fun playTrack(track: Track, newQueue: List<Track>? = null) {
+        if (newQueue != null) currentQueue = newQueue
+        else if (currentQueue.isEmpty()) currentQueue = deviceTracks
+
         try {
             isPlaying = false; mediaPlayer.reset(); mediaPlayer.setDataSource(context, track.uri); mediaPlayer.prepare(); mediaPlayer.start()
             currentTrack = track; currentPositionMs = 0L; currentTrackPlayedSeconds = 0; currentTrackRecorded20Sec = false; isPlaying = true
             scope.launch { val meta = extractTrackMetadata(context, track); currentMetadata = meta; syncMediaService(track, meta, true) }
             mediaPlayer.setOnCompletionListener {
-                val idx = deviceTracks.indexOfFirst { it.id == track.id }
-                if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1]) else { isPlaying = false; syncMediaService(currentTrack, currentMetadata, false) }
+                val idx = currentQueue.indexOfFirst { it.id == track.id }
+                if (idx != -1 && idx + 1 < currentQueue.size) playTrack(currentQueue[idx + 1]) else { isPlaying = false; syncMediaService(currentTrack, currentMetadata, false) }
             }
-        } catch (e: Throwable) { isPlaying = false; Toast.makeText(context, "Не удалось воспроизвести файл", Toast.LENGTH_SHORT).show() }
+        } catch (e: Throwable) { isPlaying = false; Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show() }
     }
 
     fun togglePlayPause() {
@@ -112,8 +121,8 @@ fun MMPApp() {
 
     SideEffect {
         PlayerBridge.onPlayPause = { togglePlayPause() }
-        PlayerBridge.onNext = { currentTrack?.let { cur -> val idx = deviceTracks.indexOfFirst { it.id == cur.id }; if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1]) } }
-        PlayerBridge.onPrev = { currentTrack?.let { cur -> val idx = deviceTracks.indexOfFirst { it.id == cur.id }; if (idx > 0) playTrack(deviceTracks[idx - 1]) } }
+        PlayerBridge.onNext = { currentTrack?.let { cur -> val idx = currentQueue.indexOfFirst { it.id == cur.id }; if (idx != -1 && idx + 1 < currentQueue.size) playTrack(currentQueue[idx + 1]) } }
+        PlayerBridge.onPrev = { currentTrack?.let { cur -> val idx = currentQueue.indexOfFirst { it.id == cur.id }; if (idx > 0) playTrack(currentQueue[idx - 1]) } }
     }
 
     LaunchedEffect(isPlaying, currentTrack) {
@@ -186,37 +195,44 @@ fun MMPApp() {
     }
 
     MaterialTheme(colorScheme = if (isLightMode) lightColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor) else darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)) {
-        // Z-INDEX FIX: Box wraps EVERYTHING
         Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
             
-            // 1. Блюр фона
             Box(modifier = Modifier.fillMaxSize().blur(themeConfig.blurIntensity.dp * 3)) {
                 Box(modifier = Modifier.size(280.dp).offset((-50).dp, 40.dp).clip(CircleShape).background(primaryColor.copy(if (isLightMode) 0.18f else 0.28f)))
                 Box(modifier = Modifier.size(320.dp).align(Alignment.BottomEnd).offset(60.dp, (-80).dp).clip(CircleShape).background(secondaryColor.copy(if (isLightMode) 0.14f else 0.22f)))
             }
 
-            // 2. Основные экраны (Главная / Медиатека)
             Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = 162.dp)) {
                 AnimatedContent(targetState = selectedBottomTab, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) }, label = "") { tab ->
                     when (tab) {
                         0 -> HomeScreen(deviceTracks, recentTracks, artistSecondsAllTime, trackPlaysAllTime, dailyStats, listenedSecondsTotal / 60, firstListenDate, hasAudioPermission, isBatteryIgnored, cardShape, expressiveShape, themeConfig, primaryColor, textColor, surfaceColor, { permissionLauncher.launch(audioPermission) }, { requestIgnoreBatteryOptimizations() }, { themeConfig = it; StorageHelper.saveTheme(prefs, it) }, { playTrack(it) }, { trackToAddToPlaylist = it }, { exportLauncher.launch("${themeConfig.themeName}.mmpui") }, { importLauncher.launch(arrayOf("*/*")) })
-                        1 -> LibraryScreen(deviceTracks, playlists, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, bgColor, { scope.launch { deviceTracks = scanDeviceMusic(context) } }, { playTrack(it) }, { trackToAddToPlaylist = it })
+                        1 -> LibraryScreen(
+                            tracks = deviceTracks, playlists = playlists, cardShape = cardShape, expressiveShape = expressiveShape, primaryColor = primaryColor, textColor = textColor, surfaceColor = surfaceColor, bgColor = bgColor,
+                            currentTrack = currentTrack, isPlaying = isPlaying, openedPlaylist = openedPlaylist, openedArtist = openedArtist, openedAlbum = openedAlbum,
+                            onRescanClick = { scope.launch { deviceTracks = scanDeviceMusic(context) } },
+                            onPlayContext = { track, queue -> playTrack(track, queue) },
+                            onTogglePlay = { togglePlayPause() },
+                            onAddTrackToPlaylistClick = { trackToAddToPlaylist = it },
+                            onSetOpenedPlaylist = { openedPlaylist = it }, onSetOpenedArtist = { openedArtist = it }, onSetOpenedAlbum = { openedAlbum = it }
+                        )
                     }
                 }
             }
 
-            // 3. Мини-плеер и док-панель
             Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 MiniPlayerBar(currentTrack, currentMetadata, isPlaying, currentPositionMs, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, { if (currentTrack != null) showFullPlayerSheet = true }, { togglePlayPause() })
-                FrostedDockBar(selectedBottomTab, cardShape, primaryColor, textColor, surfaceColor, { selectedBottomTab = it }, { showCreateStep1Sheet = true })
+                
+                // СКРЫВАЕМ ПАНЕЛЬ ЕСЛИ ОТКРЫТ АЛЬБОМ ИЛИ ПЛЕЙЛИСТ ИЛИ АРТИСТ
+                val hideDock = openedPlaylist != null || openedArtist != null || openedAlbum != null
+                if (!hideDock) {
+                    FrostedDockBar(selectedBottomTab, cardShape, primaryColor, textColor, surfaceColor, { selectedBottomTab = it }, { showCreateStep1Sheet = true })
+                }
             }
 
-            // 4. Полноэкранный плеер (ВЫШЕ дока, НИЖЕ модальных окон)
             AnimatedVisibility(visible = showFullPlayerSheet && currentTrack != null, enter = slideInVertically(initialOffsetY = { it }, animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(250)), exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(260)) + fadeOut(tween(200))) {
-                currentTrack?.let { activeTrack -> FullScreenPlayerOverlay(activeTrack, currentMetadata, isPlaying, currentPositionMs, expressiveShape, primaryColor, secondaryColor, bgColor, textColor, { showFullPlayerSheet = false }, { trackToAddToPlaylist = activeTrack }, { togglePlayPause() }, { newPos -> try { mediaPlayer.seekTo(newPos.toInt()); currentPositionMs = newPos } catch (_: Throwable) {} }, { val idx = deviceTracks.indexOfFirst { it.id == activeTrack.id }; if (idx != -1 && idx + 1 < deviceTracks.size) playTrack(deviceTracks[idx + 1]) }, { val idx = deviceTracks.indexOfFirst { it.id == activeTrack.id }; if (idx > 0) playTrack(deviceTracks[idx - 1]) }) }
+                currentTrack?.let { activeTrack -> FullScreenPlayerOverlay(activeTrack, currentMetadata, isPlaying, currentPositionMs, expressiveShape, primaryColor, secondaryColor, bgColor, textColor, { showFullPlayerSheet = false }, { trackToAddToPlaylist = activeTrack }, { togglePlayPause() }, { newPos -> try { mediaPlayer.seekTo(newPos.toInt()); currentPositionMs = newPos } catch (_: Throwable) {} }, { val idx = currentQueue.indexOfFirst { it.id == activeTrack.id }; if (idx != -1 && idx + 1 < currentQueue.size) playTrack(currentQueue[idx + 1]) }, { val idx = currentQueue.indexOfFirst { it.id == activeTrack.id }; if (idx > 0) playTrack(currentQueue[idx - 1]) }) }
             }
 
-            // 5. МОДАЛЬНЫЕ ОКНА (НА САМОМ ВЕРХУ - Z-INDEX FIX)
             AnimatedVisibility(visible = trackToAddToPlaylist != null, enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)), exit = fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 2 })) {
                 trackToAddToPlaylist?.let { targetTrack ->
                     AddToPlaylistSheet(targetTrack, playlists, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, { trackToAddToPlaylist = null }, { selectedPl ->
