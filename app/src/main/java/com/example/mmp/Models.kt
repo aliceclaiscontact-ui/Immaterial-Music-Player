@@ -83,7 +83,10 @@ fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
 }
 
 enum class ThemeMode(val label: String) {
-    DARK("Тёмная"), LIGHT("Светлая"), ADAPTIVE_DARK("Adaptive (Тёмная)"), ADAPTIVE_LIGHT("Adaptive (Светлая)")
+    DARK("Тёмная"),
+    LIGHT("Светлая"),
+    ADAPTIVE("Adaptive (Тёмная)"),
+    ADAPTIVE_LIGHT("Adaptive (Светлая)")
 }
 
 data class MMPThemeConfig(

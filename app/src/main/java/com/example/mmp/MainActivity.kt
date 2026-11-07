@@ -168,11 +168,11 @@ fun MMPApp() {
     val cardShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toCardShape() }
     val expressiveShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toExpressiveShape() }
     val effectivePrimaryHex = remember(themeConfig.themeMode, themeConfig.primaryHex, currentMetadata.coverArt) {
-        if (themeConfig.themeMode == ThemeMode.ADAPTIVE && currentMetadata.coverArt != null) extractDominantColor(currentMetadata.coverArt, themeConfig.primaryHex) else themeConfig.primaryHex
+        if ((themeConfig.themeMode == ThemeMode.ADAPTIVE || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT) && currentMetadata.coverArt != null) extractDominantColor(currentMetadata.coverArt, themeConfig.primaryHex) else themeConfig.primaryHex
     }
     val primaryColor by animateColorAsState(Color(effectivePrimaryHex), tween(500), label = "")
     val secondaryColor = Color(themeConfig.secondaryHex)
-    val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT
+    val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
     val bgColor by animateColorAsState(if (isLightMode) Color(0xFFF6F5FA) else Color(0xFF0D0D12), tween(400), label = "")
     val textColor = if (isLightMode) Color(0xFF14141C) else Color.White
     val surfaceColor = if (isLightMode) Color(0xFFE9E7F2) else Color(0xFF1A1A26)
@@ -210,7 +210,7 @@ fun MMPApp() {
                             tracks = deviceTracks, playlists = playlists, cardShape = cardShape, expressiveShape = expressiveShape, primaryColor = primaryColor, textColor = textColor, surfaceColor = surfaceColor, bgColor = bgColor,
                             currentTrack = currentTrack, isPlaying = isPlaying, openedPlaylist = openedPlaylist, openedArtist = openedArtist, openedAlbum = openedAlbum,
                             onRescanClick = { scope.launch { deviceTracks = scanDeviceMusic(context) } },
-                            onPlayContext = { track, queue -> playTrack(track, queue) },
+                            onPlayContext = { queue, track -> playTrack(track, queue) },
                             onTogglePlay = { togglePlayPause() },
                             onAddTrackToPlaylistClick = { trackToAddToPlaylist = it },
                             onSetOpenedPlaylist = { openedPlaylist = it }, onSetOpenedArtist = { openedArtist = it }, onSetOpenedAlbum = { openedAlbum = it }

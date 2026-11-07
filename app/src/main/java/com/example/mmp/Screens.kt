@@ -336,6 +336,7 @@ fun LibraryScreen(
     onSetOpenedPlaylist: (PlaylistItem?) -> Unit, onSetOpenedArtist: (String?) -> Unit, onSetOpenedAlbum: (String?) -> Unit
 ) {
     var category by remember { mutableStateOf(0) }
+    val context = LocalContext.current
     
     if (openedArtist != null) {
         val artistTracks = run { tracks.filter { it.artist.equals(openedArtist, ignoreCase = true) } }
@@ -382,7 +383,7 @@ fun LibraryScreen(
                     else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
                         items(playlists) { pl ->
                             Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedPlaylist(pl) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                val bmp = run { if (pl.coverUri != null) { try { LocalContext.current.contentResolver.openInputStream(Uri.parse(pl.coverUri))?.use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null } } else null }
+                                val bmp = run { if (pl.coverUri != null) { try { context.contentResolver.openInputStream(Uri.parse(pl.coverUri))?.use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null } } else null }
                                 Box(modifier = Modifier.size(54.dp).clip(expressiveShape).background(primaryColor.copy(0.25f)), contentAlignment = Alignment.Center) {
                                     if (bmp != null) Image(bmp.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                     else PlaylistGridCover(pl.trackIds, tracks, primaryColor, 54)
@@ -538,7 +539,7 @@ fun SettingsAndThemeEditor(themeConfig: MMPThemeConfig, isBatteryIgnored: Boolea
         } else if (menu == "UI") {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 item { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp)) { IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBack, null, tint = textColor) }; Text("Интерфейс", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp) } }
-                item { Text("Режим оформления", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold); LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 8.dp)) { items(ThemeMode.entries) { mode -> ExpressiveFilterPill(mode.label, themeConfig.themeMode == mode, primaryColor, textColor) { onThemeChange(themeConfig.copy(themeMode = mode, bgHex = if (mode == ThemeMode.LIGHT) 0xFFF7F5FA else 0xFF0D0D12)) } } } }
+                item { Text("Режим оформления", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold); LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 8.dp)) { items(ThemeMode.entries) { mode -> ExpressiveFilterPill(mode.label, themeConfig.themeMode == mode, primaryColor, textColor) { onThemeChange(themeConfig.copy(themeMode = mode, bgHex = if (mode == ThemeMode.LIGHT || mode == ThemeMode.ADAPTIVE_LIGHT) 0xFFF7F5FA else 0xFF0D0D12)) } } } }
                 item { Text("Акцентный цвет (RGB)", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold); LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) { items(presets) { (name, hex) -> Box(modifier = Modifier.size(46.dp).clip(expressiveShape).background(Color(hex)).border(if (themeConfig.primaryHex == hex) 3.dp else 0.dp, textColor, expressiveShape).clickable { onThemeChange(themeConfig.copy(themeName = name, primaryHex = hex)) }) } } }
                 item { Text("Форма MD3 Expressive", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold); LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 8.dp)) { items(ShapeStyle.entries) { style -> ExpressiveFilterPill(style.label, themeConfig.shapeStyle == style, primaryColor, textColor) { onThemeChange(themeConfig.copy(shapeStyle = style)) } } } }
                 item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 16.dp)) { Button(onClick = onExport, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Экспорт .mmpui", color = Color.Black, fontWeight = FontWeight.Bold) }; OutlinedButton(onClick = onImport, shape = RoundedCornerShape(50)) { Text("Импорт", color = textColor) } } }
