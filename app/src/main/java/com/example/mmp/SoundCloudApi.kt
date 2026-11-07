@@ -5,9 +5,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.HttpURLConnection
+import java.net.ServerSocket
+import java.net.Socket
 import java.net.URL
 import java.net.URLEncoder
+import kotlin.concurrent.thread
 
 data class SoundCloudTrack(
     val id: Long,
@@ -17,6 +22,77 @@ data class SoundCloudTrack(
     val durationMs: Long,
     val streamProgressiveUrl: String?
 )
+
+object SoundCloudStreamProxy {
+    private var serverSocket: ServerSocket? = null
+    private var proxyPort: Int = 0
+    private var currentHlsSegments: List<String> = emptyList()
+
+    fun getPort(): Int {
+        if (serverSocket == null || serverSocket!!.isClosed) {
+            serverSocket = ServerSocket(0)
+            proxyPort = serverSocket!!.localPort
+            thread(name = "MMP-Proxy-Loop", isDaemon = true) {
+                while (!serverSocket!!.isClosed) {
+                    try {
+                        val client = serverSocket!!.accept()
+                        handleClient(client)
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+        return proxyPort
+    }
+
+    fun setSourceSegments(segments: List<String>) {
+        currentHlsSegments = segments
+    }
+
+    private fun handleClient(client: Socket) {
+        thread(name = "MMP-Client-Worker", isDaemon = true) {
+            try {
+                val input = client.getInputStream()
+                val output = client.getOutputStream()
+
+                // Читаем HTTP GET запрос плеера
+                val buffer = ByteArray(2048)
+                input.read(buffer)
+
+                // Отправляем HTTP 200 заголовок потока
+                val headers = "HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: audio/mpeg\r\n" +
+                        "Connection: close\r\n\r\n"
+                output.write(headers.toByteArray())
+                output.flush()
+
+                // Непрерывно качаем и сшиваем HLS кусочки в плеер
+                val segments = currentHlsSegments
+                for (segUrl in segments) {
+                    if (client.isClosed) break
+                    try {
+                        val u = URL(segUrl)
+                        val conn = (u.openConnection() as HttpURLConnection).apply {
+                            connectTimeout = 6000
+                            readTimeout = 6000
+                            setRequestProperty("User-Agent", "Mozilla/5.0")
+                        }
+                        conn.inputStream.use { stream ->
+                            val chunkBuf = ByteArray(8192)
+                            var bytesRead: Int
+                            while (stream.read(chunkBuf).also { bytesRead = it } != -1) {
+                                output.write(chunkBuf, 0, bytesRead)
+                            }
+                            output.flush()
+                        }
+                    } catch (_: Throwable) {}
+                }
+                client.close()
+            } catch (_: Throwable) {
+                try { client.close() } catch (_: Throwable) {}
+            }
+        }
+    }
+}
 
 object SoundCloudClient {
     private const val FALLBACK_CLIENT_ID = "2t9loNQH90kzJcsMmUEoeMGjVCvAc2hw"
@@ -60,7 +136,7 @@ object SoundCloudClient {
         FALLBACK_CLIENT_ID
     }
 
-    suspend fun searchTracks(query: String, limit: Int = 25): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
+    suspend fun searchTracks(query: String, limit: Int = 30): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
         val cid = getOrExtractClientId()
         val encodedQ = URLEncoder.encode(query, "UTF-8")
         val endpoint = "https://api-v2.soundcloud.com/search/tracks?q=$encodedQ&client_id=$cid&limit=$limit"
@@ -85,18 +161,17 @@ object SoundCloudClient {
                 val transcodings = media?.optJSONArray("transcodings")
                 var selectedStreamUrl: String? = null
 
-                if (transcodings != null) {
-                    // Ищем strictly progressive MP3
+                if (transcodings != null && transcodings.length() > 0) {
+                    // Берём любой доступный поток (и progressive, и HLS) — прокси воспроизведёт всё
                     for (t in 0 until transcodings.length()) {
                         val tr = transcodings.getJSONObject(t)
                         val format = tr.optJSONObject("format")?.optString("protocol", "") ?: ""
-                        val mime = tr.optString("mime_type", "")
-                        if (format == "progressive" || mime.contains("mpeg")) {
+                        if (format == "progressive") {
                             selectedStreamUrl = tr.optString("url", "")
-                            if (selectedStreamUrl.isNotBlank()) break
+                            break
                         }
                     }
-                    if (selectedStreamUrl.isNullOrBlank() && transcodings.length() > 0) {
+                    if (selectedStreamUrl.isNullOrBlank()) {
                         selectedStreamUrl = transcodings.getJSONObject(0).optString("url", "")
                     }
                 }
@@ -119,17 +194,25 @@ object SoundCloudClient {
         try {
             val resp = httpGet(target)
             val json = JSONObject(resp)
-            var direct = json.optString("url", "")
+            val direct = json.optString("url", "")
             if (direct.isBlank()) return@withContext null
 
-            // Разворачиваем HLS в первый чанк, если нет progressive
-            if (direct.contains(".m3u8")) {
-                val m3u8Content = httpGet(direct)
-                val subUrl = m3u8Content.lines().firstOrNull { it.startsWith("http") && !it.startsWith("#") }
-                if (!subUrl.isNullOrBlank()) {
-                    direct = subUrl
-                }
+            // Если прямой MP3 — отдаём сразу
+            if (!direct.contains(".m3u8")) {
+                return@withContext direct
             }
+
+            // Если HLS — вытаскиваем все чанки и проксируем через внутренний порт
+            val m3u8 = httpGet(direct)
+            val lines = m3u8.lines()
+            val segments = lines.map { it.trim() }.filter { it.startsWith("http") && !it.startsWith("#") }
+
+            if (segments.isNotEmpty()) {
+                val port = SoundCloudStreamProxy.getPort()
+                SoundCloudStreamProxy.setSourceSegments(segments)
+                return@withContext "http://127.0.0.1:$port/stream.mp3"
+            }
+
             direct
         } catch (_: Throwable) {
             null
