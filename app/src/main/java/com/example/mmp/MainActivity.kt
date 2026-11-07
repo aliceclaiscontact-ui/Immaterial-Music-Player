@@ -50,16 +50,16 @@ fun MMPApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
-    val firstListenDate = remember { StorageHelper.getOrInitFirstListenDate(prefs) }
+    val firstLaunchDate = remember { StorageHelper.getOrInitFirstLaunchDate(context, prefs) }
     var themeConfig by remember { mutableStateOf(StorageHelper.loadTheme(prefs)) }
     var rawDeviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var minDurationSec by remember { mutableStateOf(StorageHelper.loadMinDurationSec(prefs)) }
     var excludedFolders by remember { mutableStateOf(StorageHelper.loadExcludedFolders(prefs)) }
     var tagOverrides by remember { mutableStateOf(StorageHelper.loadTagOverrides(prefs)) }
 
-    var recentTrackIds by remember { mutableStateOf(StorageHelper.loadRecentIds(prefs)) }
     var playlists by remember { mutableStateOf(StorageHelper.loadPlaylists(prefs)) }
     val artistSecondsAllTime = remember { mutableStateMapOf<String, Int>().apply { putAll(StorageHelper.loadArtistSeconds(prefs)) } }
+    val trackPlaysAllTime = remember { mutableStateMapOf<Long, Int>().apply { putAll(StorageHelper.loadTrackPlayCounts(prefs)) } }
     val dailyStats = remember { mutableStateMapOf<String, DailyStatRecord>().apply { putAll(StorageHelper.loadDailyStats(prefs)) } }
     val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
     var isBatteryIgnored by remember { mutableStateOf(prefs.getBoolean("battery_opt_dismissed", false) || powerManager.isIgnoringBatteryOptimizations(context.packageName)) }
@@ -71,28 +71,12 @@ fun MMPApp() {
         if (granted) scope.launch { rawDeviceTracks = scanDeviceMusic(context) }
     }
 
-    LaunchedEffect(Unit) {
-        val granted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
-        hasAudioPermission = granted
-        if (granted) rawDeviceTracks = scanDeviceMusic(context) else permissionLauncher.launch(audioPermission)
-    }
-
-    val deviceTracks = remember(rawDeviceTracks, minDurationSec, excludedFolders, tagOverrides) {
-        rawDeviceTracks
-            .filter { it.durationMs >= minDurationSec * 1000L && !excludedFolders.contains(it.folderPath) }
-            .map { applyOverridesToTrack(it, tagOverrides) }
-    }
-
-    val recentTracks = remember(deviceTracks, recentTrackIds) {
-        val trackMap = deviceTracks.associateBy { it.id }
-        recentTrackIds.mapNotNull { trackMap[it] }
-    }
-
     val mediaPlayer = remember { MediaPlayer() }
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
     var isPlaying by remember { mutableStateOf(false) }
+    var isMediaPlayerPrepared by remember { mutableStateOf(false) }
     var wasPlayingBeforeFocusLoss by remember { mutableStateOf(false) }
     var currentPositionMs by remember { mutableStateOf(0L) }
     var showFullPlayerSheet by remember { mutableStateOf(false) }
@@ -107,7 +91,6 @@ fun MMPApp() {
     var trackToEditTags by remember { mutableStateOf<Track?>(null) }
     var pendingTagCoverUri by remember { mutableStateOf<String?>(null) }
 
-    // Таймер сна и статус онлайн-поиска текстов
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     var sleepTimerRemainingSec by remember { mutableStateOf(0) }
     var stopAfterCurrentTrack by remember { mutableStateOf(false) }
@@ -116,6 +99,34 @@ fun MMPApp() {
     var openedPlaylist by remember { mutableStateOf<PlaylistItem?>(null) }
     var openedArtist by remember { mutableStateOf<String?>(null) }
     var openedAlbum by remember { mutableStateOf<String?>(null) }
+
+    val deviceTracks = remember(rawDeviceTracks, minDurationSec, excludedFolders, tagOverrides) {
+        rawDeviceTracks
+            .filter { it.durationMs >= minDurationSec * 1000L && !excludedFolders.contains(it.folderPath) }
+            .map { applyOverridesToTrack(it, tagOverrides) }
+    }
+
+    // При старте приложения сканируем музыку и восстанавливаем последний игравший трек в мини-плеер
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
+        hasAudioPermission = granted
+        if (granted) {
+            val scanned = scanDeviceMusic(context)
+            rawDeviceTracks = scanned
+        } else {
+            permissionLauncher.launch(audioPermission)
+        }
+
+        val lastSaved = StorageHelper.loadLastPlayedState(prefs)
+        if (lastSaved != null && currentTrack == null) {
+            val (savedTrack, savedPos) = lastSaved
+            val updatedTrack = applyOverridesToTrack(savedTrack, tagOverrides)
+            currentTrack = updatedTrack
+            currentPositionMs = savedPos
+            isMediaPlayerPrepared = false
+            currentMetadata = extractTrackMetadata(context, updatedTrack)
+        }
+    }
 
     fun syncMediaService(track: Track?, meta: DetailedMetadata, playing: Boolean) {
         if (track == null) return
@@ -130,7 +141,6 @@ fun MMPApp() {
         } catch (_: Throwable) {}
     }
 
-    // Аудиофокус (пауза при звонке и приглушение при уведомлениях)
     val focusChangeListener = remember {
         AudioManager.OnAudioFocusChangeListener { focusChange ->
             when (focusChange) {
@@ -153,7 +163,7 @@ fun MMPApp() {
                 }
                 AudioManager.AUDIOFOCUS_GAIN -> {
                     try { mediaPlayer.setVolume(1.0f, 1.0f) } catch (_: Throwable) {}
-                    if (wasPlayingBeforeFocusLoss && currentTrack != null) {
+                    if (wasPlayingBeforeFocusLoss && currentTrack != null && isMediaPlayerPrepared) {
                         wasPlayingBeforeFocusLoss = false
                         try {
                             mediaPlayer.start()
@@ -186,7 +196,6 @@ fun MMPApp() {
         } catch (_: Throwable) { true }
     }
 
-    // Автопауза при отключении наушников / Bluetooth
     DisposableEffect(context) {
         val noisyReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -203,7 +212,6 @@ fun MMPApp() {
         }
     }
 
-    // Поиск текста в базе LRCLIB и сохранение в память
     fun searchAndCacheOnlineLyrics(track: Track, customQuery: String? = null, showFeedback: Boolean = false) {
         scope.launch {
             isSearchingOnlineLyrics = true
@@ -235,7 +243,7 @@ fun MMPApp() {
         }
     }
 
-    fun playTrack(track: Track, newQueue: List<Track>? = null) {
+    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L) {
         if (newQueue != null) {
             currentQueue = if (isShuffleEnabled) {
                 listOf(track) + newQueue.filter { it.id != track.id }.shuffled()
@@ -249,22 +257,37 @@ fun MMPApp() {
         try {
             requestAudioFocus()
             isPlaying = false
-            mediaPlayer.reset()
-            mediaPlayer.setDataSource(context, track.uri)
-            mediaPlayer.prepare()
-            mediaPlayer.setVolume(1.0f, 1.0f)
-            mediaPlayer.start()
+            isMediaPlayerPrepared = false
             currentTrack = track
-            currentPositionMs = 0L
+            currentPositionMs = startOffsetMs
             currentTrackPlayedSeconds = 0
             currentTrackRecorded20Sec = false
-            isPlaying = true
+            StorageHelper.saveLastPlayedState(prefs, track, startOffsetMs)
+
+            mediaPlayer.reset()
+            if (track.uri.scheme?.startsWith("http") == true) {
+                mediaPlayer.setDataSource(track.uri.toString())
+            } else {
+                mediaPlayer.setDataSource(context, track.uri)
+            }
+
+            mediaPlayer.setOnPreparedListener { mp ->
+                isMediaPlayerPrepared = true
+                if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
+                    try { mp.seekTo(startOffsetMs.toInt()) } catch (_: Throwable) {}
+                }
+                mp.setVolume(1.0f, 1.0f)
+                mp.start()
+                isPlaying = true
+                syncMediaService(track, currentMetadata, true)
+            }
+
+            mediaPlayer.prepareAsync()
 
             scope.launch {
                 val meta = extractTrackMetadata(context, track)
                 currentMetadata = meta
                 syncMediaService(track, meta, true)
-                // Если у трека ещё нет локального текста — автоматически ищем в базе LRCLIB
                 if (meta.lyrics.isEmpty()) {
                     searchAndCacheOnlineLyrics(track, null, false)
                 }
@@ -331,7 +354,7 @@ fun MMPApp() {
 
     fun playPrevTrack() {
         val cur = currentTrack ?: return
-        if (currentPositionMs > 4000L) {
+        if (currentPositionMs > 4000L && isMediaPlayerPrepared) {
             try {
                 mediaPlayer.seekTo(0)
                 currentPositionMs = 0L
@@ -350,9 +373,14 @@ fun MMPApp() {
     fun togglePlayPause() {
         val cur = currentTrack
         if (cur != null) {
+            if (!isMediaPlayerPrepared) {
+                playTrack(cur, null, currentPositionMs)
+                return
+            }
             if (isPlaying) {
                 try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
                 isPlaying = false
+                StorageHelper.saveLastPlayedState(prefs, cur, currentPositionMs)
                 syncMediaService(cur, currentMetadata, false)
             } else {
                 try {
@@ -402,7 +430,6 @@ fun MMPApp() {
         PlayerBridge.onPrev = { playPrevTrack() }
     }
 
-    // Обратный отсчёт таймера сна
     LaunchedEffect(sleepTimerRemainingSec) {
         if (sleepTimerRemainingSec > 0) {
             delay(1000L)
@@ -419,7 +446,7 @@ fun MMPApp() {
     LaunchedEffect(isPlaying, currentTrack) {
         while (isPlaying && currentTrack != null) {
             delay(1000L)
-            if (try { mediaPlayer.isPlaying } catch (_: Throwable) { false }) {
+            if (isMediaPlayerPrepared && (try { mediaPlayer.isPlaying } catch (_: Throwable) { false })) {
                 currentPositionMs = try { mediaPlayer.currentPosition.toLong() } catch (_: Throwable) { currentPositionMs }
                 listenedSecondsTotal += 1
                 currentTrackPlayedSeconds += 1
@@ -429,16 +456,20 @@ fun MMPApp() {
                 val todayRec = dailyStats.getOrPut(today) { DailyStatRecord() }
                 todayRec.artistSeconds[trk.artist] = (todayRec.artistSeconds[trk.artist] ?: 0) + 1
                 dailyStats[today] = todayRec
+
                 if (currentTrackPlayedSeconds >= 20 && !currentTrackRecorded20Sec) {
                     currentTrackRecorded20Sec = true
-                    val updatedRecent = (listOf(trk.id) + recentTrackIds.filter { it != trk.id }).take(5)
-                    recentTrackIds = updatedRecent
-                    StorageHelper.saveRecentIds(prefs, updatedRecent)
+                    trackPlaysAllTime[trk.id] = (trackPlaysAllTime[trk.id] ?: 0) + 1
+                    todayRec.trackPlays[trk.id] = (todayRec.trackPlays[trk.id] ?: 0) + 1
+                    dailyStats[today] = todayRec
+                    StorageHelper.saveTrackPlayCounts(prefs, trackPlaysAllTime.toMap())
                 }
+
                 if (listenedSecondsTotal % 5 == 0) {
                     prefs.edit().putInt("listened_seconds_total", listenedSecondsTotal).apply()
                     StorageHelper.saveArtistSeconds(prefs, artistSecondsAllTime.toMap())
                     StorageHelper.saveDailyStats(prefs, dailyStats.toMap())
+                    StorageHelper.saveLastPlayedState(prefs, trk, currentPositionMs)
                 }
             }
         }
@@ -505,18 +536,19 @@ fun MMPApp() {
                 Box(modifier = Modifier.size(320.dp).align(Alignment.BottomEnd).offset(60.dp, (-80).dp).clip(CircleShape).background(secondaryColor.copy(if (isLightMode) 0.12f else 0.18f)))
             }
 
-            val hideDock = openedPlaylist != null || openedArtist != null || openedAlbum != null
+            val hideDock = selectedBottomTab == 1 && (openedPlaylist != null || openedArtist != null || openedAlbum != null)
 
             Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = if (hideDock) 92.dp else 162.dp)) {
                 AnimatedContent(targetState = selectedBottomTab, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) }, label = "") { tab ->
                     when (tab) {
                         0 -> HomeScreen(
                             allRawTracks = rawDeviceTracks,
-                            recentTracks = recentTracks,
+                            deviceTracks = deviceTracks,
+                            trackPlaysAllTime = trackPlaysAllTime,
                             artistSecondsAllTime = artistSecondsAllTime,
                             dailyStats = dailyStats,
                             listenedMinutesTotal = listenedSecondsTotal / 60,
-                            firstListenDate = firstListenDate,
+                            firstLaunchDate = firstLaunchDate,
                             hasPermission = hasAudioPermission,
                             isBatteryIgnored = isBatteryIgnored,
                             minDurationSec = minDurationSec,
@@ -567,6 +599,26 @@ fun MMPApp() {
                             onSetOpenedPlaylist = { openedPlaylist = it },
                             onSetOpenedArtist = { openedArtist = it },
                             onSetOpenedAlbum = { openedAlbum = it }
+                        )
+                        2 -> SoundCloudScreen(
+                            cardShape = cardShape,
+                            expressiveShape = expressiveShape,
+                            primaryColor = primaryColor,
+                            textColor = textColor,
+                            surfaceColor = surfaceColor,
+                            onPlaySoundCloudTrack = { scTrack ->
+                                val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
+                                Toast.makeText(context, "Подключаемся к SoundCloud: ${scTrack.title}...", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
+                                    if (directUrl != null) {
+                                        val playable = SoundCloudClient.toTrack(scTrack, directUrl)
+                                        playTrack(playable, listOf(playable))
+                                    } else {
+                                        Toast.makeText(context, "Не удалось получить аудиопоток SoundCloud", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
                         )
                     }
                 }
@@ -631,7 +683,12 @@ fun MMPApp() {
                         onToggleShuffle = { toggleShuffle() },
                         onToggleRepeat = { cycleRepeatMode() },
                         onPlayPause = { togglePlayPause() },
-                        onSeek = { newPos -> try { mediaPlayer.seekTo(newPos.toInt()); currentPositionMs = newPos } catch (_: Throwable) {} },
+                        onSeek = { newPos ->
+                            currentPositionMs = newPos
+                            if (isMediaPlayerPrepared) {
+                                try { mediaPlayer.seekTo(newPos.toInt()) } catch (_: Throwable) {}
+                            }
+                        },
                         onNext = { playNextTrack() },
                         onPrev = { playPrevTrack() }
                     )

@@ -21,6 +21,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -235,14 +238,16 @@ data class DailyStatRecord(
 )
 
 object CoverCache {
-    private val cache = object : LruCache<Long, Bitmap>(45) {}
+    private val cache = object : LruCache<Long, Bitmap>(50) {}
     fun get(id: Long): Bitmap? = cache.get(id)
-    fun put(id: Long, bmp: Bitmap) { cache.put(id, bmp) }
+    fun put(id: Long, bmp: Bitmap) {
+        if (!bmp.isRecycled) cache.put(id, bmp)
+    }
     fun remove(id: Long) { cache.remove(id) }
 }
 
 fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
-    if (bitmap == null) return fallbackHex
+    if (bitmap == null || bitmap.isRecycled) return fallbackHex
     return try {
         val scaled = Bitmap.createScaledBitmap(bitmap, 16, 16, false)
         var rSum = 0L; var gSum = 0L; var bSum = 0L; var count = 0L
@@ -290,7 +295,6 @@ fun parseLrcText(raw: String): List<LyricLine> {
         }
     }
     if (lines.isNotEmpty()) return lines.sortedBy { it.timeMs }
-    // Если текст без таймкодов — распределяем строчки равномерно по 4 секунды
     return rawLines.map { it.trim() }.filter { it.isNotEmpty() }.mapIndexed { idx, s ->
         LyricLine(idx * 4000L, s)
     }
@@ -299,12 +303,73 @@ fun parseLrcText(raw: String): List<LyricLine> {
 object StorageHelper {
     fun getTodayDateString(): String = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
 
-    fun getOrInitFirstListenDate(prefs: SharedPreferences): String {
-        val existing = prefs.getString("first_listen_date", null)
-        if (existing != null) return existing
-        val today = getTodayDateString()
-        prefs.edit().putString("first_listen_date", today).apply()
-        return today
+    // Дата первого запуска приложения (берёт реальную дату установки или фиксирует первый старт)
+    fun getOrInitFirstLaunchDate(context: Context, prefs: SharedPreferences): String {
+        val existing = prefs.getString("first_launch_date_v2", null)
+        if (!existing.isNullOrBlank()) return existing
+
+        val dateStr = try {
+            val pkgInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            val installTime = pkgInfo.firstInstallTime
+            if (installTime > 0L) {
+                SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(installTime))
+            } else {
+                getTodayDateString()
+            }
+        } catch (_: Throwable) {
+            getTodayDateString()
+        }
+        prefs.edit().putString("first_launch_date_v2", dateStr).apply()
+        return dateStr
+    }
+
+    // Сохранение и восстановление последнего игравшего трека и позиции
+    fun saveLastPlayedState(prefs: SharedPreferences, track: Track, positionMs: Long) {
+        val obj = JSONObject().apply {
+            put("id", track.id)
+            put("uri", track.uri.toString())
+            put("title", track.title)
+            put("artist", track.artist)
+            put("album", track.album)
+            put("durationMs", track.durationMs)
+            put("mimeType", track.mimeType)
+            put("sizeBytes", track.sizeBytes)
+            put("filePath", track.filePath)
+            put("folderPath", track.folderPath)
+            put("folderName", track.folderName)
+            if (track.customCoverUri != null) put("customCoverUri", track.customCoverUri)
+            if (track.customLyrics != null) put("customLyrics", track.customLyrics)
+            put("positionMs", positionMs)
+        }
+        prefs.edit().putString("last_played_track_state", obj.toString()).apply()
+    }
+
+    fun loadLastPlayedState(prefs: SharedPreferences): Pair<Track, Long>? {
+        val raw = prefs.getString("last_played_track_state", null) ?: return null
+        return try {
+            val obj = JSONObject(raw)
+            val id = obj.getLong("id")
+            val uriStr = obj.getString("uri")
+            val trk = Track(
+                id = id,
+                uri = Uri.parse(uriStr),
+                title = obj.optString("title", "Неизвестный трек"),
+                artist = obj.optString("artist", "Неизвестный исполнитель"),
+                album = obj.optString("album", "Без альбома"),
+                durationMs = obj.optLong("durationMs", 0L),
+                mimeType = obj.optString("mimeType", "audio/mpeg"),
+                sizeBytes = obj.optLong("sizeBytes", 0L),
+                filePath = obj.optString("filePath", ""),
+                folderPath = obj.optString("folderPath", ""),
+                folderName = obj.optString("folderName", "Память"),
+                customCoverUri = obj.optString("customCoverUri", "").ifBlank { null },
+                customLyrics = obj.optString("customLyrics", "").ifBlank { null }
+            )
+            val pos = obj.optLong("positionMs", 0L)
+            trk to pos
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     fun saveTheme(prefs: SharedPreferences, config: MMPThemeConfig) {
@@ -370,17 +435,21 @@ object StorageHelper {
         } catch (_: Exception) { emptyMap() }
     }
 
-    fun saveRecentIds(prefs: SharedPreferences, ids: List<Long>) {
-        val arr = JSONArray()
-        ids.take(5).forEach { arr.put(it) }
-        prefs.edit().putString("recent_track_ids", arr.toString()).apply()
+    fun saveTrackPlayCounts(prefs: SharedPreferences, counts: Map<Long, Int>) {
+        val obj = JSONObject()
+        counts.forEach { (k, v) -> obj.put(k.toString(), v) }
+        prefs.edit().putString("track_play_counts_all", obj.toString()).apply()
     }
 
-    fun loadRecentIds(prefs: SharedPreferences): List<Long> {
+    fun loadTrackPlayCounts(prefs: SharedPreferences): Map<Long, Int> {
         return try {
-            val arr = JSONArray(prefs.getString("recent_track_ids", "[]") ?: "[]")
-            (0 until arr.length()).map { arr.getLong(it) }
-        } catch (e: Exception) { emptyList() }
+            val obj = JSONObject(prefs.getString("track_play_counts_all", "{}") ?: "{}")
+            val map = mutableMapOf<Long, Int>()
+            obj.keys().forEach { key ->
+                key.toLongOrNull()?.let { id -> map[id] = obj.optInt(key, 0) }
+            }
+            map
+        } catch (_: Exception) { emptyMap() }
     }
 
     fun saveArtistSeconds(prefs: SharedPreferences, secondsMap: Map<String, Int>) {
@@ -538,16 +607,28 @@ fun decodeSampledBitmap(bytes: ByteArray, reqMaxSide: Int = 512): Bitmap? {
     } catch (_: Throwable) { null }
 }
 
-suspend fun loadTrackThumbnail(context: Context, track: Track): Bitmap? = withContext(Dispatchers.IO) {
-    if (track.customCoverUri != null) {
-        try {
-            context.contentResolver.openInputStream(Uri.parse(track.customCoverUri))?.use { stream ->
-                val bytes = stream.readBytes()
-                decodeSampledBitmap(bytes, 256)?.let { return@withContext it }
+suspend fun loadBitmapFromUriOrHttp(context: Context, uriStr: String, maxSide: Int = 512): Bitmap? = withContext(Dispatchers.IO) {
+    try {
+        if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
+            val conn = (URL(uriStr).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
             }
-        } catch (_: Throwable) {}
+            conn.inputStream.use { s -> decodeSampledBitmap(s.readBytes(), maxSide) }
+        } else {
+            context.contentResolver.openInputStream(Uri.parse(uriStr))?.use { s ->
+                decodeSampledBitmap(s.readBytes(), maxSide)
+            }
+        }
+    } catch (_: Throwable) { null }
+}
+
+suspend fun loadTrackThumbnail(context: Context, track: Track): Bitmap? = withContext(Dispatchers.IO) {
+    CoverCache.get(track.id)?.takeIf { !it.isRecycled }?.let { return@withContext it }
+    if (track.customCoverUri != null) {
+        loadBitmapFromUriOrHttp(context, track.customCoverUri, 256)?.also { CoverCache.put(track.id, it) }?.let { return@withContext it }
     }
-    CoverCache.get(track.id)?.let { return@withContext it }
+    if (track.uri.scheme?.startsWith("http") == true) return@withContext null
     val retriever = MediaMetadataRetriever()
     try {
         retriever.setDataSource(context, track.uri)
@@ -556,24 +637,24 @@ suspend fun loadTrackThumbnail(context: Context, track: Track): Bitmap? = withCo
 }
 
 suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetadata = withContext(Dispatchers.IO) {
+    val isHttpStream = track.uri.scheme?.startsWith("http") == true
     val retriever = MediaMetadataRetriever()
     try {
-        retriever.setDataSource(context, track.uri)
         var bitmap: Bitmap? = null
         if (track.customCoverUri != null) {
-            try {
-                context.contentResolver.openInputStream(Uri.parse(track.customCoverUri))?.use { s ->
-                    bitmap = decodeSampledBitmap(s.readBytes(), 600)
-                }
-            } catch (_: Throwable) {}
-        }
-        if (bitmap == null) {
-            val artBytes = retriever.embeddedPicture
-            bitmap = if (artBytes != null) decodeSampledBitmap(artBytes, 600)?.also { CoverCache.put(track.id, it) } else null
+            bitmap = loadBitmapFromUriOrHttp(context, track.customCoverUri, 600)?.also { CoverCache.put(track.id, it) }
         }
 
-        val rawBitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L
-        val sampleRateRaw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toLongOrNull() else null
+        if (!isHttpStream) {
+            retriever.setDataSource(context, track.uri)
+            if (bitmap == null) {
+                val artBytes = retriever.embeddedPicture
+                bitmap = if (artBytes != null) decodeSampledBitmap(artBytes, 600)?.also { CoverCache.put(track.id, it) } else null
+            }
+        }
+
+        val rawBitrate = if (!isHttpStream) retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L else 128000L
+        val sampleRateRaw = if (!isHttpStream && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toLongOrNull() else null
         val sampleRateStr = if (sampleRateRaw != null && sampleRateRaw > 0) String.format(Locale.US, "%.1f kHz", sampleRateRaw / 1000f) else "44.1 kHz"
 
         val durationSec = (track.durationMs / 1000L).coerceAtLeast(1L)
@@ -585,12 +666,14 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
         }
         if (kbps < 96L && calculatedFromSizeKbps >= 128L) kbps = calculatedFromSizeKbps
         val format = when {
+            isHttpStream -> "SC STREAM"
             track.mimeType.contains("flac", true) -> "FLAC"
             track.mimeType.contains("wav", true) -> "WAV"
             track.mimeType.contains("mp4", true) || track.mimeType.contains("m4a", true) -> "M4A"
             else -> "MP3"
         }
         val cleanKbps = when {
+            isHttpStream -> 128L
             format == "MP3" && kbps in 290L..340L -> 320L
             format == "MP3" && kbps in 235L..275L -> 256L
             format == "MP3" && kbps in 175L..210L -> 192L
@@ -599,7 +682,6 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
             else -> kbps
         }
 
-        // Чтение синхронизированного текста (.lrc или кастомного текста)
         var lyricsList = emptyList<LyricLine>()
         if (!track.customLyrics.isNullOrBlank()) {
             lyricsList = parseLrcText(track.customLyrics)
@@ -622,7 +704,6 @@ fun formatMillis(ms: Long): String {
     return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }
 
-// Поиск синхронизированных текстов песен в онлайн-базе LRCLIB
 suspend fun fetchLyricsFromLrclib(
     artist: String,
     title: String,
@@ -636,18 +717,17 @@ suspend fun fetchLyricsFromLrclib(
             .trim()
         val cleanArtist = if (artist.contains("Неизвестный", ignoreCase = true)) "" else artist.trim()
 
-        // 1. Точный запрос по артисту и названию, если не задан ручной поисковый запрос
         if (customQuery.isNullOrBlank() && cleanArtist.isNotEmpty()) {
             val durSec = (durationMs / 1000L).coerceAtLeast(1L)
             val exactUrl = "https://lrclib.net/api/get?artist_name=" +
-                java.net.URLEncoder.encode(cleanArtist, "UTF-8") +
-                "&track_name=" + java.net.URLEncoder.encode(cleanTitle, "UTF-8") +
+                URLEncoder.encode(cleanArtist, "UTF-8") +
+                "&track_name=" + URLEncoder.encode(cleanTitle, "UTF-8") +
                 "&duration=$durSec"
-            val conn = (java.net.URL(exactUrl).openConnection() as java.net.HttpURLConnection).apply {
+            val conn = (URL(exactUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 6000
                 readTimeout = 6000
-                setRequestProperty("User-Agent", "MMP-Android/2.5 (https://github.com/aliceclaiscontact-ui)")
+                setRequestProperty("User-Agent", "MMP-Android/2.6 (https://github.com/aliceclaiscontact-ui)")
             }
             if (conn.responseCode == 200) {
                 val resp = conn.inputStream.bufferedReader().use { it.readText() }
@@ -659,14 +739,13 @@ suspend fun fetchLyricsFromLrclib(
             }
         }
 
-        // 2. Поиск по базе LRCLIB (/api/search)
-        val query = customQuery?.takeIf { it.isNotBlank() } ?: "$cleanArtist$cleanTitle".trim()
-        val searchUrl = "https://lrclib.net/api/search?q=" + java.net.URLEncoder.encode(query, "UTF-8")
-        val searchConn = (java.net.URL(searchUrl).openConnection() as java.net.HttpURLConnection).apply {
+        val query = customQuery?.takeIf { it.isNotBlank() } ?: "$cleanArtist $cleanTitle".trim()
+        val searchUrl = "https://lrclib.net/api/search?q=" + URLEncoder.encode(query, "UTF-8")
+        val searchConn = (URL(searchUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 6000
             readTimeout = 6000
-            setRequestProperty("User-Agent", "MMP-Android/2.5 (https://github.com/aliceclaiscontact-ui)")
+            setRequestProperty("User-Agent", "MMP-Android/2.6 (https://github.com/aliceclaiscontact-ui)")
         }
         if (searchConn.responseCode == 200) {
             val resp = searchConn.inputStream.bufferedReader().use { it.readText() }
