@@ -19,26 +19,28 @@ data class SoundCloudTrack(
 )
 
 object SoundCloudClient {
+    // Актуальный рабочий fallback client_id на случай задержки парсинга бандлов
+    private const val FALLBACK_CLIENT_ID = "2t9loNQH90kzJcsMmUEoeMGjVCvAc2hw"
     private var cachedClientId: String? = null
-    private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+    private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     private fun httpGet(urlStr: String): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 8000
-            readTimeout = 8000
+            connectTimeout = 7000
+            readTimeout = 7000
             setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8")
+            setRequestProperty("Accept", "*/*")
         }
         return conn.inputStream.bufferedReader().use { it.readText() }
     }
 
-    suspend fun getOrExtractClientId(): String? = withContext(Dispatchers.IO) {
-        if (!cachedClientId.isNullOrBlank()) return@withContext cachedClientId
+    suspend fun getOrExtractClientId(): String = withContext(Dispatchers.IO) {
+        if (!cachedClientId.isNullOrBlank()) return@withContext cachedClientId!!
 
         try {
-            val html = httpGet("https://soundcloud.com")
-            val scriptRegex = Regex("""https://a-v2\.sndcdn\.com/assets/[^"']+\.js""")
+            val html = httpGet("https://soundcloud.com/discover")
+            val scriptRegex = Regex("""https://[a-zA-Z0-9\-_.]+\.sndcdn\.com/assets/[^"']+\.js""")
             val scriptUrls = scriptRegex.findAll(html).map { it.value }.toList()
 
             val clientRegex = Regex("""client_id[:=]["']([a-zA-Z0-9]{32})["']""")
@@ -54,11 +56,13 @@ object SoundCloudClient {
                 } catch (_: Throwable) {}
             }
         } catch (_: Throwable) {}
-        null
+
+        cachedClientId = FALLBACK_CLIENT_ID
+        FALLBACK_CLIENT_ID
     }
 
     suspend fun searchTracks(query: String, limit: Int = 25): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
-        val cid = getOrExtractClientId() ?: return@withContext emptyList()
+        val cid = getOrExtractClientId()
         val encodedQ = URLEncoder.encode(query, "UTF-8")
         val endpoint = "https://api-v2.soundcloud.com/search/tracks?q=$encodedQ&client_id=$cid&limit=$limit"
 
@@ -80,24 +84,26 @@ object SoundCloudClient {
 
                 val media = item.optJSONObject("media")
                 val transcodings = media?.optJSONArray("transcodings")
-                var progressiveUrl: String? = null
+                var targetStreamUrl: String? = null
 
                 if (transcodings != null) {
                     for (t in 0 until transcodings.length()) {
                         val tr = transcodings.getJSONObject(t)
-                        val format = tr.optJSONObject("format")?.optString("protocol", "")
-                        if (format == "progressive") {
-                            progressiveUrl = tr.optString("url", null)
-                            break
+                        val format = tr.optJSONObject("format")?.optString("protocol", "") ?: ""
+                        val mime = tr.optString("mime_type", "")
+                        // Приоритет progressive MP3
+                        if (format == "progressive" || mime.contains("mpeg")) {
+                            targetStreamUrl = tr.optString("url", "")
+                            if (!targetStreamUrl.isNullOrBlank()) break
                         }
                     }
-                    if (progressiveUrl == null && transcodings.length() > 0) {
-                        progressiveUrl = transcodings.getJSONObject(0).optString("url", null)
+                    if (targetStreamUrl.isNullOrBlank() && transcodings.length() > 0) {
+                        targetStreamUrl = transcodings.getJSONObject(0).optString("url", "")
                     }
                 }
 
-                if (id != 0L && progressiveUrl != null) {
-                    result.add(SoundCloudTrack(id, title, artist, artwork, duration, progressiveUrl))
+                if (id != 0L && !targetStreamUrl.isNullOrBlank()) {
+                    result.add(SoundCloudTrack(id, title, artist, artwork, duration, targetStreamUrl))
                 }
             }
             result
@@ -107,14 +113,15 @@ object SoundCloudClient {
     }
 
     suspend fun resolveStreamUrl(streamMetaUrl: String): String? = withContext(Dispatchers.IO) {
-        val cid = getOrExtractClientId() ?: return@withContext null
+        val cid = getOrExtractClientId()
         val sep = if (streamMetaUrl.contains("?")) "&" else "?"
         val target = "$streamMetaUrl${sep}client_id=$cid"
 
         try {
             val resp = httpGet(target)
             val json = JSONObject(resp)
-            json.optString("url", null)
+            val direct = json.optString("url", "")
+            if (direct.isNotBlank()) direct else null
         } catch (_: Throwable) {
             null
         }
