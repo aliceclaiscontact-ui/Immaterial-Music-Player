@@ -9,9 +9,7 @@ import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -73,7 +71,7 @@ fun MMPApp() {
         if (granted) scope.launch { rawDeviceTracks = scanDeviceMusic(context) }
     }
 
-    val player = remember { ExoPlayer.Builder(context).build() }
+    val mediaPlayer = remember { MediaPlayer() }
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
@@ -148,27 +146,27 @@ fun MMPApp() {
             when (focusChange) {
                 AudioManager.AUDIOFOCUS_LOSS -> {
                     wasPlayingBeforeFocusLoss = false
-                    try { if (player.isPlaying) player.pause() } catch (_: Throwable) {}
+                    try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
                     isPlaying = false
                     syncMediaService(currentTrack, currentMetadata, false)
                 }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                     if (isPlaying) {
                         wasPlayingBeforeFocusLoss = true
-                        try { if (player.isPlaying) player.pause() } catch (_: Throwable) {}
+                        try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
                         isPlaying = false
                         syncMediaService(currentTrack, currentMetadata, false)
                     }
                 }
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    try { player.volume = 0.25f } catch (_: Throwable) {}
+                    try { mediaPlayer.setVolume(0.25f, 0.25f) } catch (_: Throwable) {}
                 }
                 AudioManager.AUDIOFOCUS_GAIN -> {
-                    try { player.volume = 1.0f } catch (_: Throwable) {}
+                    try { mediaPlayer.setVolume(1.0f, 1.0f) } catch (_: Throwable) {}
                     if (wasPlayingBeforeFocusLoss && currentTrack != null && isMediaPlayerPrepared) {
                         wasPlayingBeforeFocusLoss = false
                         try {
-                            player.play()
+                            mediaPlayer.start()
                             isPlaying = true
                             syncMediaService(currentTrack, currentMetadata, true)
                         } catch (_: Throwable) {}
@@ -202,7 +200,7 @@ fun MMPApp() {
         val noisyReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && isPlaying) {
-                    try { if (player.isPlaying) player.pause() } catch (_: Throwable) {}
+                    try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
                     isPlaying = false
                     syncMediaService(currentTrack, currentMetadata, false)
                 }
@@ -266,17 +264,39 @@ fun MMPApp() {
             currentTrackRecorded20Sec = false
             StorageHelper.saveLastPlayedState(prefs, track, startOffsetMs)
 
-            player.stop()
-            player.clearMediaItems()
-            val mediaItem = MediaItem.fromUri(track.uri)
-            player.setMediaItem(mediaItem)
-            if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
-                player.seekTo(startOffsetMs)
+            mediaPlayer.reset()
+            mediaPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
+            if (track.uri.scheme?.startsWith("http") == true) {
+                val headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                mediaPlayer.setDataSource(context, track.uri, headers)
+            } else {
+                mediaPlayer.setDataSource(context, track.uri)
             }
-            player.prepare()
-            player.play()
-            isMediaPlayerPrepared = true
-            isPlaying = true
+
+            mediaPlayer.setOnErrorListener { _, what, extra ->
+                isPlaying = false
+                isMediaPlayerPrepared = false
+                Toast.makeText(context, "Ошибка потока: $what / $extra", Toast.LENGTH_SHORT).show()
+                true
+            }
+
+            mediaPlayer.setOnPreparedListener { mp ->
+                isMediaPlayerPrepared = true
+                if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
+                    try { mp.seekTo(startOffsetMs.toInt()) } catch (_: Throwable) {}
+                }
+                mp.setVolume(1.0f, 1.0f)
+                mp.start()
+                isPlaying = true
+                syncMediaService(track, currentMetadata, true)
+            }
+
+            mediaPlayer.prepareAsync()
 
             scope.launch {
                 val meta = extractTrackMetadata(context, track)
@@ -287,49 +307,44 @@ fun MMPApp() {
                 }
             }
 
-                        player.addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_ENDED) {
-                        if (stopAfterCurrentTrack) {
-                            stopAfterCurrentTrack = false
-                            isPlaying = false
+            mediaPlayer.setOnCompletionListener {
+                try {
+                    if (stopAfterCurrentTrack) {
+                        stopAfterCurrentTrack = false
+                        isPlaying = false
+                        currentPositionMs = 0L
+                        try { mediaPlayer.seekTo(0) } catch (_: Throwable) {}
+                        syncMediaService(currentTrack, currentMetadata, false)
+                        return@setOnCompletionListener
+                    }
+
+                    when (repeatMode) {
+                        RepeatMode.ONE -> {
+                            mediaPlayer.seekTo(0)
+                            mediaPlayer.start()
                             currentPositionMs = 0L
-                            syncMediaService(currentTrack, currentMetadata, false)
-                            return
+                            isPlaying = true
                         }
-                        when (repeatMode) {
-                            RepeatMode.ONE -> {
-                                player.seekTo(0L)
-                                player.play()
+                        RepeatMode.ALL -> {
+                            val idx = currentQueue.indexOfFirst { it.id == track.id }
+                            if (idx != -1 && idx + 1 < currentQueue.size) {
+                                playTrack(currentQueue[idx + 1])
+                            } else if (currentQueue.isNotEmpty()) {
+                                playTrack(currentQueue.first())
+                            }
+                        }
+                        RepeatMode.OFF -> {
+                            val idx = currentQueue.indexOfFirst { it.id == track.id }
+                            if (idx != -1 && idx + 1 < currentQueue.size) {
+                                playTrack(currentQueue[idx + 1])
+                            } else {
+                                isPlaying = false
                                 currentPositionMs = 0L
-                                isPlaying = true
-                            }
-                            RepeatMode.ALL -> {
-                                val idx = currentQueue.indexOfFirst { it.id == track.id }
-                                if (idx != -1 && idx + 1 < currentQueue.size) {
-                                    playTrack(currentQueue[idx + 1])
-                                } else if (currentQueue.isNotEmpty()) {
-                                    playTrack(currentQueue.first())
-                                }
-                            }
-                            RepeatMode.OFF -> {
-                                val idx = currentQueue.indexOfFirst { it.id == track.id }
-                                if (idx != -1 && idx + 1 < currentQueue.size) {
-                                    playTrack(currentQueue[idx + 1])
-                                } else {
-                                    isPlaying = false
-                                    currentPositionMs = 0L
-                                    syncMediaService(currentTrack, currentMetadata, false)
-                                }
+                                try { mediaPlayer.seekTo(0) } catch (_: Throwable) {}
+                                syncMediaService(currentTrack, currentMetadata, false)
                             }
                         }
                     }
-                }
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    isPlaying = false
-                    Toast.makeText(context, "Ошибка потока: ${error.errorCodeName}", Toast.LENGTH_SHORT).show()
-                }
-            })
                 } catch (_: Throwable) {
                     isPlaying = false
                 }
@@ -355,7 +370,7 @@ fun MMPApp() {
         val cur = currentTrack ?: return
         if (currentPositionMs > 4000L && isMediaPlayerPrepared) {
             try {
-                player.seekTo(0L)
+                mediaPlayer.seekTo(0)
                 currentPositionMs = 0L
                 return
             } catch (_: Throwable) {}
@@ -377,7 +392,7 @@ fun MMPApp() {
                 return
             }
             if (isPlaying) {
-                try { if (player.isPlaying) player.pause() } catch (_: Throwable) {}
+                try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
                 isPlaying = false
                 StorageHelper.saveLastPlayedState(prefs, cur, currentPositionMs)
                 syncMediaService(cur, currentMetadata, false)
@@ -385,12 +400,12 @@ fun MMPApp() {
                 try {
                     requestAudioFocus()
                     val dur = cur.durationMs
-                    val pos = try { player.currentPosition } catch (_: Throwable) { 0L }
+                    val pos = try { mediaPlayer.currentPosition.toLong() } catch (_: Throwable) { 0L }
                     if (dur > 0 && pos >= dur - 800L) {
-                        player.seekTo(0L)
+                        mediaPlayer.seekTo(0)
                         currentPositionMs = 0L
                     }
-                    player.play()
+                    mediaPlayer.start()
                     isPlaying = true
                     syncMediaService(cur, currentMetadata, true)
                 } catch (_: Throwable) {
@@ -434,7 +449,7 @@ fun MMPApp() {
             delay(1000L)
             sleepTimerRemainingSec -= 1
             if (sleepTimerRemainingSec == 0 && isPlaying) {
-                try { if (player.isPlaying) player.pause() } catch (_: Throwable) {}
+                try { if (mediaPlayer.isPlaying) mediaPlayer.pause() } catch (_: Throwable) {}
                 isPlaying = false
                 syncMediaService(currentTrack, currentMetadata, false)
                 Toast.makeText(context, "Таймер сна остановил музыку", Toast.LENGTH_SHORT).show()
@@ -445,8 +460,8 @@ fun MMPApp() {
     LaunchedEffect(isPlaying, currentTrack) {
         while (isPlaying && currentTrack != null) {
             delay(1000L)
-            if (isMediaPlayerPrepared && (try { player.isPlaying } catch (_: Throwable) { false })) {
-                currentPositionMs = try { player.currentPosition } catch (_: Throwable) { currentPositionMs }
+            if (isMediaPlayerPrepared && (try { mediaPlayer.isPlaying } catch (_: Throwable) { false })) {
+                currentPositionMs = try { mediaPlayer.currentPosition.toLong() } catch (_: Throwable) { currentPositionMs }
                 listenedSecondsTotal += 1
                 currentTrackPlayedSeconds += 1
                 val trk = currentTrack!!
@@ -474,7 +489,7 @@ fun MMPApp() {
         }
     }
 
-    DisposableEffect(Unit) { onDispose { try { player.release() } catch (_: Throwable) {} } }
+    DisposableEffect(Unit) { onDispose { try { mediaPlayer.release() } catch (_: Throwable) {} } }
 
     var selectedBottomTab by remember { mutableStateOf(0) }
     var showCreateStep1Sheet by remember { mutableStateOf(false) }
@@ -689,7 +704,7 @@ fun MMPApp() {
                         onSeek = { newPos ->
                             currentPositionMs = newPos
                             if (isMediaPlayerPrepared) {
-                                try { player.seekTo(newPos) } catch (_: Throwable) {}
+                                try { mediaPlayer.seekTo(newPos.toInt()) } catch (_: Throwable) {}
                             }
                         },
                         onNext = { playNextTrack() },

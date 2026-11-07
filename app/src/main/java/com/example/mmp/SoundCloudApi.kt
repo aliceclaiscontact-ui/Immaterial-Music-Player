@@ -85,16 +85,18 @@ object SoundCloudClient {
                 val transcodings = media?.optJSONArray("transcodings")
                 var selectedStreamUrl: String? = null
 
-                if (transcodings != null && transcodings.length() > 0) {
+                if (transcodings != null) {
+                    // Ищем strictly progressive MP3
                     for (t in 0 until transcodings.length()) {
                         val tr = transcodings.getJSONObject(t)
                         val format = tr.optJSONObject("format")?.optString("protocol", "") ?: ""
-                        if (format == "progressive") {
+                        val mime = tr.optString("mime_type", "")
+                        if (format == "progressive" || mime.contains("mpeg")) {
                             selectedStreamUrl = tr.optString("url", "")
                             if (selectedStreamUrl.isNotBlank()) break
                         }
                     }
-                    if (selectedStreamUrl.isNullOrBlank()) {
+                    if (selectedStreamUrl.isNullOrBlank() && transcodings.length() > 0) {
                         selectedStreamUrl = transcodings.getJSONObject(0).optString("url", "")
                     }
                 }
@@ -117,8 +119,18 @@ object SoundCloudClient {
         try {
             val resp = httpGet(target)
             val json = JSONObject(resp)
-            val direct = json.optString("url", "")
-            if (direct.isNotBlank()) direct else null
+            var direct = json.optString("url", "")
+            if (direct.isBlank()) return@withContext null
+
+            // Разворачиваем HLS в первый чанк, если нет progressive
+            if (direct.contains(".m3u8")) {
+                val m3u8Content = httpGet(direct)
+                val subUrl = m3u8Content.lines().firstOrNull { it.startsWith("http") && !it.startsWith("#") }
+                if (!subUrl.isNullOrBlank()) {
+                    direct = subUrl
+                }
+            }
+            direct
         } catch (_: Throwable) {
             null
         }

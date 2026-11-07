@@ -37,9 +37,6 @@ android {
 }
 
 dependencies {
-    implementation("androidx.media3:media3-exoplayer:1.3.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
-    implementation("androidx.media3:media3-common:1.3.1")
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.compose.ui:ui:1.6.0")
