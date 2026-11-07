@@ -1,5 +1,7 @@
 package com.example.mmp
 
+import kotlinx.coroutines.launch
+
 import android.app.DatePickerDialog
 import android.content.Context
 import android.graphics.Bitmap
@@ -378,11 +380,9 @@ fun SoundCloudScreen(
     LaunchedEffect(Unit) {
         if (results.isEmpty()) {
             isSearching = true
-            scope.launch {
-                val found = SoundCloudClient.searchTracks("SOPHIE")
-                isSearching = false
-                results = found
-            }
+            val found = SoundCloudClient.searchTracks("SOPHIE")
+            isSearching = false
+            results = found
         }
     }
 
