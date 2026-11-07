@@ -42,7 +42,6 @@ enum class ShapeStyle(val label: String) {
     CYBER("Срезанный")
 }
 
-// Форма для карточек и контейнеров (исправлен баг с гигантскими овалами при выборе Пилюли)
 fun ShapeStyle.toCardShape(): Shape = when (this) {
     ShapeStyle.SQUIRCLE -> RoundedCornerShape(26.dp)
     ShapeStyle.PILL -> RoundedCornerShape(28.dp)
@@ -56,7 +55,6 @@ fun ShapeStyle.toCardShape(): Shape = when (this) {
     ShapeStyle.CYBER -> CutCornerShape(16.dp)
 }
 
-// Выразительные формы MD3 для обложек, кнопок Play и превью
 fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
     ShapeStyle.SQUIRCLE -> RoundedCornerShape(28.dp)
     ShapeStyle.PILL -> CircleShape
@@ -135,7 +133,7 @@ fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
 enum class ThemeMode(val label: String) {
     DARK("Тёмная"),
     LIGHT("Светлая"),
-    ADAPTIVE("Adaptive (Под обложку)")
+    ADAPTIVE("Adaptive")
 }
 
 data class MMPThemeConfig(
@@ -203,6 +201,7 @@ data class Track(
 data class DetailedMetadata(
     val coverArt: Bitmap? = null,
     val bitrateKbps: String = "—",
+    val sampleRateStr: String = "44.1 kHz",
     val formatName: String = "AUDIO"
 )
 
@@ -221,10 +220,7 @@ fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
     if (bitmap == null) return fallbackHex
     return try {
         val scaled = Bitmap.createScaledBitmap(bitmap, 16, 16, false)
-        var rSum = 0L
-        var gSum = 0L
-        var bSum = 0L
-        var count = 0L
+        var rSum = 0L; var gSum = 0L; var bSum = 0L; var count = 0L
         for (x in 0 until 16) {
             for (y in 0 until 16) {
                 val pixel = scaled.getPixel(x, y)
@@ -233,10 +229,7 @@ fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
                 val b = pixel and 0xFF
                 val brightness = (r + g + b) / 3
                 if (brightness in 35..235) {
-                    rSum += r
-                    gSum += g
-                    bSum += b
-                    count++
+                    rSum += r; gSum += g; bSum += b; count++
                 }
             }
         }
@@ -245,16 +238,11 @@ fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
         val gAvg = (gSum / count).coerceIn(60, 255)
         val bAvg = (bSum / count).coerceIn(60, 255)
         (0xFFL shl 24) or (rAvg shl 16) or (gAvg shl 8) or bAvg
-    } catch (_: Exception) {
-        fallbackHex
-    }
+    } catch (_: Exception) { fallbackHex }
 }
 
 object StorageHelper {
-    fun getTodayDateString(): String {
-        return SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
-    }
-
+    fun getTodayDateString(): String = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
     fun getOrInitFirstListenDate(prefs: SharedPreferences): String {
         val existing = prefs.getString("first_listen_date", null)
         if (existing != null) return existing
@@ -262,71 +250,47 @@ object StorageHelper {
         prefs.edit().putString("first_listen_date", today).apply()
         return today
     }
-
-    fun saveTheme(prefs: SharedPreferences, config: MMPThemeConfig) {
-        prefs.edit().putString("saved_theme_v3", config.toJson()).apply()
-    }
-
+    fun saveTheme(prefs: SharedPreferences, config: MMPThemeConfig) { prefs.edit().putString("saved_theme_v3", config.toJson()).apply() }
     fun loadTheme(prefs: SharedPreferences): MMPThemeConfig {
-        val raw = prefs.getString("saved_theme_v3", null) ?: return MMPThemeConfig()
-        return MMPThemeConfig.fromJson(raw) ?: MMPThemeConfig()
+        return MMPThemeConfig.fromJson(prefs.getString("saved_theme_v3", null) ?: "") ?: MMPThemeConfig()
     }
-
     fun saveRecentIds(prefs: SharedPreferences, ids: List<Long>) {
         val arr = JSONArray()
         ids.take(5).forEach { arr.put(it) }
         prefs.edit().putString("recent_track_ids", arr.toString()).apply()
     }
-
     fun loadRecentIds(prefs: SharedPreferences): List<Long> {
-        val raw = prefs.getString("recent_track_ids", null) ?: return emptyList()
         return try {
-            val arr = JSONArray(raw)
+            val arr = JSONArray(prefs.getString("recent_track_ids", "[]"))
             (0 until arr.length()).map { arr.getLong(it) }
-        } catch (e: Exception) {
-            emptyList()
-        }
+        } catch (e: Exception) { emptyList() }
     }
-
-    // Сохраняем секунды прослушивания каждого артиста (а не просто клики)
     fun saveArtistSeconds(prefs: SharedPreferences, secondsMap: Map<String, Int>) {
         val obj = JSONObject()
         secondsMap.forEach { (k, v) -> obj.put(k, v) }
         prefs.edit().putString("artist_listen_seconds", obj.toString()).apply()
     }
-
     fun loadArtistSeconds(prefs: SharedPreferences): Map<String, Int> {
-        val raw = prefs.getString("artist_listen_seconds", null) ?: return emptyMap()
         return try {
-            val obj = JSONObject(raw)
+            val obj = JSONObject(prefs.getString("artist_listen_seconds", "{}"))
             val map = mutableMapOf<String, Int>()
             obj.keys().forEach { key -> map[key] = obj.optInt(key, 0) }
             map
-        } catch (e: Exception) {
-            emptyMap()
-        }
+        } catch (e: Exception) { emptyMap() }
     }
-
     fun saveTrackPlayCounts(prefs: SharedPreferences, counts: Map<Long, Int>) {
         val obj = JSONObject()
         counts.forEach { (k, v) -> obj.put(k.toString(), v) }
         prefs.edit().putString("track_play_counts_all", obj.toString()).apply()
     }
-
     fun loadTrackPlayCounts(prefs: SharedPreferences): Map<Long, Int> {
-        val raw = prefs.getString("track_play_counts_all", null) ?: return emptyMap()
         return try {
-            val obj = JSONObject(raw)
+            val obj = JSONObject(prefs.getString("track_play_counts_all", "{}"))
             val map = mutableMapOf<Long, Int>()
-            obj.keys().forEach { key ->
-                key.toLongOrNull()?.let { id -> map[id] = obj.optInt(key, 0) }
-            }
+            obj.keys().forEach { key -> key.toLongOrNull()?.let { id -> map[id] = obj.optInt(key, 0) } }
             map
-        } catch (e: Exception) {
-            emptyMap()
-        }
+        } catch (e: Exception) { emptyMap() }
     }
-
     fun saveDailyStats(prefs: SharedPreferences, stats: Map<String, DailyStatRecord>) {
         val root = JSONObject()
         stats.forEach { (date, record) ->
@@ -341,31 +305,21 @@ object StorageHelper {
         }
         prefs.edit().putString("daily_history_stats", root.toString()).apply()
     }
-
     fun loadDailyStats(prefs: SharedPreferences): MutableMap<String, DailyStatRecord> {
-        val raw = prefs.getString("daily_history_stats", null) ?: return mutableMapOf()
         return try {
-            val root = JSONObject(raw)
+            val root = JSONObject(prefs.getString("daily_history_stats", "{}"))
             val result = mutableMapOf<String, DailyStatRecord>()
             root.keys().forEach { date ->
                 val dObj = root.getJSONObject(date)
                 val artMap = mutableMapOf<String, Int>()
                 val trkMap = mutableMapOf<Long, Int>()
-                dObj.optJSONObject("artists")?.let { aObj ->
-                    aObj.keys().forEach { k -> artMap[k] = aObj.optInt(k, 0) }
-                }
-                dObj.optJSONObject("tracks")?.let { tObj ->
-                    tObj.keys().forEach { k -> k.toLongOrNull()?.let { id -> trkMap[id] = tObj.optInt(k, 0) } }
-                }
+                dObj.optJSONObject("artists")?.let { aObj -> aObj.keys().forEach { k -> artMap[k] = aObj.optInt(k, 0) } }
+                dObj.optJSONObject("tracks")?.let { tObj -> tObj.keys().forEach { k -> k.toLongOrNull()?.let { id -> trkMap[id] = tObj.optInt(k, 0) } } }
                 result[date] = DailyStatRecord(artMap, trkMap)
             }
             result
-        } catch (e: Exception) {
-            mutableMapOf()
-        }
+        } catch (e: Exception) { mutableMapOf() }
     }
-
-    // Без авто-плейлистов: по умолчанию список пустой
     fun savePlaylists(prefs: SharedPreferences, list: List<PlaylistItem>) {
         val arr = JSONArray()
         list.forEach { item ->
@@ -379,47 +333,26 @@ object StorageHelper {
         }
         prefs.edit().putString("user_playlists_v3", arr.toString()).apply()
     }
-
     fun loadPlaylists(prefs: SharedPreferences): List<PlaylistItem> {
-        val raw = prefs.getString("user_playlists_v3", null) ?: return emptyList()
         return try {
-            val arr = JSONArray(raw)
+            val arr = JSONArray(prefs.getString("user_playlists_v3", "[]"))
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 val uri = obj.optString("coverUri", "").ifBlank { null }
                 val idsArr = obj.optJSONArray("trackIds")
-                val ids = if (idsArr != null) {
-                    (0 until idsArr.length()).map { idx -> idsArr.getLong(idx) }
-                } else emptyList()
+                val ids = if (idsArr != null) (0 until idsArr.length()).map { idx -> idsArr.getLong(idx) } else emptyList()
                 PlaylistItem(obj.optString("name", "Плейлист"), uri, ids)
             }
-        } catch (e: Exception) {
-            emptyList()
-        }
+        } catch (e: Exception) { emptyList() }
     }
 }
 
 suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatchers.IO) {
     val trackList = mutableListOf<Track>()
-    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-    } else {
-        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-    }
-
-    val projection = arrayOf(
-        MediaStore.Audio.Media._ID,
-        MediaStore.Audio.Media.TITLE,
-        MediaStore.Audio.Media.ARTIST,
-        MediaStore.Audio.Media.ALBUM,
-        MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.MIME_TYPE,
-        MediaStore.Audio.Media.SIZE
-    )
-
+    val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL) else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+    val projection = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.ALBUM, MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.MIME_TYPE, MediaStore.Audio.Media.SIZE)
     val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
     val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
-
     try {
         context.contentResolver.query(collection, projection, selection, null, sortOrder)?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
@@ -429,18 +362,14 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
             val durCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
-
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
                 val title = cursor.getString(titleCol) ?: "Неизвестный трек"
-                val rawArtist = cursor.getString(artistCol) ?: "Неизвестный исполнитель"
-                val artist = if (rawArtist == "<unknown>") "Неизвестный исполнитель" else rawArtist
-                val rawAlbum = cursor.getString(albumCol) ?: "Без альбома"
-                val album = if (rawAlbum == "<unknown>") "Без альбома" else rawAlbum
+                val artist = cursor.getString(artistCol)?.takeIf { it != "<unknown>" } ?: "Неизвестный исполнитель"
+                val album = cursor.getString(albumCol)?.takeIf { it != "<unknown>" } ?: "Без альбома"
                 val duration = cursor.getLong(durCol)
                 val mime = cursor.getString(mimeCol) ?: "audio/mpeg"
                 val size = cursor.getLong(sizeCol)
-
                 if (duration > 3000) {
                     val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
                     trackList.add(Track(id, contentUri, title, artist, album, duration, mime, size))
@@ -459,18 +388,13 @@ fun decodeSampledBitmap(bytes: ByteArray, reqMaxSide: Int = 512): Bitmap? {
         val maxDim = maxOf(options.outWidth, options.outHeight)
         if (maxDim > reqMaxSide) {
             val halfDim = maxDim / 2
-            while ((halfDim / inSampleSize) >= reqMaxSide) {
-                inSampleSize *= 2
-            }
+            while ((halfDim / inSampleSize) >= reqMaxSide) inSampleSize *= 2
         }
-        val decodeOptions = BitmapFactory.Options().apply {
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
             this.inSampleSize = inSampleSize
             this.inPreferredConfig = Bitmap.Config.RGB_565
-        }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
-    } catch (_: Throwable) {
-        null
-    }
+        })
+    } catch (_: Throwable) { null }
 }
 
 suspend fun loadTrackThumbnail(context: Context, track: Track): Bitmap? = withContext(Dispatchers.IO) {
@@ -478,51 +402,34 @@ suspend fun loadTrackThumbnail(context: Context, track: Track): Bitmap? = withCo
     val retriever = MediaMetadataRetriever()
     try {
         retriever.setDataSource(context, track.uri)
-        val artBytes = retriever.embeddedPicture
-        if (artBytes != null) {
-            val bmp = decodeSampledBitmap(artBytes, 256)
-            if (bmp != null) CoverCache.put(track.id, bmp)
-            bmp
-        } else null
-    } catch (_: Throwable) {
-        null
-    } finally {
-        try { retriever.release() } catch (_: Throwable) {}
-    }
+        retriever.embeddedPicture?.let { decodeSampledBitmap(it, 256)?.also { bmp -> CoverCache.put(track.id, bmp) } }
+    } catch (_: Throwable) { null } finally { try { retriever.release() } catch (_: Throwable) {} }
 }
 
-// Исправлен расчёт битрейта (никаких 32 kbps вместо 320 kbps) и утечки памяти
 suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetadata = withContext(Dispatchers.IO) {
     val retriever = MediaMetadataRetriever()
     try {
         retriever.setDataSource(context, track.uri)
         val artBytes = retriever.embeddedPicture
-        val bitmap = if (artBytes != null) {
-            decodeSampledBitmap(artBytes, 600)?.also { CoverCache.put(track.id, it) }
-        } else null
-
+        val bitmap = if (artBytes != null) decodeSampledBitmap(artBytes, 600)?.also { CoverCache.put(track.id, it) } else null
         val rawBitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L
+        val sampleRateRaw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toLongOrNull() else null
+        val sampleRateStr = if (sampleRateRaw != null && sampleRateRaw > 0) String.format(Locale.US, "%.1f kHz", sampleRateRaw / 1000f) else "44.1 kHz"
+        
         val durationSec = (track.durationMs / 1000L).coerceAtLeast(1L)
         val calculatedFromSizeKbps = if (track.sizeBytes > 0) ((track.sizeBytes * 8L) / (durationSec * 1000L)) else 0L
-
         var kbps = when {
             rawBitrate >= 64000L -> rawBitrate / 1000L
             rawBitrate in 64L..1411L -> rawBitrate
             else -> calculatedFromSizeKbps
         }
-
-        // Если заголовок MP3 вернул заниженное значение (например, 32 kbps на 320 kbps файле), берём расчёт по размеру файла
-        if (kbps < 96L && calculatedFromSizeKbps >= 128L) {
-            kbps = calculatedFromSizeKbps
-        }
-
+        if (kbps < 96L && calculatedFromSizeKbps >= 128L) kbps = calculatedFromSizeKbps
         val format = when {
             track.mimeType.contains("flac", true) -> "FLAC"
             track.mimeType.contains("wav", true) -> "WAV"
             track.mimeType.contains("mp4", true) || track.mimeType.contains("m4a", true) -> "M4A"
             else -> "MP3"
         }
-
         val cleanKbps = when {
             format == "MP3" && kbps in 290L..340L -> 320L
             format == "MP3" && kbps in 235L..275L -> 256L
@@ -531,14 +438,8 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
             kbps <= 0L -> if (format == "FLAC" || format == "WAV") 999L else 320L
             else -> kbps
         }
-
-        val bitrateStr = if (cleanKbps == 999L) "Lossless" else "$cleanKbps kbps"
-        DetailedMetadata(bitmap, bitrateStr, format)
-    } catch (e: Throwable) {
-        DetailedMetadata()
-    } finally {
-        try { retriever.release() } catch (_: Throwable) {}
-    }
+        DetailedMetadata(bitmap, if (cleanKbps == 999L) "Lossless" else "$cleanKbps kbps", sampleRateStr, format)
+    } catch (e: Throwable) { DetailedMetadata() } finally { try { retriever.release() } catch (_: Throwable) {} }
 }
 
 fun formatMillis(ms: Long): String {
