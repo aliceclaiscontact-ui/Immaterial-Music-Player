@@ -19,7 +19,6 @@ data class SoundCloudTrack(
 )
 
 object SoundCloudClient {
-    // Актуальный рабочий fallback client_id на случай задержки парсинга бандлов
     private const val FALLBACK_CLIENT_ID = "2t9loNQH90kzJcsMmUEoeMGjVCvAc2hw"
     private var cachedClientId: String? = null
     private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -27,8 +26,8 @@ object SoundCloudClient {
     private fun httpGet(urlStr: String): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 7000
-            readTimeout = 7000
+            connectTimeout = 8000
+            readTimeout = 8000
             setRequestProperty("User-Agent", USER_AGENT)
             setRequestProperty("Accept", "*/*")
         }
@@ -84,26 +83,32 @@ object SoundCloudClient {
 
                 val media = item.optJSONObject("media")
                 val transcodings = media?.optJSONArray("transcodings")
-                var targetStreamUrl: String? = null
+                var chosenUrl: String? = null
 
                 if (transcodings != null) {
+                    var progressiveCandidate: String? = null
+                    var hlsCandidate: String? = null
+
                     for (t in 0 until transcodings.length()) {
                         val tr = transcodings.getJSONObject(t)
                         val format = tr.optJSONObject("format")?.optString("protocol", "") ?: ""
-                        val mime = tr.optString("mime_type", "")
-                        // Приоритет progressive MP3
-                        if (format == "progressive" || mime.contains("mpeg")) {
-                            targetStreamUrl = tr.optString("url", "")
-                            if (!targetStreamUrl.isNullOrBlank()) break
+                        val trUrl = tr.optString("url", "")
+
+                        if (trUrl.isNotBlank()) {
+                            if (format == "progressive") {
+                                progressiveCandidate = trUrl
+                                break
+                            } else if (format == "hls" && hlsCandidate == null) {
+                                hlsCandidate = trUrl
+                            }
                         }
                     }
-                    if (targetStreamUrl.isNullOrBlank() && transcodings.length() > 0) {
-                        targetStreamUrl = transcodings.getJSONObject(0).optString("url", "")
-                    }
+                    // Отдаём приоритет прямому MP3 (progressive), чтобы MediaPlayer не захлебнулся на HLS
+                    chosenUrl = progressiveCandidate ?: hlsCandidate
                 }
 
-                if (id != 0L && !targetStreamUrl.isNullOrBlank()) {
-                    result.add(SoundCloudTrack(id, title, artist, artwork, duration, targetStreamUrl))
+                if (id != 0L && !chosenUrl.isNullOrBlank()) {
+                    result.add(SoundCloudTrack(id, title, artist, artwork, duration, chosenUrl))
                 }
             }
             result
@@ -121,7 +126,19 @@ object SoundCloudClient {
             val resp = httpGet(target)
             val json = JSONObject(resp)
             val direct = json.optString("url", "")
-            if (direct.isNotBlank()) direct else null
+            if (direct.isBlank()) return@withContext null
+
+            // Если получен m3u8 (HLS), берём из плейлиста прямой стрим-URL
+            if (direct.contains(".m3u8")) {
+                try {
+                    val m3u8Content = httpGet(direct)
+                    val lines = m3u8Content.lines()
+                    val mediaUrl = lines.firstOrNull { it.startsWith("http") && !it.startsWith("#") }
+                    if (!mediaUrl.isNullOrBlank()) return@withContext mediaUrl
+                } catch (_: Throwable) {}
+            }
+
+            direct
         } catch (_: Throwable) {
             null
         }
