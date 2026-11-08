@@ -1664,7 +1664,7 @@ fun SettingsAndThemeEditor(
                             border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
                         ) {
                             Text(
-                                "v1.1.0 (Fixed All)",
+                                "v1.1.1",
                                 color = primaryColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,

@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.mmp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0-Expressive"
+        versionCode = 3
+        versionName = "1.1.1"
     }
 
     buildTypes {
