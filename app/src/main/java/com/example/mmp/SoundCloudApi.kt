@@ -226,4 +226,21 @@ object SoundCloudClient {
             return@withContext null
         }
     }
+
+    fun toTrack(scTrack: SoundCloudTrack, directHttpUri: String): Track {
+        return Track(
+            id = scTrack.id,
+            title = scTrack.title,
+            artist = scTrack.artist,
+            album = "SoundCloud",
+            durationMs = scTrack.durationMs,
+            uri = android.net.Uri.parse(directHttpUri),
+            folderName = "SoundCloud",
+            folderPath = "SoundCloud",
+            filePath = scTrack.streamProgressiveUrl ?: directHttpUri,
+            sizeBytes = 0L,
+            dateAddedSec = System.currentTimeMillis() / 1000L,
+            customCoverUri = scTrack.artworkUrl
+        )
+    }
 }
