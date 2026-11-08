@@ -57,13 +57,15 @@ fun MMPApp() {
     val firstLaunchDate = remember { StorageHelper.getOrInitFirstLaunchDate(context, prefs) }
     var themeConfig by remember { mutableStateOf(StorageHelper.loadTheme(prefs)) }
     var rawDeviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var savedScTracks by remember { mutableStateOf(StorageHelper.loadSoundCloudTracks(prefs)) }
+    var savedScTracks by remember { mutableStateOf<List<Track>>(StorageHelper.loadSoundCloudTracks(prefs)) }
     var likedScTracks by remember {
         val rawLiked = prefs.getString("liked_sc_tracks_v1", null)
-        mutableStateOf(
-            if (rawLiked != null) StorageHelper.loadSoundCloudTracks(prefs).filter { rawLiked.contains(it.id.toString()) }
-            else emptyList()
-        )
+        val initialList: List<Track> = if (rawLiked != null) {
+            StorageHelper.loadSoundCloudTracks(prefs).filter { trk -> rawLiked.contains(trk.id.toString()) }
+        } else {
+            emptyList()
+        }
+        mutableStateOf<List<Track>>(initialList)
     }
     var showAudioFxDialog by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
@@ -632,7 +634,7 @@ fun MMPApp() {
                                     val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
                                     if (directUrl != null) {
                                         val playable = SoundCloudClient.toTrack(scTrack, directUrl)
-                                        if (savedScTracks.none { it.id == playable.id }) {
+                                        if (savedScTracks.none { trk -> trk.id == playable.id }) {
                                             val updated = savedScTracks + playable
                                             savedScTracks = updated
                                             StorageHelper.saveSoundCloudTracks(prefs, updated)
@@ -671,20 +673,20 @@ fun MMPApp() {
                             onToggleLikeScTrack = { scTrack ->
                                 val progUrl = scTrack.streamProgressiveUrl ?: ""
                                 val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
-                                if (savedScTracks.none { it.id == trkObj.id }) {
+                                if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
                                     val upd = savedScTracks + trkObj
                                     savedScTracks = upd
                                     StorageHelper.saveSoundCloudTracks(prefs, upd)
                                 }
-                                val exists = likedScTracks.any { it.id == trkObj.id }
-                                val nextLiked = if (exists) likedScTracks.filterNot { it.id == trkObj.id } else likedScTracks + trkObj
+                                val exists = likedScTracks.any { trk -> trk.id == trkObj.id }
+                                val nextLiked = if (exists) likedScTracks.filterNot { trk -> trk.id == trkObj.id } else likedScTracks + trkObj
                                 likedScTracks = nextLiked
-                                prefs.edit().putString("liked_sc_tracks_v1", nextLiked.joinToString(",") { it.id.toString() }).apply()
+                                prefs.edit().putString("liked_sc_tracks_v1", nextLiked.joinToString(",") { trk -> trk.id.toString() }).apply()
                             },
                             onAddScToPlaylist = { scTrack ->
                                 val progUrl = scTrack.streamProgressiveUrl ?: ""
                                 val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
-                                if (savedScTracks.none { it.id == trkObj.id }) {
+                                if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
                                     val upd = savedScTracks + trkObj
                                     savedScTracks = upd
                                     StorageHelper.saveSoundCloudTracks(prefs, upd)
@@ -743,7 +745,7 @@ fun MMPApp() {
                         surfaceColor = surfaceColor,
                         onDismiss = { showFullPlayerSheet = false },
                         onAddToPlaylistClick = {
-                            if (activeTrack.folderName == "SoundCloud" && savedScTracks.none { it.id == activeTrack.id }) {
+                            if (activeTrack.folderName == "SoundCloud" && savedScTracks.none { trk -> trk.id == activeTrack.id }) {
                                 val upd = savedScTracks + activeTrack
                                 savedScTracks = upd
                                 StorageHelper.saveSoundCloudTracks(prefs, upd)

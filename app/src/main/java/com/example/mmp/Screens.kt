@@ -363,6 +363,15 @@ fun HomeScreen(
 // -----------------------------------------------------
 // ВКЛАДКА SOUNDCLOUD (ПОИСК, СТРИМИНГ И КАРАОКЕ ЧЕРЕЗ LRCLIB)
 // -----------------------------------------------------
+
+fun formatDuration(ms: Long): String {
+    val totalSec = (ms / 1000).coerceAtLeast(0)
+    val minutes = totalSec / 60
+    val seconds = totalSec % 60
+    return String.format("%d:%02d", minutes, seconds)
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SoundCloudScreen(
     cardShape: Shape,
@@ -490,7 +499,7 @@ fun SoundCloudScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(scTrack.title, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${scTrack.artist} • ${formatTime(scTrack.durationMs)}", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1)
+                                Text("${scTrack.artist} • ${formatDuration(scTrack.durationMs)}", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1)
                             }
                             IconButton(onClick = { onToggleLikeScTrack(scTrack) }, modifier = Modifier.size(34.dp)) {
                                 Icon(

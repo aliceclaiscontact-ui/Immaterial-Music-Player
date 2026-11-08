@@ -763,10 +763,13 @@ suspend fun fetchLyricsFromLrclib(
         null
     }
 
+
+
+
     fun saveSoundCloudTracks(prefs: SharedPreferences, tracks: List<Track>) {
-        val arr = JSONArray()
+        val arr = org.json.JSONArray()
         tracks.forEach { t ->
-            val obj = JSONObject()
+            val obj = org.json.JSONObject()
             obj.put("id", t.id)
             obj.put("uri", t.uri.toString())
             obj.put("title", t.title)
@@ -783,13 +786,13 @@ suspend fun fetchLyricsFromLrclib(
         val raw = prefs.getString("saved_sc_tracks_v1", null) ?: return emptyList()
         val list = mutableListOf<Track>()
         try {
-            val arr = JSONArray(raw)
+            val arr = org.json.JSONArray(raw)
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 list.add(
                     Track(
                         id = o.optLong("id"),
-                        uri = Uri.parse(o.optString("uri")),
+                        uri = android.net.Uri.parse(o.optString("uri")),
                         title = o.optString("title", "SoundCloud Track"),
                         artist = o.optString("artist", "SoundCloud"),
                         album = o.optString("album", "SoundCloud"),
@@ -806,5 +809,4 @@ suspend fun fetchLyricsFromLrclib(
         } catch (_: Throwable) {}
         return list
     }
-
 }
