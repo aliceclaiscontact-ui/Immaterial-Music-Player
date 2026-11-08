@@ -42,7 +42,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -134,59 +134,51 @@ fun MMPApp() {
     var openedArtist by remember { mutableStateOf<String?>(null) }
     var openedAlbum by remember { mutableStateOf<String?>(null) }
 
-    // Глобальный эквалайзер и синхронизация эффектов
-    DisposableEffect(Unit) {
-        var sysEq: Equalizer? = null
-        var sysBass: BassBoost? = null
+    // Контроль параллельных запусков при быстром переключении
+    var activePlayJob by remember { mutableStateOf<Job?>(null) }
 
-        fun applyFx() {
-            try {
-                if (sysEq == null) sysEq = Equalizer(1000, 0)
-                if (sysBass == null) sysBass = BassBoost(1000, 0)
+    fun applySystemEqualizer(sessionId: Int = 0) {
+        try {
+            val enabled = prefs.getBoolean("eq_enabled", false)
+            val eqSession = if (sessionId != 0) sessionId else 0
+            val eq = Equalizer(1000, eqSession).apply { this.enabled = enabled }
+            val bass = BassBoost(1000, eqSession).apply { this.enabled = enabled }
 
-                val enabled = prefs.getBoolean("eq_enabled", false)
-                sysEq?.enabled = enabled
-                sysBass?.enabled = enabled
-
-                if (enabled && sysEq != null) {
-                    val eq = sysEq!!
-                    val range = eq.bandLevelRange
-                    val minMb = range[0].toInt()
-                    val maxMb = range[1].toInt()
-                    val bands = listOf(
-                        prefs.getFloat("eq_b0", 0f),
-                        prefs.getFloat("eq_b1", 0f),
-                        prefs.getFloat("eq_b2", 0f),
-                        prefs.getFloat("eq_b3", 0f),
-                        prefs.getFloat("eq_b4", 0f)
-                    )
-                    for (b in 0 until eq.numberOfBands.toInt()) {
-                        val db = bands.getOrElse(b) { 0f }
-                        val mb = (db * 100f).toInt().coerceIn(minMb, maxMb).toShort()
-                        eq.setBandLevel(b.toShort(), mb)
-                    }
+            if (enabled) {
+                val range = eq.bandLevelRange
+                val minMb = range[0].toInt()
+                val maxMb = range[1].toInt()
+                val bands = listOf(
+                    prefs.getFloat("eq_b0", 0f),
+                    prefs.getFloat("eq_b1", 0f),
+                    prefs.getFloat("eq_b2", 0f),
+                    prefs.getFloat("eq_b3", 0f),
+                    prefs.getFloat("eq_b4", 0f)
+                )
+                for (b in 0 until eq.numberOfBands.toInt()) {
+                    val db = bands.getOrElse(b) { 0f }
+                    val mb = (db * 100f).toInt().coerceIn(minMb, maxMb).toShort()
+                    eq.setBandLevel(b.toShort(), mb)
                 }
-                if (enabled && sysBass?.strengthSupported == true) {
-                    val bass = (prefs.getInt("bass_boost_level", 0) * 10).coerceIn(0, 1000).toShort()
-                    sysBass?.setStrength(bass)
+                if (bass.strengthSupported) {
+                    val bassVal = (prefs.getInt("bass_boost_level", 0) * 10).coerceIn(0, 1000).toShort()
+                    bass.setStrength(bassVal)
                 }
-            } catch (e: Throwable) {
-                e.printStackTrace()
             }
-        }
+        } catch (_: Throwable) {}
+    }
 
+    DisposableEffect(Unit) {
         val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _: SharedPreferences?, key: String? ->
             if (key != null && (key.startsWith("eq_") || key == "bass_boost_level")) {
-                applyFx()
+                applySystemEqualizer(exoPlayer.audioSessionId)
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
-        applyFx()
+        applySystemEqualizer()
 
         onDispose {
             prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
-            try { sysEq?.release() } catch (_: Throwable) {}
-            try { sysBass?.release() } catch (_: Throwable) {}
         }
     }
 
@@ -347,17 +339,19 @@ fun MMPApp() {
             currentQueue = deviceTracks
         }
 
-        try {
-            requestAudioFocus()
-            currentTrack = track
-            currentPositionMs = startOffsetMs
-            currentTrackPlayedSeconds = 0
-            currentTrackRecorded20Sec = false
-            StorageHelper.saveLastPlayedState(prefs, track, startOffsetMs)
+        activePlayJob?.cancel()
+        currentTrack = track
+        currentPositionMs = startOffsetMs
+        currentTrackPlayedSeconds = 0
+        currentTrackRecorded20Sec = false
+        StorageHelper.saveLastPlayedState(prefs, track, startOffsetMs)
 
-            exoPlayer.stop()
-            exoPlayer.clearMediaItems()
-            scope.launch {
+        activePlayJob = scope.launch {
+            try {
+                requestAudioFocus()
+                exoPlayer.stop()
+                exoPlayer.clearMediaItems()
+
                 val rawUrl = track.filePath.ifBlank { track.uri.toString() }
                 val finalUri = if (rawUrl.contains("api-v2.soundcloud.com")) {
                     val resolved = SoundCloudClient.resolveStreamUrl(rawUrl)
@@ -365,30 +359,33 @@ fun MMPApp() {
                 } else {
                     track.uri
                 }
+
                 val mediaItem = MediaItem.fromUri(finalUri)
                 exoPlayer.setMediaItem(mediaItem)
                 exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
                 exoPlayer.prepare()
+
                 if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
                     exoPlayer.seekTo(startOffsetMs)
                 }
+
                 exoPlayer.play()
                 isMediaPlayerPrepared = true
                 isPlaying = true
                 syncMediaService(track, currentMetadata, true)
-            }
+                applySystemEqualizer(exoPlayer.audioSessionId)
 
-            scope.launch {
                 val meta = extractTrackMetadata(context, track)
                 currentMetadata = meta
                 syncMediaService(track, meta, true)
                 if (meta.lyrics.isEmpty()) {
                     searchAndCacheOnlineLyrics(track, null, false)
                 }
+            } catch (e: Throwable) {
+                isPlaying = false
+                isMediaPlayerPrepared = false
+                Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
             }
-        } catch (e: Throwable) {
-            isPlaying = false
-            Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -397,12 +394,16 @@ fun MMPApp() {
             override fun onIsPlayingChanged(playing: Boolean) {
                 if (playing) {
                     isPlaying = true
-                } else if (exoPlayer.playbackState != Player.STATE_BUFFERING) {
+                } else if (exoPlayer.playbackState != Player.STATE_BUFFERING && exoPlayer.playbackState != Player.STATE_IDLE) {
                     isPlaying = false
                 }
             }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
+                if (playbackState == Player.STATE_READY) {
+                    isMediaPlayerPrepared = true
+                    applySystemEqualizer(exoPlayer.audioSessionId)
+                } else if (playbackState == Player.STATE_ENDED) {
                     if (stopAfterCurrentTrack) {
                         stopAfterCurrentTrack = false
                         isPlaying = false
@@ -439,9 +440,11 @@ fun MMPApp() {
                     }
                 }
             }
+
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 isPlaying = false
-                Toast.makeText(context, "Ошибка потока ExoPlayer: ${error.errorCodeName}", Toast.LENGTH_SHORT).show()
+                isMediaPlayerPrepared = false
+                Toast.makeText(context, "Ошибка потока: ${error.errorCodeName}", Toast.LENGTH_SHORT).show()
             }
         }
         exoPlayer.addListener(listener)
@@ -903,7 +906,7 @@ fun MMPApp() {
                         onPlayPause = { togglePlayPause() },
                         onSeek = { newPos ->
                             currentPositionMs = newPos
-                            if (isMediaPlayerPrepared) {
+                            if (isMediaPlayerPrepared && exoPlayer.playbackState != Player.STATE_IDLE) {
                                 try {
                                     val dur = exoPlayer.duration
                                     val safeTarget = if (dur > 0L) newPos.coerceIn(0L, (dur - 250L).coerceAtLeast(0L)) else newPos.coerceAtLeast(0L)

@@ -1,13 +1,4 @@
 package com.example.mmp
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.animation.core.*
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-
-
-import kotlinx.coroutines.launch
 
 import android.app.DatePickerDialog
 import android.content.Context
@@ -17,6 +8,7 @@ import android.media.AudioManager
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -24,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -47,8 +41,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
@@ -60,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -152,7 +150,6 @@ fun HomeScreen(
     val topArtistEntry = activeArtistSeconds.maxByOrNull { it.value }
     val topArtistPercent = if (totalArtistSec > 0 && topArtistEntry != null) ((topArtistEntry.value.toFloat() / totalArtistSec) * 100).toInt().coerceIn(1, 100) else 0
 
-    // Топ-5 треков: только те, что прослушаны 2 и более раз
     val top5TracksWithPlays = run {
         val trackMap = deviceTracks.associateBy { it.id }
         trackPlaysAllTime.entries
@@ -239,7 +236,6 @@ fun HomeScreen(
                         }
                     }
 
-                    // Статистика по датам: "За всё время" + кнопочка календаря
                     item {
                         Column {
                             Text("Статистика артистов", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = textColor)
@@ -311,7 +307,6 @@ fun HomeScreen(
                         }
                     }
 
-                    // Топ-5 треков (без надписи "от 20 сек", только 2 и более прослушиваний + счётчик)
                     item { Text("Топ-5 треков", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = textColor) }
                     if (top5TracksWithPlays.isEmpty()) {
                         item {
@@ -362,10 +357,6 @@ fun HomeScreen(
     }
 }
 
-// -----------------------------------------------------
-// ВКЛАДКА SOUNDCLOUD (ПОИСК, СТРИМИНГ И КАРАОКЕ ЧЕРЕЗ LRCLIB)
-// -----------------------------------------------------
-
 fun formatDuration(ms: Long): String {
     val totalSec = (ms / 1000).coerceAtLeast(0)
     val minutes = totalSec / 60
@@ -391,7 +382,7 @@ fun SoundCloudScreen(
     var query by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<SoundCloudTrack>>(emptyList()) }
-    var activeTab by remember { mutableIntStateOf(0) } // 0 = Поиск, 1 = Понравившееся из SoundCloud
+    var activeTab by remember { mutableIntStateOf(0) }
     var statusMessage by remember { mutableStateOf("Введите имя, автора или название альбома") }
     val scope = rememberCoroutineScope()
 
@@ -1129,7 +1120,7 @@ fun FullScreenPlayerOverlay(
                 val safeDur = track.durationMs.coerceAtLeast(1L)
                 WavySlider(
                     value = (currentPosMs.toFloat() / safeDur.toFloat()).coerceIn(0f, 1f),
-                    onValueChange = { frac -> onSeek((frac * safeDur).toLong()) },
+                    onSeekCommit = { frac -> onSeek((frac * safeDur).toLong()) },
                     isPlaying = isPlaying,
                     waveColor = primaryColor,
                     trackColor = textColor.copy(alpha = 0.22f),
@@ -1197,7 +1188,6 @@ fun FullScreenPlayerOverlay(
                         tint = repeatAccent,
                         modifier = Modifier.size(24.dp)
                     )
-
                 }
             }
 
@@ -1265,9 +1255,6 @@ fun FullScreenPlayerOverlay(
     }
 }
 
-// -----------------------------------------------------
-// БЕЗОПАСНЫЙ ПОЛНОЭКРАННЫЙ ТЕКСТ (БЕЗ ВЫЛЕТА ПРИ СВОРАЧИВАНИИ ПРИЛОЖЕНИЯ)
-// -----------------------------------------------------
 @Composable
 fun FullScreenLyricsOverlayWithMiniPlayer(
     track: Track,
@@ -1286,7 +1273,6 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
     onSearchLyricsByQuery: (String?) -> Unit
 ) {
     val lyricsList = metadata.lyrics
-    // Компенсация задержки аудиовыхода (+220 мс) для идеального попадания в бит
     val syncedPosMs = currentPosMs + 220L
     val activeLyricIndex = remember(syncedPosMs, lyricsList) {
         if (lyricsList.isEmpty()) -1
@@ -1299,7 +1285,6 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
     LaunchedEffect(activeLyricIndex) {
         if (activeLyricIndex >= 0 && lyricsList.isNotEmpty()) {
             try {
-                // Держим ровно 1 предыдущую строчку сверху, а текущую сразу под ней!
                 val targetIdx = (activeLyricIndex - 1).coerceAtLeast(0)
                 lyricListState.animateScrollToItem(index = targetIdx, scrollOffset = 0)
             } catch (_: Throwable) {}
@@ -1394,7 +1379,6 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                         }
                     }
                 } else {
-                    @OptIn(ExperimentalFoundationApi::class)
                     LazyColumn(
                         state = lyricListState,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1452,7 +1436,6 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                 }
             }
 
-            // Прямоугольный мини-мини-плеер снизу
             val safeDur = track.durationMs.coerceAtLeast(1L)
             val progressFraction = (currentPosMs.toFloat() / safeDur.toFloat()).coerceIn(0f, 1f)
 
@@ -1835,7 +1818,7 @@ fun SettingsAndThemeEditor(
             "SOUND" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
                 val ctx = LocalContext.current
-                val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+                val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
                 var eqEnabled by remember { mutableStateOf(prefs.getBoolean("eq_enabled", false)) }
                 var crossfadeSec by remember { mutableFloatStateOf(prefs.getInt("crossfade_sec", 0).toFloat()) }
                 var bassBoostLevel by remember { mutableFloatStateOf(prefs.getInt("bass_boost_level", 0).toFloat()) }
@@ -1948,7 +1931,7 @@ fun SettingsAndThemeEditor(
             "ANIMATIONS" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
                 val ctx = LocalContext.current
-                val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+                val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
                 var waveAnimEnabled by remember { mutableStateOf(prefs.getBoolean("anim_wave_enabled", true)) }
                 var smoothLyricsAnim by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_smooth", false)) }
                 var blurLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_blur", false)) }
@@ -2110,7 +2093,6 @@ fun QueueManagementSheet(
     }
 }
 
-// Док-панель с вкладкой SoundCloud
 @Composable
 fun FrostedDockBar(selectedTab: Int, cardShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color, onTabSelected: (Int) -> Unit, onCreateClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor.copy(0.95f)).border(1.dp, textColor.copy(0.14f), cardShape).padding(horizontal = 6.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -2228,7 +2210,6 @@ fun CreatePlaylistDetailsDialog(cardShape: Shape, expressiveShape: Shape, primar
     )
 }
 
-
 @Composable
 fun AudioFxDialog(
     playbackSpeed: Float,
@@ -2259,7 +2240,6 @@ fun AudioFxDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                // Быстрые пресеты
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     ExpressiveFilterPill("Обычный", speed == 1f && pitch == 1f, primaryColor, textColor) {
                         speed = 1.0f; pitch = 1.0f; onApplyFx(1.0f, 1.0f, bass, reverb)
@@ -2311,14 +2291,10 @@ fun AudioFxDialog(
     )
 }
 
-
-// ==========================================
-// M3 Expressive Wavy Slider
-// ==========================================
 @Composable
 fun WavySlider(
     value: Float,
-    onValueChange: (Float) -> Unit,
+    onSeekCommit: (Float) -> Unit,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
     waveColor: Color,
@@ -2326,10 +2302,9 @@ fun WavySlider(
     thumbColor: Color = waveColor
 ) {
     val ctx = LocalContext.current
-    val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+    val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
     val waveEnabled = prefs.getBoolean("anim_wave_enabled", true)
 
-    // Безопасный покадровый генератор фазы без InfiniteTransition (0 шансов на вылет при паузе/включении!)
     var phase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(isPlaying, waveEnabled) {
         if (isPlaying && waveEnabled) {
@@ -2343,7 +2318,6 @@ fun WavySlider(
         }
     }
 
-    // При паузе амплитуда плавно уходит в 0f -> волна выпрямляется в идеально ровную линию!
     val amplitudeFraction by animateFloatAsState(
         targetValue = if (isPlaying && waveEnabled) 1f else 0f,
         animationSpec = tween(durationMillis = 320),
@@ -2364,7 +2338,7 @@ fun WavySlider(
                         val w = size.width.toFloat()
                         if (w > 0f) {
                             val targetFrac = (offset.x / w).coerceIn(0f, 1f)
-                            onValueChange(targetFrac)
+                            onSeekCommit(targetFrac)
                         }
                     }
                 )
@@ -2383,7 +2357,7 @@ fun WavySlider(
                     },
                     onDragEnd = {
                         isDragging = false
-                        onValueChange(dragProgress)
+                        onSeekCommit(dragProgress)
                     },
                     onDragCancel = { isDragging = false }
                 )
@@ -2398,8 +2372,8 @@ fun WavySlider(
             if (thumbX < width) {
                 drawLine(
                     color = trackColor,
-                    start = androidx.compose.ui.geometry.Offset(thumbX, midY),
-                    end = androidx.compose.ui.geometry.Offset(width, midY),
+                    start = Offset(thumbX, midY),
+                    end = Offset(width, midY),
                     strokeWidth = 3.5.dp.toPx(),
                     cap = StrokeCap.Round
                 )
@@ -2408,11 +2382,10 @@ fun WavySlider(
             if (thumbX > 0f) {
                 val maxAmpPx = 4.2.dp.toPx() * amplitudeFraction
                 if (maxAmpPx < 0.2f) {
-                    // На паузе рисуем чистую прямую полоску без лишних расчетов синуса
                     drawLine(
                         color = waveColor,
-                        start = androidx.compose.ui.geometry.Offset(0f, midY),
-                        end = androidx.compose.ui.geometry.Offset(thumbX, midY),
+                        start = Offset(0f, midY),
+                        end = Offset(thumbX, midY),
                         strokeWidth = 4.dp.toPx(),
                         cap = StrokeCap.Round
                     )
@@ -2444,7 +2417,7 @@ fun WavySlider(
             drawCircle(
                 color = thumbColor,
                 radius = if (isDragging) 8.5.dp.toPx() else 6.5.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(thumbX, midY)
+                center = Offset(thumbX, midY)
             )
         }
     }

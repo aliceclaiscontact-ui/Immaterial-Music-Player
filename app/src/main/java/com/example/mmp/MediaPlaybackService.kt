@@ -94,6 +94,7 @@ class MediaPlaybackService : Service() {
         mediaSession = MediaSessionCompat(this, "MMPMediaSession").apply {
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
+                    // Вызываем только если действие инициировано извне (наушники/BT)
                     if (!PlayerBridge.isPlaying) {
                         PlayerBridge.onPlayPause?.invoke()
                     }
@@ -115,7 +116,7 @@ class MediaPlaybackService : Service() {
             "ACTION_TOGGLE" -> PlayerBridge.onPlayPause?.invoke()
             "ACTION_NEXT" -> PlayerBridge.onNext?.invoke()
             "ACTION_PREV" -> PlayerBridge.onPrev?.invoke()
-            "ACTION_UPDATE" -> { /* Просто обновляем нотификацию без вызова коллбэков */ }
+            "ACTION_UPDATE" -> { /* Просто обновляем статус и нотификацию */ }
         }
         updateNotification()
         MMPWidgetProvider.updateAllWidgets(this)
