@@ -143,37 +143,65 @@ object SoundCloudClient {
 
     suspend fun downloadTrackToDevice(context: Context, title: String, artist: String, streamMetaOrDirectUrl: String): File? = withContext(Dispatchers.IO) {
         try {
-            val direct = if (streamMetaOrDirectUrl.contains("api-v2.soundcloud.com")) {
-                resolveStreamUrl(streamMetaOrDirectUrl) ?: return@withContext null
-            } else {
-                streamMetaOrDirectUrl
+            var direct: String? = null
+            if (streamMetaOrDirectUrl.contains("api-v2.soundcloud.com")) {
+                direct = resolveStreamUrl(streamMetaOrDirectUrl)
+            } else if (streamMetaOrDirectUrl.startsWith("http")) {
+                direct = streamMetaOrDirectUrl
             }
+
+            // Если прямая ссылка протухла или пустая — ищем свежий поток по названию трека
+            if (direct.isNullOrBlank()) {
+                val fallbackSearch = searchTracks("$artist $title", limit = 5)
+                val match = fallbackSearch.firstOrNull { it.streamProgressiveUrl != null }
+                if (match?.streamProgressiveUrl != null) {
+                    direct = resolveStreamUrl(match.streamProgressiveUrl)
+                }
+            }
+            var finalUrl = direct ?: return@withContext null
 
             val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "MMP_SoundCloud")
             if (!musicDir.exists()) musicDir.mkdirs()
 
-            val safeName = "$artist - $title".replace(Regex("[\\\\/:*?\"<>|]"), "_").take(90)
-            val outFile = File(musicDir, "$safeName.mp3")
+            val cleanTitle = "$artist - $title".replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _\\-.,()\\[\\]]"), "_").take(80).trim().ifBlank { "sc_track_${System.currentTimeMillis()}" }
+            val outFile = File(musicDir, "$cleanTitle.mp3")
+
+            // Проверяем, работает ли ссылка; если CDN вернул 403/404, обновляем через поиск
+            val testConn = (URL(finalUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10000
+                readTimeout = 10000
+                setRequestProperty("User-Agent", USER_AGENT)
+            }
+            if (testConn.responseCode !in 200..299) {
+                val fallbackSearch = searchTracks("$artist $title", limit = 5)
+                val match = fallbackSearch.firstOrNull { it.streamProgressiveUrl != null }
+                val refreshed = match?.streamProgressiveUrl?.let { resolveStreamUrl(it) }
+                if (!refreshed.isNullOrBlank()) finalUrl = refreshed
+            }
 
             FileOutputStream(outFile).use { out ->
-                if (!direct.contains(".m3u8")) {
-                    val conn = (URL(direct).openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 10000
-                        readTimeout = 10000
+                if (!finalUrl.contains(".m3u8")) {
+                    val conn = (URL(finalUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 15000
+                        readTimeout = 15000
                         setRequestProperty("User-Agent", USER_AGENT)
                     }
                     conn.inputStream.use { inp -> inp.copyTo(out) }
                 } else {
-                    var playlist = httpGet(direct)
-                    val subUrl = playlist.lines().map { it.trim() }.firstOrNull { it.startsWith("http") && it.contains(".m3u8") }
+                    var playlist = httpGet(finalUrl)
+                    val baseUri = finalUrl.substringBeforeLast("/")
+                    val subUrl = playlist.lines().map { it.trim() }.firstOrNull { !it.startsWith("#") && it.contains(".m3u8") }
                     if (!subUrl.isNullOrBlank()) {
-                        playlist = httpGet(subUrl)
+                        val resolvedSub = if (subUrl.startsWith("http")) subUrl else "$baseUri/$subUrl"
+                        playlist = httpGet(resolvedSub)
                     }
-                    val segments = playlist.lines().map { it.trim() }.filter { it.startsWith("http") && !it.startsWith("#") }
+                    val segments = playlist.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
+                    if (segments.isEmpty()) return@withContext null
                     for (seg in segments) {
-                        val conn = (URL(seg).openConnection() as HttpURLConnection).apply {
-                            connectTimeout = 8000
-                            readTimeout = 8000
+                        val segUrl = if (seg.startsWith("http")) seg else "$baseUri/$seg"
+                        val conn = (URL(segUrl).openConnection() as HttpURLConnection).apply {
+                            connectTimeout = 12000
+                            readTimeout = 12000
                             setRequestProperty("User-Agent", USER_AGENT)
                         }
                         conn.inputStream.use { inp -> inp.copyTo(out) }
@@ -181,28 +209,21 @@ object SoundCloudClient {
                 }
             }
 
-            MediaScannerConnection.scanFile(context, arrayOf(outFile.absolutePath), arrayOf("audio/mpeg"), null)
-            outFile
-        } catch (e: Throwable) {
-            null
-        }
-    }
+            if (!outFile.exists() || outFile.length() < 1024L) {
+                outFile.delete()
+                return@withContext null
+            }
 
-    fun toTrack(scTrack: SoundCloudTrack, directHttpUri: String): Track {
-        return Track(
-            id = if (scTrack.id > 0) -scTrack.id else scTrack.id,
-            uri = Uri.parse(directHttpUri),
-            title = scTrack.title,
-            artist = scTrack.artist,
-            album = "SoundCloud",
-            durationMs = scTrack.durationMs,
-            mimeType = "audio/mpeg",
-            sizeBytes = 0L,
-            filePath = scTrack.streamProgressiveUrl ?: directHttpUri,
-            folderPath = "SoundCloud",
-            folderName = "SoundCloud",
-            customCoverUri = scTrack.artworkUrl,
-            customLyrics = null
-        )
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(outFile.absolutePath),
+                arrayOf("audio/mpeg"),
+                null
+            )
+            return@withContext outFile
+        } catch (e: Throwable) {
+            e.printStackTrace()
+            return@withContext null
+        }
     }
 }

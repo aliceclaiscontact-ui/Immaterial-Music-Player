@@ -1093,7 +1093,7 @@ fun FullScreenPlayerOverlay(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Найти текст в базе LRCLIB", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                    text = { Text("Синхронный текст", color = textColor, fontWeight = FontWeight.SemiBold) },
                                     leadingIcon = { Icon(Icons.Filled.CloudDownload, null, tint = primaryColor) },
                                     onClick = {
                                         showMoreMenu = false
@@ -1343,13 +1343,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(
-                        onClick = { showManualSearchField = !showManualSearchField },
-                        modifier = Modifier.size(38.dp).clip(CircleShape).background(Color.White.copy(0.14f))
-                    ) {
-                        Icon(Icons.Filled.Search, "Поиск текста в базе", tint = primaryColor, modifier = Modifier.size(20.dp))
-                    }
-                    Text("Синхронный текст (LRCLIB)", color = Color.White.copy(0.85f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Синхронный текст", color = Color.White.copy(0.9f), fontWeight = FontWeight.Black, fontSize = 16.sp)
                 }
                 IconButton(
                     onClick = onClose,
@@ -1388,7 +1382,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = primaryColor)
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("Ищем синхронизированный текст в базе LRCLIB...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Загружаем синхронный текст...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                 } else if (lyricsList.isEmpty()) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
@@ -1403,7 +1397,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                         ) {
                             Icon(Icons.Filled.CloudDownload, null, tint = Color.Black, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Найти в базе LRCLIB", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Загрузить синхронный текст", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
                     }
                 } else {
@@ -1417,47 +1411,47 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                         itemsIndexed(lyricsList, key = { idx, item -> "${idx}_${item.timeMs}" }) { idx, line ->
                             val isCurrent = idx == activeLyricIndex
                             val distance = abs(idx - activeLyricIndex)
-                            val targetScale by animateFloatAsState(
-                                targetValue = if (isCurrent) 1.02f else 0.94f,
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
-                                label = "LyricScale"
-                            )
-                            val targetAlpha by animateFloatAsState(
-                                targetValue = when {
-                                    isCurrent -> 1f
-                                    idx == activeLyricIndex - 1 -> 0.48f
-                                    else -> (0.45f - distance * 0.06f).coerceIn(0.18f, 0.45f)
-                                },
-                                animationSpec = tween(320),
-                                label = "LyricAlpha"
-                            )
-                            val blurRadius by animateFloatAsState(
-                                targetValue = if (isCurrent) 0f else (distance * 1.35f).coerceAtMost(4.8f),
-                                animationSpec = tween(320),
-                                label = "LyricBlur"
-                            )
+                            val ctx = LocalContext.current
+                            val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+                            val smoothLyricsAnim = remember { prefs.getBoolean("anim_lyrics_smooth", false) }
+                            val blurLyricsEnabled = remember { prefs.getBoolean("anim_lyrics_blur", false) }
+
+                            val rawAlpha = when {
+                                isCurrent -> 1f
+                                idx == activeLyricIndex - 1 -> 0.5f
+                                else -> (0.42f - distance * 0.06f).coerceIn(0.2f, 0.42f)
+                            }
+                            val targetAlpha = if (smoothLyricsAnim) {
+                                animateFloatAsState(targetValue = rawAlpha, animationSpec = tween(220), label = "LyricAlpha").value
+                            } else rawAlpha
+
+                            val targetScale = if (smoothLyricsAnim) {
+                                animateFloatAsState(targetValue = if (isCurrent) 1.0f else 0.96f, animationSpec = tween(220), label = "LyricScale").value
+                            } else 1.0f
+
+                            val blurRadius = if (blurLyricsEnabled && !isCurrent) {
+                                (distance * 1.2f).coerceAtMost(4.0f)
+                            } else 0f
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .animateItemPlacement(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow))
                                     .clickable { onSeek(line.timeMs) }
-                                    // Важно: внутренний padding ДО blur + Unbounded, чтобы блюр никогда не обрезался рамкой!
                                     .let { mod ->
-                                        if (blurRadius > 0.15f) mod.blur(blurRadius.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                                        if (blurRadius > 0.2f) mod.blur(blurRadius.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
                                         else mod
                                     }
-                                    .padding(vertical = 10.dp, horizontal = 8.dp)
+                                    .padding(vertical = 8.dp, horizontal = 8.dp)
                             ) {
                                 Text(
                                     text = line.text,
-                                    color = Color.White.copy(alpha = targetAlpha),
-                                    fontSize = if (isCurrent) 26.sp else 19.sp,
+                                    color = if (isCurrent) primaryColor else Color.White.copy(alpha = targetAlpha),
+                                    fontSize = if (isCurrent) 24.sp else 18.sp,
                                     fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
-                                    lineHeight = if (isCurrent) 33.sp else 26.sp,
+                                    lineHeight = if (isCurrent) 31.sp else 24.sp,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .scale(targetScale)
+                                        .let { m -> if (smoothLyricsAnim) m.scale(targetScale) else m }
                                 )
                             }
                         }
@@ -1689,6 +1683,16 @@ fun SettingsAndThemeEditor(
                         }
                     }
                     item {
+                        SettingsCategoryItem(Icons.Filled.GraphicEq, "Звук", "5-полосный эквалайзер, пресеты, усиление баса и плавное затухание (Crossfade)", textColor, primaryColor) {
+                            activeSettingsMenu = "SOUND"
+                        }
+                    }
+                    item {
+                        SettingsCategoryItem(Icons.Filled.Animation, "Анимации", "Плавность интерфейса, волна плеера и оптимизация текста для бюджетных устройств", textColor, primaryColor) {
+                            activeSettingsMenu = "ANIMATIONS"
+                        }
+                    }
+                    item {
                         SettingsCategoryItem(Icons.Filled.FolderSpecial, "Медиатека и Папки", "Выбор папок с музыкой, пропуск треков от $minDurationSec сек", textColor, primaryColor) {
                             activeSettingsMenu = "LIBRARY"
                         }
@@ -1812,6 +1816,182 @@ fun SettingsAndThemeEditor(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
                             Button(onClick = onExport, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Экспорт .mmpui", color = Color.Black, fontWeight = FontWeight.Bold) }
                             OutlinedButton(onClick = onImport, shape = RoundedCornerShape(50)) { Text("Импорт", color = textColor) }
+                        }
+                    }
+                }
+            }
+            "SOUND" -> {
+                BackHandler { activeSettingsMenu = "MAIN" }
+                val ctx = LocalContext.current
+                val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+                var eqEnabled by remember { mutableStateOf(prefs.getBoolean("eq_enabled", false)) }
+                var crossfadeSec by remember { mutableFloatStateOf(prefs.getInt("crossfade_sec", 0).toFloat()) }
+                var bassBoostLevel by remember { mutableFloatStateOf(prefs.getInt("bass_boost_level", 0).toFloat()) }
+                var band60 by remember { mutableFloatStateOf(prefs.getFloat("eq_b0", 0f)) }
+                var band230 by remember { mutableFloatStateOf(prefs.getFloat("eq_b1", 0f)) }
+                var band910 by remember { mutableFloatStateOf(prefs.getFloat("eq_b2", 0f)) }
+                var band3600 by remember { mutableFloatStateOf(prefs.getFloat("eq_b3", 0f)) }
+                var band14000 by remember { mutableFloatStateOf(prefs.getFloat("eq_b4", 0f)) }
+
+                fun saveEqBands(b0: Float, b1: Float, b2: Float, b3: Float, b4: Float) {
+                    band60 = b0; band230 = b1; band910 = b2; band3600 = b3; band14000 = b4
+                    prefs.edit()
+                        .putFloat("eq_b0", b0).putFloat("eq_b1", b1).putFloat("eq_b2", b2)
+                        .putFloat("eq_b3", b3).putFloat("eq_b4", b4)
+                        .putLong("eq_updated_ts", System.currentTimeMillis())
+                        .apply()
+                }
+
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 120.dp)) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
+                            Text("Звук и Эквалайзер", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                        }
+                    }
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Плавное затухание (Crossfade)", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Плавный переход громкости при смене треков", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                }
+                                Text(if (crossfadeSec.toInt() == 0) "Выкл" else "${crossfadeSec.toInt()} сек", color = primaryColor, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                            }
+                            Slider(
+                                value = crossfadeSec,
+                                onValueChange = {
+                                    crossfadeSec = it
+                                    prefs.edit().putInt("crossfade_sec", it.toInt()).apply()
+                                },
+                                valueRange = 0f..12f,
+                                steps = 11,
+                                colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
+                            )
+                        }
+                    }
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column {
+                                    Text("Системный 5-полосный эквалайзер", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Обработка аудиопотока в реальном времени", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                }
+                                Switch(
+                                    checked = eqEnabled,
+                                    onCheckedChange = {
+                                        eqEnabled = it
+                                        prefs.edit().putBoolean("eq_enabled", it).putLong("eq_updated_ts", System.currentTimeMillis()).apply()
+                                    },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                item { ExpressiveFilterPill("Flat", false, primaryColor, textColor) { saveEqBands(0f, 0f, 0f, 0f, 0f) } }
+                                item { ExpressiveFilterPill("Bass Boost", false, primaryColor, textColor) { saveEqBands(8f, 5f, 0f, 1f, 2f) } }
+                                item { ExpressiveFilterPill("Hyperpop / Club", false, primaryColor, textColor) { saveEqBands(7f, 3f, -2f, 5f, 8f) } }
+                                item { ExpressiveFilterPill("Vocal", false, primaryColor, textColor) { saveEqBands(-2f, 1f, 6f, 5f, 1f) } }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            val bands = listOf(
+                                Triple("60 Гц (Суб-бас)", band60) { v: Float -> saveEqBands(v, band230, band910, band3600, band14000) },
+                                Triple("230 Гц (Низкие)", band230) { v: Float -> saveEqBands(band60, v, band910, band3600, band14000) },
+                                Triple("910 Гц (Средние)", band910) { v: Float -> saveEqBands(band60, band230, v, band3600, band14000) },
+                                Triple("3.6 кГц (Верхние СЧ)", band3600) { v: Float -> saveEqBands(band60, band230, band910, v, band14000) },
+                                Triple("14 кГц (Воздух / ВЧ)", band14000) { v: Float -> saveEqBands(band60, band230, band910, band3600, v) }
+                            )
+                            bands.forEach { (label, value, onChange) ->
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(label, color = textColor.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("${if (value >= 0) "+" else ""}${value.toInt()} дБ", color = primaryColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Slider(
+                                    value = value,
+                                    onValueChange = onChange,
+                                    valueRange = -12f..12f,
+                                    enabled = eqEnabled,
+                                    colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Усиление баса (Bass Boost)", color = textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("${bassBoostLevel.toInt()}%", color = primaryColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Slider(
+                                value = bassBoostLevel,
+                                onValueChange = {
+                                    bassBoostLevel = it
+                                    prefs.edit().putInt("bass_boost_level", it.toInt()).putLong("eq_updated_ts", System.currentTimeMillis()).apply()
+                                },
+                                valueRange = 0f..100f,
+                                enabled = eqEnabled,
+                                colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
+                            )
+                        }
+                    }
+                }
+            }
+            "ANIMATIONS" -> {
+                BackHandler { activeSettingsMenu = "MAIN" }
+                val ctx = LocalContext.current
+                val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+                var waveAnimEnabled by remember { mutableStateOf(prefs.getBoolean("anim_wave_enabled", true)) }
+                var smoothLyricsAnim by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_smooth", false)) }
+                var blurLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_blur", false)) }
+
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 120.dp)) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
+                            Text("Анимации", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                        }
+                    }
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Волна прогресс-бара (WavySlider)", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Живая волна при воспроизведении и прямая линия на паузе", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                }
+                                Switch(
+                                    checked = waveAnimEnabled,
+                                    onCheckedChange = {
+                                        waveAnimEnabled = it
+                                        prefs.edit().putBoolean("anim_wave_enabled", it).apply()
+                                    },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
+                                )
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Плавное масштабирование текста", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Отключите для максимального FPS на бюджетных смартфонах", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                }
+                                Switch(
+                                    checked = smoothLyricsAnim,
+                                    onCheckedChange = {
+                                        smoothLyricsAnim = it
+                                        prefs.edit().putBoolean("anim_lyrics_smooth", it).apply()
+                                    },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
+                                )
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Эффект размытия (Blur) неактивных строк", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Тяжелый шейдер для GPU — рекомендуется выключать при лагах", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                }
+                                Switch(
+                                    checked = blurLyricsEnabled,
+                                    onCheckedChange = {
+                                        blurLyricsEnabled = it
+                                        prefs.edit().putBoolean("anim_lyrics_blur", it).apply()
+                                    },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
+                                )
+                            }
                         }
                     }
                 }
@@ -2133,15 +2313,27 @@ fun WavySlider(
     trackColor: Color = waveColor.copy(alpha = 0.25f),
     thumbColor: Color = waveColor
 ) {
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
+    val waveEnabled = prefs.getBoolean("anim_wave_enabled", true)
+
+    // Фиксированный диапазон 0..2*PI никогда не вызывает краш при паузе/старте!
     val infiniteTransition = rememberInfiniteTransition(label = "wave")
     val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = if (isPlaying) (2f * Math.PI.toFloat()) else 0f,
+        targetValue = (2f * Math.PI.toFloat()),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2000, easing = LinearEasing),
+            animation = tween(durationMillis = 1900, easing = LinearEasing),
             repeatMode = androidx.compose.animation.core.RepeatMode.Restart
         ),
         label = "phase"
+    )
+
+    // При паузе амплитуда плавно уходит в 0f -> волна выпрямляется в идеально ровную линию!
+    val amplitudeFraction by animateFloatAsState(
+        targetValue = if (isPlaying && waveEnabled) 1f else 0f,
+        animationSpec = tween(durationMillis = 320),
+        label = "waveAmp"
     )
 
     var isDragging by remember { mutableStateOf(false) }
@@ -2184,7 +2376,7 @@ fun WavySlider(
         Canvas(modifier = Modifier.fillMaxWidth().height(24.dp)) {
             val width = size.width
             val midY = size.height / 2f
-            val thumbX = width * displayProgress
+            val thumbX = (width * displayProgress).coerceIn(0f, width)
 
             if (thumbX < width) {
                 drawLine(
@@ -2197,41 +2389,46 @@ fun WavySlider(
             }
 
             if (thumbX > 0f) {
-                val wavePath = androidx.compose.ui.graphics.Path()
-                wavePath.moveTo(0f, midY)
-
-                val waveLength = 48.dp.toPx()
-                val waveAmplitude = if (isPlaying) 4.5.dp.toPx() else 2.dp.toPx()
-
-                var x = 0f
-                val step = 3f
-                while (x <= thumbX) {
-                    val relativeX = x / waveLength
-                    val y = midY + kotlin.math.sin((relativeX * 2 * Math.PI + phase).toDouble()).toFloat() * waveAmplitude
-                    wavePath.lineTo(x, y)
-                    x += step
-                }
-
-                drawPath(
-                    path = wavePath,
-                    color = waveColor,
-                    style = Stroke(
-                        width = 4.dp.toPx(),
+                val maxAmpPx = 4.2.dp.toPx() * amplitudeFraction
+                if (maxAmpPx < 0.2f) {
+                    // На паузе рисуем чистую прямую полоску без лишних расчетов синуса
+                    drawLine(
+                        color = waveColor,
+                        start = androidx.compose.ui.geometry.Offset(0f, midY),
+                        end = androidx.compose.ui.geometry.Offset(thumbX, midY),
+                        strokeWidth = 4.dp.toPx(),
                         cap = StrokeCap.Round
                     )
-                )
+                } else {
+                    val wavePath = androidx.compose.ui.graphics.Path()
+                    val waveLength = 46.dp.toPx().coerceAtLeast(1f)
+                    var x = 0f
+                    val step = 3.5f
+                    var first = true
+                    while (x <= thumbX) {
+                        val relativeX = x / waveLength
+                        val y = midY + kotlin.math.sin((relativeX * 2.0 * Math.PI + phase.toDouble())).toFloat() * maxAmpPx
+                        if (first) {
+                            wavePath.moveTo(x, y)
+                            first = false
+                        } else {
+                            wavePath.lineTo(x, y)
+                        }
+                        x += step
+                    }
+                    drawPath(
+                        path = wavePath,
+                        color = waveColor,
+                        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
             }
 
-            if (thumbX in 0f..width) {
-                val thumbH = 16.dp.toPx()
-                drawLine(
-                    color = thumbColor,
-                    start = androidx.compose.ui.geometry.Offset(thumbX, midY - thumbH / 2f),
-                    end = androidx.compose.ui.geometry.Offset(thumbX, midY + thumbH / 2f),
-                    strokeWidth = 4.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
-            }
+            drawCircle(
+                color = thumbColor,
+                radius = if (isDragging) 8.5.dp.toPx() else 6.5.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(thumbX, midY)
+            )
         }
     }
 }

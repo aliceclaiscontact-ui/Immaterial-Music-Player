@@ -775,7 +775,8 @@ fun MMPApp() {
                         onOpenSleepTimerClick = { showSleepTimerDialog = true },
                         onOpenAudioFxClick = { showAudioFxDialog = true },
                         onDownloadCurrentScTrack = {
-                            val srcUrl = activeTrack.filePath.ifBlank { activeTrack.uri.toString() }
+                            val savedMatch = savedScTracks.firstOrNull { it.id == activeTrack.id }
+                            val srcUrl = savedMatch?.filePath?.takeIf { it.isNotBlank() } ?: activeTrack.filePath.ifBlank { activeTrack.uri.toString() }
                             Toast.makeText(context, "Скачиваем «${activeTrack.title}»...", Toast.LENGTH_SHORT).show()
                             scope.launch {
                                 val file = SoundCloudClient.downloadTrackToDevice(context, activeTrack.title, activeTrack.artist, srcUrl)
