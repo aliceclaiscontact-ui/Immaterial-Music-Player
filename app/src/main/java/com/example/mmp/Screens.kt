@@ -1,3 +1,122 @@
+
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.sin
+
+@Composable
+fun WavySlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    waveColor: Color,
+    trackColor: Color = waveColor.copy(alpha = 0.25f),
+    thumbColor: Color = waveColor
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "wave")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = if (isPlaying) (2f * Math.PI.toFloat()) else 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "phase"
+    )
+
+    var isDragging by remember { mutableStateOf(false) }
+    var dragProgress by remember { mutableFloatStateOf(0f) }
+    val displayProgress = if (isDragging) dragProgress else value.coerceIn(0f, 1f)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val newP = (offset.x / size.width).coerceIn(0f, 1f)
+                    onValueChange(newP)
+                }
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        isDragging = true
+                        dragProgress = (offset.x / size.width).coerceIn(0f, 1f)
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        dragProgress = (change.position.x / size.width).coerceIn(0f, 1f)
+                    },
+                    onDragEnd = {
+                        isDragging = false
+                        onValueChange(dragProgress)
+                    },
+                    onDragCancel = { isDragging = false }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxWidth().height(24.dp)) {
+            val width = size.width
+            val midY = size.height / 2f
+            val thumbX = width * displayProgress
+
+            // 1. Неактивная часть (прямая гладкая линия справа)
+            if (thumbX < width) {
+                drawLine(
+                    color = trackColor,
+                    start = androidx.compose.ui.geometry.Offset(thumbX, midY),
+                    end = androidx.compose.ui.geometry.Offset(width, midY),
+                    strokeWidth = 3.5.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            }
+
+            // 2. Активная часть (волна M3 слева)
+            if (thumbX > 0f) {
+                val wavePath = androidx.compose.ui.graphics.Path()
+                wavePath.moveTo(0f, midY)
+
+                val waveLength = 48.dp.toPx()
+                val waveAmplitude = if (isPlaying) 4.5.dp.toPx() else 2.dp.toPx()
+
+                var x = 0f
+                val step = 3f
+                while (x <= thumbX) {
+                    val relativeX = x / waveLength
+                    val y = midY + sin((relativeX * 2 * Math.PI + phase).toDouble()).toFloat() * waveAmplitude
+                    wavePath.lineTo(x, y)
+                    x += step
+                }
+
+                drawPath(
+                    path = wavePath,
+                    color = waveColor,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 4.dp.toPx(),
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                )
+            }
+
+            // 3. Вертикальная планка-индикатор (как в M3 на фото)
+            if (thumbX in 0f..width) {
+                val thumbH = 16.dp.toPx()
+                drawLine(
+                    color = thumbColor,
+                    start = androidx.compose.ui.geometry.Offset(thumbX, midY - thumbH / 2f),
+                    end = androidx.compose.ui.geometry.Offset(thumbX, midY + thumbH / 2f),
+                    strokeWidth = 4.dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            }
+        }
+    }
+}
+
 package com.example.mmp
 
 import kotlinx.coroutines.launch
