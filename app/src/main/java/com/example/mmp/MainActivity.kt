@@ -104,6 +104,34 @@ fun MMPApp() {
             .build()
     }
 
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    var currentTrack by remember { mutableStateOf<Track?>(null) }
+    var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var isMediaPlayerPrepared by remember { mutableStateOf(false) }
+    var wasPlayingBeforeFocusLoss by remember { mutableStateOf(false) }
+    var currentPositionMs by remember { mutableStateOf(0L) }
+    var showFullPlayerSheet by remember { mutableStateOf(false) }
+    var currentTrackPlayedSeconds by remember { mutableStateOf(0) }
+    var currentTrackRecorded20Sec by remember { mutableStateOf(false) }
+    var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds_total", 0)) }
+
+    var currentQueue by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var isShuffleEnabled by remember { mutableStateOf(false) }
+    var repeatMode by remember { mutableStateOf(RepeatMode.OFF) }
+    var showQueueSheet by remember { mutableStateOf(false) }
+    var trackToEditTags by remember { mutableStateOf<Track?>(null) }
+    var pendingTagCoverUri by remember { mutableStateOf<String?>(null) }
+
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
+    var sleepTimerRemainingSec by remember { mutableStateOf(0) }
+    var stopAfterCurrentTrack by remember { mutableStateOf(false) }
+    var isSearchingOnlineLyrics by remember { mutableStateOf(false) }
+
+    var openedPlaylist by remember { mutableStateOf<PlaylistItem?>(null) }
+    var openedArtist by remember { mutableStateOf<String?>(null) }
+    var openedAlbum by remember { mutableStateOf<String?>(null) }
+
     // Звуковой движок и синхронизация состояния плеера
     DisposableEffect(exoPlayer) {
         var sysEq: android.media.audiofx.Equalizer? = null
