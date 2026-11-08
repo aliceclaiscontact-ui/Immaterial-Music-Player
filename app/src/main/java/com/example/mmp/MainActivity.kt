@@ -1,3 +1,4 @@
+import android.content.SharedPreferences
 package com.example.mmp
 
 import android.Manifest
@@ -154,7 +155,7 @@ fun MMPApp() {
         }
         exoPlayer.addListener(listener)
 
-        val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _: SharedPreferences?, key: String? ->
             if (key != null && (key.startsWith("eq_") || key == "bass_boost_level")) {
                 applySoundSettings()
             }
