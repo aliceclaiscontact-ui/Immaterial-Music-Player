@@ -1,6 +1,6 @@
-import android.content.SharedPreferences
 package com.example.mmp
 
+import android.content.SharedPreferences
 import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
