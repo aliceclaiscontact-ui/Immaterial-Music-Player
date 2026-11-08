@@ -239,7 +239,7 @@ object SoundCloudClient {
             folderPath = "SoundCloud",
             filePath = scTrack.streamProgressiveUrl ?: directHttpUri,
             sizeBytes = 0L,
-            dateAddedSec = System.currentTimeMillis() / 1000L,
+            mimeType = "audio/mpeg",
             customCoverUri = scTrack.artworkUrl
         )
     }
