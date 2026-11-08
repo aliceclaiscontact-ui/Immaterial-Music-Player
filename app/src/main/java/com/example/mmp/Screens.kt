@@ -1676,7 +1676,26 @@ fun SettingsAndThemeEditor(
         when (menu) {
             "MAIN" -> {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    item { Text("Настройки", color = textColor, fontWeight = FontWeight.Black, fontSize = 24.sp, modifier = Modifier.padding(16.dp)) }
+                    item { Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Настройки", color = textColor, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = primaryColor.copy(alpha = 0.15f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
+                        ) {
+                            Text(
+                                "v1.0.8 (Clean Engine)",
+                                color = primaryColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    } }
                     item {
                         SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и Темы", "Цвета, MD3 формы, светлая/темная/Adaptive тема, импорт .mmpui", textColor, primaryColor) {
                             activeSettingsMenu = "UI"

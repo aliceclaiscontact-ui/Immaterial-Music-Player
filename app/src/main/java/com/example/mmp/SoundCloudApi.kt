@@ -174,7 +174,7 @@ object SoundCloudClient {
             val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "MMP_SoundCloud")
             if (!musicDir.exists()) musicDir.mkdirs()
 
-            val cleanTitle = "$artist - $title".replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _\\-.,()\\[\\]]"), "_").take(80).trim().ifBlank { "sc_track_${System.currentTimeMillis()}" }
+            val cleanTitle = "${artist.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").take(30)} - ${title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").take(40)}".trim().ifBlank { "sc_track_${System.currentTimeMillis()}" }
             val outFile = File(musicDir, "$cleanTitle.mp3")
 
             // Проверяем, работает ли ссылка; если CDN вернул 403/404, обновляем через поиск

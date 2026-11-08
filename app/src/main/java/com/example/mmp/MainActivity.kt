@@ -93,7 +93,16 @@ fun MMPApp() {
                                         rawDeviceTracks = scanDeviceMusic(context) }
     }
 
-    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
+    val exoPlayer = remember {
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+        ExoPlayer.Builder(context)
+            .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+    }
 
     // Реальный звуковой движок: 5-полосный эквалайзер + BassBoost, реагирующий на настройки в реальном времени
     DisposableEffect(exoPlayer) {
@@ -911,10 +920,14 @@ fun MMPApp() {
                             currentPositionMs = clampedPos
                             if (isMediaPlayerPrepared) {
                                 try {
-                                    val dur = exoPlayer.duration
-                                    val target = if (dur > 0L) clampedPos.coerceIn(0L, (dur - 200L).coerceAtLeast(0L)) else clampedPos
-                                    exoPlayer.seekTo(target)
-                                } catch (e: Throwable) {}
+                                    if (exoPlayer.isCommandAvailable(androidx.media3.common.Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
+                                        val dur = exoPlayer.duration
+                                        val target = if (dur > 0L) clampedPos.coerceIn(0L, (dur - 200L).coerceAtLeast(0L)) else clampedPos
+                                        exoPlayer.seekTo(target)
+                                    }
+                                } catch (e: Throwable) {
+                                    e.printStackTrace()
+                                }
                             }
                         },
                         onNext = { playNextTrack() },
