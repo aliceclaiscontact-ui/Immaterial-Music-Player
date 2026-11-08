@@ -2359,12 +2359,15 @@ fun WavySlider(
             .fillMaxWidth()
             .height(36.dp)
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    val w = size.width.toFloat()
-                    if (w > 0f) {
-                        onValueChange((offset.x / w).coerceIn(0f, 1f))
+                detectTapGestures(
+                    onPress = { offset ->
+                        val w = size.width.toFloat()
+                        if (w > 0f) {
+                            val targetFrac = (offset.x / w).coerceIn(0f, 1f)
+                            onValueChange(targetFrac)
+                        }
                     }
-                }
+                )
             }
             .pointerInput(Unit) {
                 detectDragGestures(

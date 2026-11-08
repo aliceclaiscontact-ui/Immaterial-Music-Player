@@ -395,7 +395,11 @@ fun MMPApp() {
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
+                if (playing) {
+                    isPlaying = true
+                } else if (exoPlayer.playbackState != Player.STATE_BUFFERING) {
+                    isPlaying = false
+                }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
@@ -900,16 +904,11 @@ fun MMPApp() {
                         onSeek = { newPos ->
                             currentPositionMs = newPos
                             if (isMediaPlayerPrepared) {
-                                scope.launch(Dispatchers.Main) {
-                                    try {
-                                        val dur = exoPlayer.duration
-                                        if (dur > 0L) {
-                                            exoPlayer.seekTo(newPos.coerceIn(0L, dur - 200L))
-                                        } else {
-                                            exoPlayer.seekTo(newPos)
-                                        }
-                                    } catch (_: Throwable) {}
-                                }
+                                try {
+                                    val dur = exoPlayer.duration
+                                    val safeTarget = if (dur > 0L) newPos.coerceIn(0L, (dur - 250L).coerceAtLeast(0L)) else newPos.coerceAtLeast(0L)
+                                    exoPlayer.seekTo(safeTarget)
+                                } catch (_: Throwable) {}
                             }
                         },
                         onNext = { playNextTrack() },
