@@ -639,14 +639,14 @@ fun MMPApp() {
                             surfaceColor = surfaceColor,
                             likedScTracks = likedScTracks,
                             onPlaySoundCloudTrack = { scTrack, allResults ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: return@SoundCloudScreen
+                                val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
                                 Toast.makeText(context, "Подключаемся к SoundCloud: ${scTrack.title}...", Toast.LENGTH_SHORT).show()
                                 scope.launch {
                                     val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
                                     if (directUrl != null) {
                                         val playable = SoundCloudClient.toTrack(scTrack, progUrl).copy(uri = Uri.parse(directUrl))
                                         val queueTracks = allResults.mapNotNull { item ->
-                                            val itemUrl = item.streamProgressiveUrl ?: item.streamHlsUrl ?: return@mapNotNull null
+                                            val itemUrl = item.streamProgressiveUrl ?: return@mapNotNull null
                                             if (item.id == scTrack.id) playable else SoundCloudClient.toTrack(item, itemUrl)
                                         }
                                         if (savedScTracks.none { trk -> trk.id == playable.id }) {
@@ -673,7 +673,7 @@ fun MMPApp() {
                                 }
                             },
                             onDownloadScTrack = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: return@SoundCloudScreen
+                                val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
                                 Toast.makeText(context, "Скачиваем «${scTrack.title}» в память...", Toast.LENGTH_SHORT).show()
                                 scope.launch {
                                     val file = SoundCloudClient.downloadTrackToDevice(context, scTrack.title, scTrack.artist, progUrl)
@@ -687,7 +687,7 @@ fun MMPApp() {
                                 }
                             },
                             onToggleLikeScTrack = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: ""
+                                val progUrl = scTrack.streamProgressiveUrl ?: ""
                                 val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
                                 if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
                                     val upd = savedScTracks + trkObj
@@ -700,7 +700,7 @@ fun MMPApp() {
                                 prefs.edit().putString("liked_sc_tracks_v1", nextLiked.joinToString(",") { trk -> trk.id.toString() }).apply()
                             },
                             onAddScToPlaylist = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: ""
+                                val progUrl = scTrack.streamProgressiveUrl ?: ""
                                 val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
                                 if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
                                     val upd = savedScTracks + trkObj
