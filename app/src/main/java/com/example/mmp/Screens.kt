@@ -382,7 +382,7 @@ fun SoundCloudScreen(
     textColor: Color,
     surfaceColor: Color,
     likedScTracks: List<Track>,
-    onPlaySoundCloudTrack: (SoundCloudTrack) -> Unit,
+    onPlaySoundCloudTrack: (SoundCloudTrack, List<SoundCloudTrack>) -> Unit,
     onPlaySavedScTrack: (Track) -> Unit,
     onDownloadScTrack: (SoundCloudTrack) -> Unit,
     onToggleLikeScTrack: (SoundCloudTrack) -> Unit,
@@ -480,7 +480,7 @@ fun SoundCloudScreen(
                                 .fillMaxWidth()
                                 .clip(cardShape)
                                 .background(surfaceColor)
-                                .clickable { onPlaySoundCloudTrack(scTrack) }
+                                .clickable { onPlaySoundCloudTrack(scTrack, results) }
                                 .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1127,11 +1127,13 @@ fun FullScreenPlayerOverlay(
 
                 Spacer(modifier = Modifier.height(10.dp))
                 val safeDur = track.durationMs.coerceAtLeast(1L)
-                Slider(
-                    value = currentPosMs.toFloat().coerceIn(0f, safeDur.toFloat()),
-                    onValueChange = { onSeek(it.toLong()) },
-                    valueRange = 0f..safeDur.toFloat(),
-                    colors = SliderDefaults.colors(thumbColor = textColor, activeTrackColor = primaryColor, inactiveTrackColor = textColor.copy(0.22f)),
+                WavySlider(
+                    value = (currentPosMs.toFloat() / safeDur.toFloat()).coerceIn(0f, 1f),
+                    onValueChange = { frac -> onSeek((frac * safeDur).toLong()) },
+                    isPlaying = isPlaying,
+                    waveColor = primaryColor,
+                    trackColor = textColor.copy(alpha = 0.22f),
+                    thumbColor = textColor,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

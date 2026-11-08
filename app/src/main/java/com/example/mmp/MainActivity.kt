@@ -88,7 +88,8 @@ fun MMPApp() {
     var hasAudioPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasAudioPermission = granted
-        if (granted) scope.launch { rawDeviceTracks = scanDeviceMusic(context) }
+        if (granted) scope.launch { kotlinx.coroutines.delay(700)
+                                        rawDeviceTracks = scanDeviceMusic(context) }
     }
 
     val exoPlayer = remember { ExoPlayer.Builder(context).build() }
@@ -286,16 +287,25 @@ fun MMPApp() {
 
             exoPlayer.stop()
             exoPlayer.clearMediaItems()
-            val mediaItem = MediaItem.fromUri(track.uri)
-            exoPlayer.setMediaItem(mediaItem)
-            exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
-            if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
-                exoPlayer.seekTo(startOffsetMs)
+            scope.launch {
+                val rawUrl = track.filePath.ifBlank { track.uri.toString() }
+                val finalUri = if (rawUrl.contains("api-v2.soundcloud.com")) {
+                    val resolved = SoundCloudClient.resolveStreamUrl(rawUrl)
+                    if (resolved != null) Uri.parse(resolved) else track.uri
+                } else {
+                    track.uri
+                }
+                val mediaItem = MediaItem.fromUri(finalUri)
+                exoPlayer.setMediaItem(mediaItem)
+                exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
+                exoPlayer.prepare()
+                if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
+                    exoPlayer.seekTo(startOffsetMs)
+                }
+                exoPlayer.play()
+                isMediaPlayerPrepared = true
+                isPlaying = true
             }
-            exoPlayer.prepare()
-            exoPlayer.play()
-            isMediaPlayerPrepared = true
-            isPlaying = true
             syncMediaService(track, currentMetadata, true)
 
             scope.launch {
@@ -597,7 +607,7 @@ fun MMPApp() {
                             onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
                         )
                         1 -> LibraryScreen(
-                            tracks = deviceTracks,
+                            tracks = (deviceTracks + savedScTracks).distinctBy { it.id },
                             playlists = playlists,
                             cardShape = cardShape,
                             expressiveShape = expressiveShape,
@@ -611,7 +621,8 @@ fun MMPApp() {
                             openedPlaylist = openedPlaylist,
                             openedArtist = openedArtist,
                             openedAlbum = openedAlbum,
-                            onRescanClick = { scope.launch { rawDeviceTracks = scanDeviceMusic(context) } },
+                            onRescanClick = { scope.launch { kotlinx.coroutines.delay(700)
+                                        rawDeviceTracks = scanDeviceMusic(context) } },
                             onPlayContext = { queue, track -> playTrack(track, queue) },
                             onTogglePlay = { togglePlayPause() },
                             onToggleShuffle = { toggleShuffle() },
@@ -627,19 +638,23 @@ fun MMPApp() {
                             textColor = textColor,
                             surfaceColor = surfaceColor,
                             likedScTracks = likedScTracks,
-                            onPlaySoundCloudTrack = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
+                            onPlaySoundCloudTrack = { scTrack, allResults ->
+                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: return@SoundCloudScreen
                                 Toast.makeText(context, "Подключаемся к SoundCloud: ${scTrack.title}...", Toast.LENGTH_SHORT).show()
                                 scope.launch {
                                     val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
                                     if (directUrl != null) {
-                                        val playable = SoundCloudClient.toTrack(scTrack, directUrl)
+                                        val playable = SoundCloudClient.toTrack(scTrack, progUrl).copy(uri = Uri.parse(directUrl))
+                                        val queueTracks = allResults.mapNotNull { item ->
+                                            val itemUrl = item.streamProgressiveUrl ?: item.streamHlsUrl ?: return@mapNotNull null
+                                            if (item.id == scTrack.id) playable else SoundCloudClient.toTrack(item, itemUrl)
+                                        }
                                         if (savedScTracks.none { trk -> trk.id == playable.id }) {
                                             val updated = savedScTracks + playable
                                             savedScTracks = updated
                                             StorageHelper.saveSoundCloudTracks(prefs, updated)
                                         }
-                                        playTrack(playable, listOf(playable))
+                                        playTrack(playable, queueTracks.ifEmpty { listOf(playable) })
                                     } else {
                                         Toast.makeText(context, "Не удалось получить аудиопоток SoundCloud", Toast.LENGTH_SHORT).show()
                                     }
@@ -658,12 +673,13 @@ fun MMPApp() {
                                 }
                             },
                             onDownloadScTrack = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
+                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: return@SoundCloudScreen
                                 Toast.makeText(context, "Скачиваем «${scTrack.title}» в память...", Toast.LENGTH_SHORT).show()
                                 scope.launch {
                                     val file = SoundCloudClient.downloadTrackToDevice(context, scTrack.title, scTrack.artist, progUrl)
                                     if (file != null) {
                                         Toast.makeText(context, "Сохранено в Music/MMP_SoundCloud: ${file.name}", Toast.LENGTH_LONG).show()
+                                        kotlinx.coroutines.delay(700)
                                         rawDeviceTracks = scanDeviceMusic(context)
                                     } else {
                                         Toast.makeText(context, "Не удалось скачать трек", Toast.LENGTH_SHORT).show()
@@ -671,7 +687,7 @@ fun MMPApp() {
                                 }
                             },
                             onToggleLikeScTrack = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: ""
+                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: ""
                                 val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
                                 if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
                                     val upd = savedScTracks + trkObj
@@ -684,7 +700,7 @@ fun MMPApp() {
                                 prefs.edit().putString("liked_sc_tracks_v1", nextLiked.joinToString(",") { trk -> trk.id.toString() }).apply()
                             },
                             onAddScToPlaylist = { scTrack ->
-                                val progUrl = scTrack.streamProgressiveUrl ?: ""
+                                val progUrl = scTrack.streamProgressiveUrl ?: scTrack.streamHlsUrl ?: ""
                                 val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
                                 if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
                                     val upd = savedScTracks + trkObj
@@ -765,7 +781,8 @@ fun MMPApp() {
                                 val file = SoundCloudClient.downloadTrackToDevice(context, activeTrack.title, activeTrack.artist, srcUrl)
                                 if (file != null) {
                                     Toast.makeText(context, "Трек сохранён: ${file.name}", Toast.LENGTH_LONG).show()
-                                    rawDeviceTracks = scanDeviceMusic(context)
+                                    kotlinx.coroutines.delay(700)
+                                        rawDeviceTracks = scanDeviceMusic(context)
                                 } else {
                                     Toast.makeText(context, "Ошибка скачивания трека", Toast.LENGTH_SHORT).show()
                                 }
