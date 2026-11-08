@@ -146,7 +146,18 @@ object SoundCloudClient {
             var direct: String? = null
             if (streamMetaOrDirectUrl.contains("api-v2.soundcloud.com")) {
                 direct = resolveStreamUrl(streamMetaOrDirectUrl)
-            } else if (streamMetaOrDirectUrl.startsWith("http")) {
+            }
+            // Если передана временная ссылка из плеера или пустая строка — всегда берем свежую через поиск по треку
+            if (direct.isNullOrBlank()) {
+                val query = "$artist $title".trim()
+                val found = searchTracks(query, limit = 8)
+                val best = found.firstOrNull { it.title.equals(title, ignoreCase = true) && it.streamProgressiveUrl != null }
+                    ?: found.firstOrNull { it.streamProgressiveUrl != null }
+                if (best?.streamProgressiveUrl != null) {
+                    direct = resolveStreamUrl(best.streamProgressiveUrl)
+                }
+            }
+            if (direct.isNullOrBlank() && streamMetaOrDirectUrl.startsWith("http")) {
                 direct = streamMetaOrDirectUrl
             }
 

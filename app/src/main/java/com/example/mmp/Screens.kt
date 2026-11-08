@@ -2317,17 +2317,19 @@ fun WavySlider(
     val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
     val waveEnabled = prefs.getBoolean("anim_wave_enabled", true)
 
-    // Фиксированный диапазон 0..2*PI никогда не вызывает краш при паузе/старте!
-    val infiniteTransition = rememberInfiniteTransition(label = "wave")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * Math.PI.toFloat()),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1900, easing = LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
-        ),
-        label = "phase"
-    )
+    // Безопасный покадровый генератор фазы без InfiniteTransition (0 шансов на вылет при паузе/включении!)
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(isPlaying, waveEnabled) {
+        if (isPlaying && waveEnabled) {
+            var lastTime = withFrameNanos { it }
+            while (true) {
+                val now = withFrameNanos { it }
+                val dt = (now - lastTime) / 1_000_000_000f
+                lastTime = now
+                phase = (phase + dt * 3.3f) % (2f * Math.PI.toFloat())
+            }
+        }
+    }
 
     // При паузе амплитуда плавно уходит в 0f -> волна выпрямляется в идеально ровную линию!
     val amplitudeFraction by animateFloatAsState(
