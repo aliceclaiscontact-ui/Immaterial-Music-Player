@@ -1,4 +1,11 @@
 package com.example.mmp
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+
 
 import kotlinx.coroutines.launch
 
@@ -2125,17 +2132,17 @@ fun WavySlider(
     onValueChange: (Float) -> Unit,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
-    waveColor: androidx.compose.ui.graphics.Color,
-    trackColor: androidx.compose.ui.graphics.Color = waveColor.copy(alpha = 0.25f),
-    thumbColor: androidx.compose.ui.graphics.Color = waveColor
+    waveColor: Color,
+    trackColor: Color = waveColor.copy(alpha = 0.25f),
+    thumbColor: Color = waveColor
 ) {
-    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "wave")
+    val infiniteTransition = rememberInfiniteTransition(label = "wave")
     val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = if (isPlaying) (2f * Math.PI.toFloat()) else 0f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(durationMillis = 2000, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
         label = "phase"
     )
@@ -2148,21 +2155,25 @@ fun WavySlider(
         modifier = modifier
             .fillMaxWidth()
             .height(36.dp)
-            .androidx.compose.ui.input.pointer.pointerInput(Unit) {
-                androidx.compose.foundation.gestures.detectTapGestures { offset ->
-                    val newP = (offset.x / size.width).coerceIn(0f, 1f)
-                    onValueChange(newP)
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val w = size.width.toFloat()
+                    if (w > 0f) {
+                        onValueChange((offset.x / w).coerceIn(0f, 1f))
+                    }
                 }
             }
-            .androidx.compose.ui.input.pointer.pointerInput(Unit) {
-                androidx.compose.foundation.gestures.detectDragGestures(
+            .pointerInput(Unit) {
+                detectDragGestures(
                     onDragStart = { offset ->
                         isDragging = true
-                        dragProgress = (offset.x / size.width).coerceIn(0f, 1f)
+                        val w = size.width.toFloat()
+                        if (w > 0f) dragProgress = (offset.x / w).coerceIn(0f, 1f)
                     },
                     onDrag = { change, _ ->
                         change.consume()
-                        dragProgress = (change.position.x / size.width).coerceIn(0f, 1f)
+                        val w = size.width.toFloat()
+                        if (w > 0f) dragProgress = (change.position.x / w).coerceIn(0f, 1f)
                     },
                     onDragEnd = {
                         isDragging = false
@@ -2173,7 +2184,7 @@ fun WavySlider(
             },
         contentAlignment = Alignment.Center
     ) {
-        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxWidth().height(24.dp)) {
+        Canvas(modifier = Modifier.fillMaxWidth().height(24.dp)) {
             val width = size.width
             val midY = size.height / 2f
             val thumbX = width * displayProgress
@@ -2184,12 +2195,12 @@ fun WavySlider(
                     start = androidx.compose.ui.geometry.Offset(thumbX, midY),
                     end = androidx.compose.ui.geometry.Offset(width, midY),
                     strokeWidth = 3.5.dp.toPx(),
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    cap = StrokeCap.Round
                 )
             }
 
             if (thumbX > 0f) {
-                val wavePath = androidx.compose.ui.graphics.Path()
+                val wavePath = Path()
                 wavePath.moveTo(0f, midY)
 
                 val waveLength = 48.dp.toPx()
@@ -2207,9 +2218,9 @@ fun WavySlider(
                 drawPath(
                     path = wavePath,
                     color = waveColor,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    style = Stroke(
                         width = 4.dp.toPx(),
-                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        cap = StrokeCap.Round
                     )
                 )
             }
@@ -2221,7 +2232,7 @@ fun WavySlider(
                     start = androidx.compose.ui.geometry.Offset(thumbX, midY - thumbH / 2f),
                     end = androidx.compose.ui.geometry.Offset(thumbX, midY + thumbH / 2f),
                     strokeWidth = 4.dp.toPx(),
-                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    cap = StrokeCap.Round
                 )
             }
         }
