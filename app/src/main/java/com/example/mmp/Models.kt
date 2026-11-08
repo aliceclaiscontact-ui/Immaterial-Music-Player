@@ -521,6 +521,49 @@ object StorageHelper {
             }
         } catch (e: Exception) { emptyList() }
     }
+    fun saveSoundCloudTracks(prefs: SharedPreferences, tracks: List<Track>) {
+        val arr = org.json.JSONArray()
+        tracks.forEach { t ->
+            val obj = org.json.JSONObject()
+            obj.put("id", t.id)
+            obj.put("uri", t.uri.toString())
+            obj.put("title", t.title)
+            obj.put("artist", t.artist)
+            obj.put("album", t.album)
+            obj.put("durationMs", t.durationMs)
+            obj.put("customCoverUri", t.customCoverUri ?: "")
+            arr.put(obj)
+        }
+        prefs.edit().putString("saved_sc_tracks_v1", arr.toString()).apply()
+    }
+
+    fun loadSoundCloudTracks(prefs: SharedPreferences): List<Track> {
+        val raw = prefs.getString("saved_sc_tracks_v1", null) ?: return emptyList()
+        val list = mutableListOf<Track>()
+        try {
+            val arr = org.json.JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    Track(
+                        id = o.optLong("id"),
+                        uri = android.net.Uri.parse(o.optString("uri")),
+                        title = o.optString("title", "SoundCloud Track"),
+                        artist = o.optString("artist", "SoundCloud"),
+                        album = o.optString("album", "SoundCloud"),
+                        durationMs = o.optLong("durationMs", 0L),
+                        mimeType = "audio/mpeg",
+                        sizeBytes = 0L,
+                        filePath = o.optString("uri"),
+                        folderPath = "SoundCloud",
+                        folderName = "SoundCloud",
+                        customCoverUri = o.optString("customCoverUri").takeIf { it.isNotBlank() }
+                    )
+                )
+            }
+        } catch (_: Throwable) {}
+        return list
+    }
 }
 
 fun applyOverridesToTrack(track: Track, overrides: Map<Long, TrackTagOverride>): Track {
@@ -764,47 +807,4 @@ suspend fun fetchLyricsFromLrclib(
     }
     }
 
-    fun saveSoundCloudTracks(prefs: SharedPreferences, tracks: List<Track>) {
-        val arr = org.json.JSONArray()
-        tracks.forEach { t ->
-            val obj = org.json.JSONObject()
-            obj.put("id", t.id)
-            obj.put("uri", t.uri.toString())
-            obj.put("title", t.title)
-            obj.put("artist", t.artist)
-            obj.put("album", t.album)
-            obj.put("durationMs", t.durationMs)
-            obj.put("customCoverUri", t.customCoverUri ?: "")
-            arr.put(obj)
-        }
-        prefs.edit().putString("saved_sc_tracks_v1", arr.toString()).apply()
-    }
-
-    fun loadSoundCloudTracks(prefs: SharedPreferences): List<Track> {
-        val raw = prefs.getString("saved_sc_tracks_v1", null) ?: return emptyList()
-        val list = mutableListOf<Track>()
-        try {
-            val arr = org.json.JSONArray(raw)
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                list.add(
-                    Track(
-                        id = o.optLong("id"),
-                        uri = android.net.Uri.parse(o.optString("uri")),
-                        title = o.optString("title", "SoundCloud Track"),
-                        artist = o.optString("artist", "SoundCloud"),
-                        album = o.optString("album", "SoundCloud"),
-                        durationMs = o.optLong("durationMs", 0L),
-                        mimeType = "audio/mpeg",
-                        sizeBytes = 0L,
-                        filePath = o.optString("uri"),
-                        folderPath = "SoundCloud",
-                        folderName = "SoundCloud",
-                        customCoverUri = o.optString("customCoverUri").takeIf { it.isNotBlank() }
-                    )
-                )
-            }
-        } catch (_: Throwable) {}
-        return list
-    }
 
