@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.mmp"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.1.2"
     }
 
     buildTypes {
@@ -37,7 +37,6 @@ android {
 }
 
 dependencies {
-    // Media3 ExoPlayer
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-common:1.3.1")

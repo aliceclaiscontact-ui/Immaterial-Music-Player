@@ -1,15 +1,10 @@
 package com.example.mmp
 
 import android.Manifest
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.net.Uri
@@ -76,7 +71,7 @@ fun MMPApp() {
     var playbackPitch by remember { mutableFloatStateOf(1.0f) }
     var bassBoostStrength by remember { mutableIntStateOf(0) }
     var reverbPreset by remember { mutableIntStateOf(0) }
-    val bassBoostEffect = remember { mutableStateOf<BassBoost?>(null) }
+
     var minDurationSec by remember { mutableStateOf(StorageHelper.loadMinDurationSec(prefs)) }
     var excludedFolders by remember { mutableStateOf(StorageHelper.loadExcludedFolders(prefs)) }
     var tagOverrides by remember { mutableStateOf(StorageHelper.loadTagOverrides(prefs)) }
@@ -95,6 +90,7 @@ fun MMPApp() {
         if (granted) scope.launch { delay(700); rawDeviceTracks = scanDeviceMusic(context) }
     }
 
+    // ExoPlayer сам управляет AudioFocus (true) и наушниками (true) без конфликтов!
     val exoPlayer = remember {
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -106,12 +102,10 @@ fun MMPApp() {
             .build()
     }
 
-    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
     var isPlaying by remember { mutableStateOf(false) }
     var isMediaPlayerPrepared by remember { mutableStateOf(false) }
-    var wasPlayingBeforeFocusLoss by remember { mutableStateOf(false) }
     var currentPositionMs by remember { mutableStateOf(0L) }
     var showFullPlayerSheet by remember { mutableStateOf(false) }
     var currentTrackPlayedSeconds by remember { mutableStateOf(0) }
@@ -134,17 +128,32 @@ fun MMPApp() {
     var openedArtist by remember { mutableStateOf<String?>(null) }
     var openedAlbum by remember { mutableStateOf<String?>(null) }
 
-    // Контроль параллельных запусков при быстром переключении
     var activePlayJob by remember { mutableStateOf<Job?>(null) }
+    var activeMetaJob by remember { mutableStateOf<Job?>(null) }
 
-    fun applySystemEqualizer(sessionId: Int = 0) {
+    // Единый безопасный экземпляр эквалайзера и баса (без утечки памяти и крашей!)
+    val globalEqRef = remember { mutableStateOf<Equalizer?>(null) }
+    val globalBassRef = remember { mutableStateOf<BassBoost?>(null) }
+    val boundSessionId = remember { mutableIntStateOf(-1) }
+
+    fun applySystemEqualizer(sessionId: Int) {
+        val targetSession = if (sessionId > 0) sessionId else 0
         try {
             val enabled = prefs.getBoolean("eq_enabled", false)
-            val eqSession = if (sessionId != 0) sessionId else 0
-            val eq = Equalizer(1000, eqSession).apply { this.enabled = enabled }
-            val bass = BassBoost(1000, eqSession).apply { this.enabled = enabled }
+            if (globalEqRef.value == null || boundSessionId.intValue != targetSession) {
+                try { globalEqRef.value?.release() } catch (_: Throwable) {}
+                try { globalBassRef.value?.release() } catch (_: Throwable) {}
+                globalEqRef.value = Equalizer(0, targetSession)
+                globalBassRef.value = BassBoost(0, targetSession)
+                boundSessionId.intValue = targetSession
+            }
 
-            if (enabled) {
+            val eq = globalEqRef.value
+            val bass = globalBassRef.value
+            eq?.enabled = enabled
+            bass?.enabled = enabled
+
+            if (enabled && eq != null) {
                 val range = eq.bandLevelRange
                 val minMb = range[0].toInt()
                 val maxMb = range[1].toInt()
@@ -155,15 +164,17 @@ fun MMPApp() {
                     prefs.getFloat("eq_b3", 0f),
                     prefs.getFloat("eq_b4", 0f)
                 )
-                for (b in 0 until eq.numberOfBands.toInt()) {
+                val numBands = eq.numberOfBands.toInt()
+                for (b in 0 until numBands) {
                     val db = bands.getOrElse(b) { 0f }
                     val mb = (db * 100f).toInt().coerceIn(minMb, maxMb).toShort()
                     eq.setBandLevel(b.toShort(), mb)
                 }
-                if (bass.strengthSupported) {
-                    val bassVal = (prefs.getInt("bass_boost_level", 0) * 10).coerceIn(0, 1000).toShort()
-                    bass.setStrength(bassVal)
-                }
+            }
+            if (enabled && bass != null && bass.strengthSupported) {
+                val prefBass = prefs.getInt("bass_boost_level", 0) * 10
+                val effectiveBass = if (bassBoostStrength > 0) bassBoostStrength else prefBass
+                bass.setStrength(effectiveBass.coerceIn(0, 1000).toShort())
             }
         } catch (_: Throwable) {}
     }
@@ -175,10 +186,11 @@ fun MMPApp() {
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
-        applySystemEqualizer()
 
         onDispose {
             prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+            try { globalEqRef.value?.release() } catch (_: Throwable) {}
+            try { globalBassRef.value?.release() } catch (_: Throwable) {}
         }
     }
 
@@ -209,6 +221,8 @@ fun MMPApp() {
         }
     }
 
+    var isServiceStarted by remember { mutableStateOf(false) }
+
     fun syncMediaService(track: Track?, meta: DetailedMetadata, playing: Boolean) {
         if (track == null) return
         try {
@@ -218,83 +232,17 @@ fun MMPApp() {
             PlayerBridge.isPlaying = playing
             MMPWidgetProvider.updateAllWidgets(context)
             val intent = Intent(context, MediaPlaybackService::class.java).setAction("ACTION_UPDATE")
-            if (playing) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+            if (playing || !isServiceStarted) {
+                isServiceStarted = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
             } else {
                 context.startService(intent)
             }
-        } catch (e: Throwable) {
-            e.printStackTrace()
-        }
-    }
-
-    val focusChangeListener = remember {
-        AudioManager.OnAudioFocusChangeListener { focusChange ->
-            when (focusChange) {
-                AudioManager.AUDIOFOCUS_LOSS -> {
-                    wasPlayingBeforeFocusLoss = false
-                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
-                    isPlaying = false
-                    syncMediaService(currentTrack, currentMetadata, false)
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    wasPlayingBeforeFocusLoss = isPlaying
-                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
-                    isPlaying = false
-                    syncMediaService(currentTrack, currentMetadata, false)
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    try { exoPlayer.volume = 0.2f } catch (_: Throwable) {}
-                }
-                AudioManager.AUDIOFOCUS_GAIN -> {
-                    try { exoPlayer.volume = 1f } catch (_: Throwable) {}
-                    if (wasPlayingBeforeFocusLoss) {
-                        wasPlayingBeforeFocusLoss = false
-                        try {
-                            exoPlayer.play()
-                            isPlaying = true
-                            syncMediaService(currentTrack, currentMetadata, true)
-                        } catch (_: Throwable) {}
-                    }
-                }
-            }
-        }
-    }
-
-    fun requestAudioFocus(): Boolean {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build()
-                    )
-                    .setOnAudioFocusChangeListener(focusChangeListener)
-                    .build()
-                audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            } else {
-                @Suppress("DEPRECATION")
-                audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            }
-        } catch (_: Throwable) { true }
-    }
-
-    DisposableEffect(context) {
-        val noisyReceiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context?, intent: Intent?) {
-                if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY && isPlaying) {
-                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
-                    isPlaying = false
-                    syncMediaService(currentTrack, currentMetadata, false)
-                }
-            }
-        }
-        context.registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
-        onDispose {
-            try { context.unregisterReceiver(noisyReceiver) } catch (_: Throwable) {}
-        }
+        } catch (_: Throwable) {}
     }
 
     fun searchAndCacheOnlineLyrics(track: Track, customQuery: String? = null, showFeedback: Boolean = false) {
@@ -340,6 +288,8 @@ fun MMPApp() {
         }
 
         activePlayJob?.cancel()
+        activeMetaJob?.cancel()
+
         currentTrack = track
         currentPositionMs = startOffsetMs
         currentTrackPlayedSeconds = 0
@@ -348,10 +298,6 @@ fun MMPApp() {
 
         activePlayJob = scope.launch {
             try {
-                requestAudioFocus()
-                exoPlayer.stop()
-                exoPlayer.clearMediaItems()
-
                 val rawUrl = track.filePath.ifBlank { track.uri.toString() }
                 val finalUri = if (rawUrl.contains("api-v2.soundcloud.com")) {
                     val resolved = SoundCloudClient.resolveStreamUrl(rawUrl)
@@ -361,30 +307,30 @@ fun MMPApp() {
                 }
 
                 val mediaItem = MediaItem.fromUri(finalUri)
-                exoPlayer.setMediaItem(mediaItem)
+                exoPlayer.setMediaItem(mediaItem, startOffsetMs.coerceAtLeast(0L))
                 exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
+                exoPlayer.volume = 1f
                 exoPlayer.prepare()
-
-                if (startOffsetMs > 0L && startOffsetMs < track.durationMs - 1000L) {
-                    exoPlayer.seekTo(startOffsetMs)
-                }
-
                 exoPlayer.play()
+
                 isMediaPlayerPrepared = true
                 isPlaying = true
                 syncMediaService(track, currentMetadata, true)
-                applySystemEqualizer(exoPlayer.audioSessionId)
-
-                val meta = extractTrackMetadata(context, track)
-                currentMetadata = meta
-                syncMediaService(track, meta, true)
-                if (meta.lyrics.isEmpty()) {
-                    searchAndCacheOnlineLyrics(track, null, false)
-                }
             } catch (e: Throwable) {
                 isPlaying = false
                 isMediaPlayerPrepared = false
                 Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        activeMetaJob = scope.launch {
+            val meta = extractTrackMetadata(context, track)
+            if (currentTrack?.id == track.id) {
+                currentMetadata = meta
+                syncMediaService(track, meta, isPlaying)
+                if (meta.lyrics.isEmpty()) {
+                    searchAndCacheOnlineLyrics(track, null, false)
+                }
             }
         }
     }
@@ -392,11 +338,15 @@ fun MMPApp() {
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
-                if (playing) {
-                    isPlaying = true
-                } else if (exoPlayer.playbackState != Player.STATE_BUFFERING && exoPlayer.playbackState != Player.STATE_IDLE) {
-                    isPlaying = false
+                isPlaying = playing
+                val cur = currentTrack
+                if (cur != null) {
+                    syncMediaService(cur, currentMetadata, playing)
                 }
+            }
+
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                applySystemEqualizer(audioSessionId)
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -480,21 +430,20 @@ fun MMPApp() {
         }
     }
 
-    fun togglePlayPause() {
+    fun setPlayingState(wantPlay: Boolean) {
         val cur = currentTrack
         if (cur != null) {
             if (!isMediaPlayerPrepared || exoPlayer.playbackState == Player.STATE_IDLE) {
-                playTrack(cur, null, currentPositionMs)
+                if (wantPlay) playTrack(cur, null, currentPositionMs)
                 return
             }
-            if (isPlaying) {
+            if (!wantPlay) {
                 try { exoPlayer.pause() } catch (_: Throwable) {}
                 isPlaying = false
                 StorageHelper.saveLastPlayedState(prefs, cur, currentPositionMs)
                 syncMediaService(cur, currentMetadata, false)
             } else {
                 try {
-                    requestAudioFocus()
                     if (exoPlayer.playbackState == Player.STATE_ENDED) {
                         exoPlayer.seekTo(0L)
                         currentPositionMs = 0L
@@ -503,13 +452,15 @@ fun MMPApp() {
                     exoPlayer.play()
                     isPlaying = true
                     syncMediaService(cur, currentMetadata, true)
-                } catch (e: Throwable) {
-                    e.printStackTrace()
-                }
+                } catch (_: Throwable) {}
             }
-        } else if (deviceTracks.isNotEmpty()) {
+        } else if (wantPlay && deviceTracks.isNotEmpty()) {
             playTrack(deviceTracks.first(), deviceTracks)
         }
+    }
+
+    fun togglePlayPause() {
+        setPlayingState(!isPlaying)
     }
 
     fun toggleShuffle() {
@@ -534,7 +485,9 @@ fun MMPApp() {
     }
 
     SideEffect {
-        PlayerBridge.onPlayPause = { togglePlayPause() }
+        PlayerBridge.onPlay = { setPlayingState(true) }
+        PlayerBridge.onPause = { setPlayingState(false) }
+        PlayerBridge.onToggle = { togglePlayPause() }
         PlayerBridge.onNext = { playNextTrack() }
         PlayerBridge.onPrev = { playPrevTrack() }
     }
@@ -544,9 +497,7 @@ fun MMPApp() {
             delay(1000L)
             sleepTimerRemainingSec -= 1
             if (sleepTimerRemainingSec == 0 && isPlaying) {
-                try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (_: Throwable) {}
-                isPlaying = false
-                syncMediaService(currentTrack, currentMetadata, false)
+                setPlayingState(false)
                 Toast.makeText(context, "Таймер сна остановил музыку", Toast.LENGTH_SHORT).show()
             }
         }
@@ -938,13 +889,7 @@ fun MMPApp() {
                         reverbPreset = rev
                         try {
                             exoPlayer.playbackParameters = PlaybackParameters(spd, ptc)
-                            val sessionId = exoPlayer.audioSessionId
-                            if (sessionId != 0) {
-                                if (bassBoostEffect.value == null) {
-                                    bassBoostEffect.value = BassBoost(0, sessionId).apply { enabled = true }
-                                }
-                                bassBoostEffect.value?.setStrength(bass.toShort())
-                            }
+                            applySystemEqualizer(exoPlayer.audioSessionId)
                         } catch (_: Throwable) {}
                     }
                 )

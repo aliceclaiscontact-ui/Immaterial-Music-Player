@@ -20,7 +20,9 @@ import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 
 object PlayerBridge {
-    var onPlayPause: (() -> Unit)? = null
+    var onPlay: (() -> Unit)? = null
+    var onPause: (() -> Unit)? = null
+    var onToggle: (() -> Unit)? = null
     var onNext: (() -> Unit)? = null
     var onPrev: (() -> Unit)? = null
     var currentTitle: String = "MMP"
@@ -45,8 +47,9 @@ class MMPWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_title, PlayerBridge.currentTitle)
                 views.setTextViewText(R.id.widget_artist, PlayerBridge.currentArtist)
 
-                if (PlayerBridge.currentBitmap != null) {
-                    views.setImageViewBitmap(R.id.widget_cover, PlayerBridge.currentBitmap)
+                val bmp = PlayerBridge.currentBitmap?.takeIf { !it.isRecycled }
+                if (bmp != null) {
+                    views.setImageViewBitmap(R.id.widget_cover, bmp)
                 } else {
                     views.setImageViewResource(R.id.widget_cover, android.R.drawable.ic_media_play)
                 }
@@ -87,6 +90,7 @@ class MediaPlaybackService : Service() {
     private lateinit var mediaSession: MediaSessionCompat
     private val CHANNEL_ID = "mmp_playback_channel"
     private val NOTIF_ID = 777
+    private var isUpdatingInternally = false
 
     override fun onCreate() {
         super.onCreate()
@@ -94,18 +98,17 @@ class MediaPlaybackService : Service() {
         mediaSession = MediaSessionCompat(this, "MMPMediaSession").apply {
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    // Вызываем только если действие инициировано извне (наушники/BT)
-                    if (!PlayerBridge.isPlaying) {
-                        PlayerBridge.onPlayPause?.invoke()
-                    }
+                    if (!isUpdatingInternally) PlayerBridge.onPlay?.invoke()
                 }
                 override fun onPause() {
-                    if (PlayerBridge.isPlaying) {
-                        PlayerBridge.onPlayPause?.invoke()
-                    }
+                    if (!isUpdatingInternally) PlayerBridge.onPause?.invoke()
                 }
-                override fun onSkipToNext() { PlayerBridge.onNext?.invoke() }
-                override fun onSkipToPrevious() { PlayerBridge.onPrev?.invoke() }
+                override fun onSkipToNext() {
+                    if (!isUpdatingInternally) PlayerBridge.onNext?.invoke()
+                }
+                override fun onSkipToPrevious() {
+                    if (!isUpdatingInternally) PlayerBridge.onPrev?.invoke()
+                }
             })
             isActive = true
         }
@@ -113,10 +116,10 @@ class MediaPlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            "ACTION_TOGGLE" -> PlayerBridge.onPlayPause?.invoke()
+            "ACTION_TOGGLE" -> PlayerBridge.onToggle?.invoke()
             "ACTION_NEXT" -> PlayerBridge.onNext?.invoke()
             "ACTION_PREV" -> PlayerBridge.onPrev?.invoke()
-            "ACTION_UPDATE" -> { /* Просто обновляем статус и нотификацию */ }
+            "ACTION_UPDATE" -> { /* Только обновляем уведомление */ }
         }
         updateNotification()
         MMPWidgetProvider.updateAllWidgets(this)
@@ -124,26 +127,33 @@ class MediaPlaybackService : Service() {
     }
 
     private fun updateNotification() {
-        val state = if (PlayerBridge.isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
-        mediaSession.setPlaybackState(
-            PlaybackStateCompat.Builder()
-                .setActions(
-                    PlaybackStateCompat.ACTION_PLAY or
-                    PlaybackStateCompat.ACTION_PAUSE or
-                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
-                )
-                .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
-                .build()
-        )
+        try {
+            isUpdatingInternally = true
+            val state = if (PlayerBridge.isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
+            mediaSession.setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setActions(
+                        PlaybackStateCompat.ACTION_PLAY or
+                        PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                    )
+                    .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
+                    .build()
+            )
 
-        val metaBuilder = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, PlayerBridge.currentTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, PlayerBridge.currentArtist)
-        if (PlayerBridge.currentBitmap != null) {
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, PlayerBridge.currentBitmap)
+            val safeBitmap = PlayerBridge.currentBitmap?.takeIf { !it.isRecycled }
+            val metaBuilder = MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, PlayerBridge.currentTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, PlayerBridge.currentArtist)
+            if (safeBitmap != null) {
+                metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, safeBitmap)
+            }
+            mediaSession.setMetadata(metaBuilder.build())
+        } catch (_: Throwable) {
+        } finally {
+            isUpdatingInternally = false
         }
-        mediaSession.setMetadata(metaBuilder.build())
 
         val openAppIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -164,12 +174,13 @@ class MediaPlaybackService : Service() {
         )
 
         val playPauseIcon = if (PlayerBridge.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val safeBitmap = PlayerBridge.currentBitmap?.takeIf { !it.isRecycled }
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(PlayerBridge.currentTitle)
             .setContentText(PlayerBridge.currentArtist)
-            .setLargeIcon(PlayerBridge.currentBitmap)
+            .setLargeIcon(safeBitmap)
             .setContentIntent(openAppIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(PlayerBridge.isPlaying)
@@ -183,7 +194,9 @@ class MediaPlaybackService : Service() {
             )
             .build()
 
-        startForeground(NOTIF_ID, notification)
+        try {
+            startForeground(NOTIF_ID, notification)
+        } catch (_: Throwable) {}
     }
 
     private fun createChannel() {
@@ -199,7 +212,7 @@ class MediaPlaybackService : Service() {
     }
 
     override fun onDestroy() {
-        mediaSession.release()
+        try { mediaSession.release() } catch (_: Throwable) {}
         super.onDestroy()
     }
 
