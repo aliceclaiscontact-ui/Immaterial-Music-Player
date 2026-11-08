@@ -207,6 +207,85 @@ fun MMPApp() {
         }
     }
 
+    val deviceTracks = remember(rawDeviceTracks, minDurationSec, excludedFolders, tagOverrides) {
+        rawDeviceTracks
+            .filter { it.durationMs >= minDurationSec * 1000L && !excludedFolders.contains(it.folderPath) }
+            .map { applyOverridesToTrack(it, tagOverrides) }
+    }
+
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
+        hasAudioPermission = granted
+        if (granted) {
+            val scanned = scanDeviceMusic(context)
+            rawDeviceTracks = scanned
+        } else {
+            permissionLauncher.launch(audioPermission)
+        }
+
+        val lastSaved = StorageHelper.loadLastPlayedState(prefs)
+        if (lastSaved != null && currentTrack == null) {
+            val (savedTrack, savedPos) = lastSaved
+            val updatedTrack = applyOverridesToTrack(savedTrack, tagOverrides)
+            currentTrack = updatedTrack
+            currentPositionMs = savedPos
+            isMediaPlayerPrepared = false
+            currentMetadata = extractTrackMetadata(context, updatedTrack)
+        }
+    }
+
+    fun syncMediaService(track: Track?, meta: DetailedMetadata, playing: Boolean) {
+        if (track == null) return
+        try {
+            PlayerBridge.currentTitle = track.title
+            PlayerBridge.currentArtist = track.artist
+            PlayerBridge.currentBitmap = meta.coverArt?.takeIf { !it.isRecycled }
+            PlayerBridge.isPlaying = playing
+            MMPWidgetProvider.updateAllWidgets(context)
+            val intent = Intent(context, MediaPlaybackService::class.java).setAction("ACTION_UPDATE")
+            if (playing) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
+    }
+
+    val focusChangeListener = remember {
+        AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS -> {
+                    wasPlayingBeforeFocusLoss = false
+                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (e: Throwable) {}
+                    isPlaying = false
+                    syncMediaService(currentTrack, currentMetadata, false)
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    wasPlayingBeforeFocusLoss = isPlaying
+                    try { if (exoPlayer.isPlaying) exoPlayer.pause() } catch (e: Throwable) {}
+                    isPlaying = false
+                    syncMediaService(currentTrack, currentMetadata, false)
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    try { exoPlayer.volume = 0.2f } catch (e: Throwable) {}
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    try { exoPlayer.volume = 1f } catch (e: Throwable) {}
+                    if (wasPlayingBeforeFocusLoss) {
+                        wasPlayingBeforeFocusLoss = false
+                        try {
+                            exoPlayer.play()
+                            isPlaying = true
+                            syncMediaService(currentTrack, currentMetadata, true)
+                        } catch (e: Throwable) {}
+                    }
+                }
+            }
+        }
+    }
+
     fun requestAudioFocus(): Boolean {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
