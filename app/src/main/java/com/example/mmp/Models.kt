@@ -10,7 +10,6 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.LruCache
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -300,7 +299,6 @@ fun parseLrcText(raw: String): List<LyricLine> {
 object StorageHelper {
     fun getTodayDateString(): String = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
 
-    // Дата первого запуска приложения (берёт реальную дату установки или фиксирует первый старт)
     fun getOrInitFirstLaunchDate(context: Context, prefs: SharedPreferences): String {
         val existing = prefs.getString("first_launch_date_v2", null)
         if (!existing.isNullOrBlank()) return existing
@@ -320,7 +318,6 @@ object StorageHelper {
         return dateStr
     }
 
-    // Сохранение и восстановление последнего игравшего трека и позиции
     fun saveLastPlayedState(prefs: SharedPreferences, track: Track, positionMs: Long) {
         val obj = JSONObject().apply {
             put("id", track.id)
@@ -367,6 +364,58 @@ object StorageHelper {
         } catch (_: Throwable) {
             null
         }
+    }
+
+    fun saveLastQueue(prefs: SharedPreferences, queue: List<Track>) {
+        val arr = JSONArray()
+        queue.take(150).forEach { track ->
+            val obj = JSONObject().apply {
+                put("id", track.id)
+                put("uri", track.uri.toString())
+                put("title", track.title)
+                put("artist", track.artist)
+                put("album", track.album)
+                put("durationMs", track.durationMs)
+                put("mimeType", track.mimeType)
+                put("sizeBytes", track.sizeBytes)
+                put("filePath", track.filePath)
+                put("folderPath", track.folderPath)
+                put("folderName", track.folderName)
+                if (track.customCoverUri != null) put("customCoverUri", track.customCoverUri)
+                if (track.customLyrics != null) put("customLyrics", track.customLyrics)
+            }
+            arr.put(obj)
+        }
+        prefs.edit().putString("last_saved_queue_v1", arr.toString()).apply()
+    }
+
+    fun loadLastQueue(prefs: SharedPreferences): List<Track> {
+        val raw = prefs.getString("last_saved_queue_v1", null) ?: return emptyList()
+        val list = mutableListOf<Track>()
+        try {
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    Track(
+                        id = obj.optLong("id"),
+                        uri = Uri.parse(obj.optString("uri")),
+                        title = obj.optString("title", "Неизвестный трек"),
+                        artist = obj.optString("artist", "Неизвестный исполнитель"),
+                        album = obj.optString("album", "Без альбома"),
+                        durationMs = obj.optLong("durationMs", 0L),
+                        mimeType = obj.optString("mimeType", "audio/mpeg"),
+                        sizeBytes = obj.optLong("sizeBytes", 0L),
+                        filePath = obj.optString("filePath", ""),
+                        folderPath = obj.optString("folderPath", ""),
+                        folderName = obj.optString("folderName", "Память"),
+                        customCoverUri = obj.optString("customCoverUri", "").ifBlank { null },
+                        customLyrics = obj.optString("customLyrics", "").ifBlank { null }
+                    )
+                )
+            }
+        } catch (_: Throwable) {}
+        return list
     }
 
     fun saveTheme(prefs: SharedPreferences, config: MMPThemeConfig) {
@@ -521,6 +570,7 @@ object StorageHelper {
             }
         } catch (e: Exception) { emptyList() }
     }
+
     fun saveSoundCloudTracks(prefs: SharedPreferences, tracks: List<Track>) {
         val arr = org.json.JSONArray()
         tracks.forEach { t ->
@@ -805,6 +855,4 @@ suspend fun fetchLyricsFromLrclib(
     } catch (_: Throwable) {
         null
     }
-    }
-
-
+}

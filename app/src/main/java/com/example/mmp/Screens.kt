@@ -35,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -379,7 +378,9 @@ fun SoundCloudScreen(
     onToggleLikeScTrack: (SoundCloudTrack) -> Unit,
     onAddScToPlaylist: (SoundCloudTrack) -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
+    val ctx = LocalContext.current
+    val scPrefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
+    var query by remember { mutableStateOf(scPrefs.getString("sc_saved_query", "") ?: "") }
     var isSearching by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<SoundCloudTrack>>(emptyList()) }
     var activeTab by remember { mutableIntStateOf(0) }
@@ -415,7 +416,10 @@ fun SoundCloudScreen(
             ) {
                 OutlinedTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = {
+                        query = it
+                        scPrefs.edit().putString("sc_saved_query", it).apply()
+                    },
                     placeholder = { Text("Введите имя, автора или название альбома", color = textColor.copy(0.5f), fontSize = 13.sp) },
                     singleLine = true,
                     shape = cardShape,
@@ -426,6 +430,7 @@ fun SoundCloudScreen(
                         if (query.isNotBlank()) {
                             isSearching = true
                             statusMessage = ""
+                            scPrefs.edit().putString("sc_saved_query", query).apply()
                             scope.launch {
                                 val found = SoundCloudClient.searchTracks(query.trim())
                                 isSearching = false
@@ -1011,12 +1016,14 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            val coverScale by animateFloatAsState(if (isPlaying) 1f else 0.92f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "")
+            // Безопасный масштаб без вылета при паузе
+            val targetScale = if (isPlaying) 1f else 0.94f
+            val coverScale by animateFloatAsState(targetValue = targetScale, animationSpec = tween(250), label = "coverScale")
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .padding((1f - coverScale).dp * 100)
+                    .padding((1f - coverScale).dp * 80)
                     .clip(expressiveShape)
                     .background(textColor.copy(0.08f))
                     .border(1.dp, textColor.copy(0.18f), expressiveShape)
@@ -1153,7 +1160,9 @@ fun FullScreenPlayerOverlay(
                 }
 
                 Box(
-                    modifier = Modifier.size(76.dp).clip(expressiveShape).background(primaryColor).clickable { onPlayPause() },
+                    modifier = Modifier.size(76.dp).clip(expressiveShape).background(primaryColor).clickable {
+                        onPlayPause()
+                    },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(40.dp))
@@ -1381,7 +1390,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                 } else {
                     LazyColumn(
                         state = lyricListState,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(top = 18.dp, bottom = 260.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
@@ -1389,27 +1398,20 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                             val isCurrent = idx == activeLyricIndex
                             val distance = abs(idx - activeLyricIndex)
                             val ctx = LocalContext.current
-                            val prefs = remember { ctx.getSharedPreferences("mmp_prefs", Context.MODE_PRIVATE) }
-                            val smoothLyricsAnim = remember { prefs.getBoolean("anim_lyrics_smooth", false) }
+                            val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
                             val blurLyricsEnabled = remember { prefs.getBoolean("anim_lyrics_blur", false) }
 
                             val rawAlpha = when {
                                 isCurrent -> 1f
-                                idx == activeLyricIndex - 1 -> 0.5f
-                                else -> (0.42f - distance * 0.06f).coerceIn(0.2f, 0.42f)
+                                idx == activeLyricIndex - 1 -> 0.6f
+                                else -> (0.45f - distance * 0.08f).coerceIn(0.2f, 0.45f)
                             }
-                            val targetAlpha = if (smoothLyricsAnim) {
-                                animateFloatAsState(targetValue = rawAlpha, animationSpec = tween(220), label = "LyricAlpha").value
-                            } else rawAlpha
-
-                            val targetScale = if (smoothLyricsAnim) {
-                                animateFloatAsState(targetValue = if (isCurrent) 1.0f else 0.96f, animationSpec = tween(220), label = "LyricScale").value
-                            } else 1.0f
 
                             val blurRadius = if (blurLyricsEnabled && !isCurrent) {
-                                (distance * 1.2f).coerceAtMost(4.0f)
+                                (distance * 1.0f).coerceAtMost(3.0f)
                             } else 0f
 
+                            // Текст без масштабирования и без цветного акцента (чистый белый и читаемый)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1418,17 +1420,15 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                                         if (blurRadius > 0.2f) mod.blur(blurRadius.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
                                         else mod
                                     }
-                                    .padding(vertical = 8.dp, horizontal = 8.dp)
+                                    .padding(vertical = 6.dp, horizontal = 8.dp)
                             ) {
                                 Text(
                                     text = line.text,
-                                    color = if (isCurrent) primaryColor else Color.White.copy(alpha = targetAlpha),
-                                    fontSize = if (isCurrent) 24.sp else 18.sp,
+                                    color = Color.White.copy(alpha = rawAlpha),
+                                    fontSize = 20.sp,
                                     fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
-                                    lineHeight = if (isCurrent) 31.sp else 24.sp,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .let { m -> if (smoothLyricsAnim) m.scale(targetScale) else m }
+                                    lineHeight = 28.sp,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }
@@ -1664,7 +1664,7 @@ fun SettingsAndThemeEditor(
                             border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
                         ) {
                             Text(
-                                "v1.1.2",
+                                "v1.1.3",
                                 color = primaryColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
@@ -1933,7 +1933,6 @@ fun SettingsAndThemeEditor(
                 val ctx = LocalContext.current
                 val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
                 var waveAnimEnabled by remember { mutableStateOf(prefs.getBoolean("anim_wave_enabled", true)) }
-                var smoothLyricsAnim by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_smooth", false)) }
                 var blurLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_blur", false)) }
 
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 120.dp)) {
@@ -1955,20 +1954,6 @@ fun SettingsAndThemeEditor(
                                     onCheckedChange = {
                                         waveAnimEnabled = it
                                         prefs.edit().putBoolean("anim_wave_enabled", it).apply()
-                                    },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
-                                )
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Плавное масштабирование текста", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Отключите для максимального FPS на бюджетных смартфонах", color = textColor.copy(0.6f), fontSize = 12.sp)
-                                }
-                                Switch(
-                                    checked = smoothLyricsAnim,
-                                    onCheckedChange = {
-                                        smoothLyricsAnim = it
-                                        prefs.edit().putBoolean("anim_lyrics_smooth", it).apply()
                                     },
                                     colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
                                 )

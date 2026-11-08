@@ -66,11 +66,12 @@ fun MMPApp() {
         }
         mutableStateOf<List<Track>>(initialList)
     }
+
     var showAudioFxDialog by remember { mutableStateOf(false) }
-    var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
-    var playbackPitch by remember { mutableFloatStateOf(1.0f) }
-    var bassBoostStrength by remember { mutableIntStateOf(0) }
-    var reverbPreset by remember { mutableIntStateOf(0) }
+    var playbackSpeed by remember { mutableFloatStateOf(prefs.getFloat("saved_speed", 1.0f)) }
+    var playbackPitch by remember { mutableFloatStateOf(prefs.getFloat("saved_pitch", 1.0f)) }
+    var bassBoostStrength by remember { mutableIntStateOf(prefs.getInt("saved_fx_bass", 0)) }
+    var reverbPreset by remember { mutableIntStateOf(prefs.getInt("saved_fx_reverb", 0)) }
 
     var minDurationSec by remember { mutableStateOf(StorageHelper.loadMinDurationSec(prefs)) }
     var excludedFolders by remember { mutableStateOf(StorageHelper.loadExcludedFolders(prefs)) }
@@ -90,7 +91,6 @@ fun MMPApp() {
         if (granted) scope.launch { delay(700); rawDeviceTracks = scanDeviceMusic(context) }
     }
 
-    // ExoPlayer сам управляет AudioFocus (true) и наушниками (true) без конфликтов!
     val exoPlayer = remember {
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
@@ -112,9 +112,12 @@ fun MMPApp() {
     var currentTrackRecorded20Sec by remember { mutableStateOf(false) }
     var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds_total", 0)) }
 
-    var currentQueue by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var isShuffleEnabled by remember { mutableStateOf(false) }
-    var repeatMode by remember { mutableStateOf(RepeatMode.OFF) }
+    var currentQueue by remember { mutableStateOf(StorageHelper.loadLastQueue(prefs)) }
+    var isShuffleEnabled by remember { mutableStateOf(prefs.getBoolean("saved_shuffle_enabled", false)) }
+    var repeatMode by remember {
+        val ord = prefs.getInt("saved_repeat_mode", 0)
+        mutableStateOf(RepeatMode.entries.getOrElse(ord) { RepeatMode.OFF })
+    }
     var showQueueSheet by remember { mutableStateOf(false) }
     var trackToEditTags by remember { mutableStateOf<Track?>(null) }
     var pendingTagCoverUri by remember { mutableStateOf<String?>(null) }
@@ -130,8 +133,8 @@ fun MMPApp() {
 
     var activePlayJob by remember { mutableStateOf<Job?>(null) }
     var activeMetaJob by remember { mutableStateOf<Job?>(null) }
+    var crossfadeTriggeredForTrackId by remember { mutableStateOf<Long?>(null) }
 
-    // Единый безопасный экземпляр эквалайзера и баса (без утечки памяти и крашей!)
     val globalEqRef = remember { mutableStateOf<Equalizer?>(null) }
     val globalBassRef = remember { mutableStateOf<BassBoost?>(null) }
     val boundSessionId = remember { mutableIntStateOf(-1) }
@@ -151,7 +154,7 @@ fun MMPApp() {
             val eq = globalEqRef.value
             val bass = globalBassRef.value
             eq?.enabled = enabled
-            bass?.enabled = enabled
+            bass?.enabled = (enabled || bassBoostStrength > 0)
 
             if (enabled && eq != null) {
                 val range = eq.bandLevelRange
@@ -171,9 +174,9 @@ fun MMPApp() {
                     eq.setBandLevel(b.toShort(), mb)
                 }
             }
-            if (enabled && bass != null && bass.strengthSupported) {
-                val prefBass = prefs.getInt("bass_boost_level", 0) * 10
-                val effectiveBass = if (bassBoostStrength > 0) bassBoostStrength else prefBass
+            if (bass != null && bass.strengthSupported) {
+                val prefBass = if (enabled) prefs.getInt("bass_boost_level", 0) * 10 else 0
+                val effectiveBass = maxOf(bassBoostStrength, prefBass)
                 bass.setStrength(effectiveBass.coerceIn(0, 1000).toShort())
             }
         } catch (_: Throwable) {}
@@ -230,6 +233,10 @@ fun MMPApp() {
             PlayerBridge.currentArtist = track.artist
             PlayerBridge.currentBitmap = meta.coverArt?.takeIf { !it.isRecycled }
             PlayerBridge.isPlaying = playing
+            PlayerBridge.currentPositionMs = currentPositionMs
+            PlayerBridge.durationMs = track.durationMs
+            PlayerBridge.isShuffleEnabled = isShuffleEnabled
+            PlayerBridge.repeatModeOrdinal = repeatMode.ordinal
             MMPWidgetProvider.updateAllWidgets(context)
             val intent = Intent(context, MediaPlaybackService::class.java).setAction("ACTION_UPDATE")
             if (playing || !isServiceStarted) {
@@ -278,18 +285,22 @@ fun MMPApp() {
 
     fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L) {
         if (newQueue != null) {
-            currentQueue = if (isShuffleEnabled) {
+            val builtQueue = if (isShuffleEnabled) {
                 listOf(track) + newQueue.filter { it.id != track.id }.shuffled()
             } else {
                 newQueue
             }
+            currentQueue = builtQueue
+            StorageHelper.saveLastQueue(prefs, builtQueue)
         } else if (currentQueue.isEmpty()) {
             currentQueue = deviceTracks
+            StorageHelper.saveLastQueue(prefs, deviceTracks)
         }
 
         activePlayJob?.cancel()
         activeMetaJob?.cancel()
 
+        crossfadeTriggeredForTrackId = null
         currentTrack = track
         currentPositionMs = startOffsetMs
         currentTrackPlayedSeconds = 0
@@ -309,7 +320,9 @@ fun MMPApp() {
                 val mediaItem = MediaItem.fromUri(finalUri)
                 exoPlayer.setMediaItem(mediaItem, startOffsetMs.coerceAtLeast(0L))
                 exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
-                exoPlayer.volume = 1f
+
+                val cfSec = prefs.getInt("crossfade_sec", 0)
+                exoPlayer.volume = if (cfSec > 0 && startOffsetMs == 0L) 0.15f else 1f
                 exoPlayer.prepare()
                 exoPlayer.play()
 
@@ -335,6 +348,57 @@ fun MMPApp() {
         }
     }
 
+    fun playNextTrack() {
+        val cur = currentTrack ?: return
+        if (currentQueue.isEmpty()) currentQueue = deviceTracks
+        val idx = currentQueue.indexOfFirst { it.id == cur.id }
+        if (idx != -1 && idx + 1 < currentQueue.size) {
+            playTrack(currentQueue[idx + 1])
+        } else if (repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty()) {
+            playTrack(currentQueue.first())
+        }
+    }
+
+    fun playPrevTrack() {
+        val cur = currentTrack ?: return
+        if (currentPositionMs > 4000L && isMediaPlayerPrepared) {
+            try {
+                if (exoPlayer.playbackState == Player.STATE_READY) {
+                    exoPlayer.seekTo(0L)
+                    currentPositionMs = 0L
+                    syncMediaService(cur, currentMetadata, isPlaying)
+                    return
+                }
+            } catch (_: Throwable) {}
+        }
+        if (currentQueue.isEmpty()) currentQueue = deviceTracks
+        val idx = currentQueue.indexOfFirst { it.id == cur.id }
+        if (idx > 0) {
+            playTrack(currentQueue[idx - 1])
+        } else if (repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty()) {
+            playTrack(currentQueue.last())
+        }
+    }
+
+    fun safeSeekTo(targetMs: Long) {
+        val cur = currentTrack ?: return
+        val maxDur = cur.durationMs.coerceAtLeast(1L)
+        val clamped = targetMs.coerceIn(0L, (maxDur - 300L).coerceAtLeast(0L))
+        currentPositionMs = clamped
+        StorageHelper.saveLastPlayedState(prefs, cur, clamped)
+        if (isMediaPlayerPrepared) {
+            try {
+                val st = exoPlayer.playbackState
+                if (st == Player.STATE_READY || st == Player.STATE_BUFFERING) {
+                    val playerDur = exoPlayer.duration
+                    val finalPos = if (playerDur > 0L) clamped.coerceIn(0L, (playerDur - 300L).coerceAtLeast(0L)) else clamped
+                    exoPlayer.seekTo(finalPos)
+                    syncMediaService(cur, currentMetadata, isPlaying)
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
@@ -353,6 +417,13 @@ fun MMPApp() {
                 if (playbackState == Player.STATE_READY) {
                     isMediaPlayerPrepared = true
                     applySystemEqualizer(exoPlayer.audioSessionId)
+                    currentTrack?.let { trk ->
+                        val realDur = exoPlayer.duration
+                        if (realDur > 1000L && trk.durationMs <= 0L) {
+                            currentTrack = trk.copy(durationMs = realDur)
+                        }
+                        syncMediaService(currentTrack, currentMetadata, isPlaying)
+                    }
                 } else if (playbackState == Player.STATE_ENDED) {
                     if (stopAfterCurrentTrack) {
                         stopAfterCurrentTrack = false
@@ -363,9 +434,12 @@ fun MMPApp() {
                     }
                     when (repeatMode) {
                         RepeatMode.ONE -> {
-                            exoPlayer.seekTo(0L)
-                            exoPlayer.play()
-                            currentPositionMs = 0L
+                            try {
+                                exoPlayer.seekTo(0L)
+                                exoPlayer.volume = 1f
+                                exoPlayer.play()
+                                currentPositionMs = 0L
+                            } catch (_: Throwable) {}
                         }
                         RepeatMode.ALL -> {
                             val cur = currentTrack
@@ -401,35 +475,6 @@ fun MMPApp() {
         onDispose { exoPlayer.removeListener(listener) }
     }
 
-    fun playNextTrack() {
-        val cur = currentTrack ?: return
-        if (currentQueue.isEmpty()) currentQueue = deviceTracks
-        val idx = currentQueue.indexOfFirst { it.id == cur.id }
-        if (idx != -1 && idx + 1 < currentQueue.size) {
-            playTrack(currentQueue[idx + 1])
-        } else if (repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty()) {
-            playTrack(currentQueue.first())
-        }
-    }
-
-    fun playPrevTrack() {
-        val cur = currentTrack ?: return
-        if (currentPositionMs > 4000L && isMediaPlayerPrepared) {
-            try {
-                exoPlayer.seekTo(0L)
-                currentPositionMs = 0L
-                return
-            } catch (_: Throwable) {}
-        }
-        if (currentQueue.isEmpty()) currentQueue = deviceTracks
-        val idx = currentQueue.indexOfFirst { it.id == cur.id }
-        if (idx > 0) {
-            playTrack(currentQueue[idx - 1])
-        } else if (repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty()) {
-            playTrack(currentQueue.last())
-        }
-    }
-
     fun setPlayingState(wantPlay: Boolean) {
         val cur = currentTrack
         if (cur != null) {
@@ -438,11 +483,12 @@ fun MMPApp() {
                 return
             }
             if (!wantPlay) {
-                try { exoPlayer.pause() } catch (_: Throwable) {}
                 isPlaying = false
+                try { exoPlayer.pause() } catch (_: Throwable) {}
                 StorageHelper.saveLastPlayedState(prefs, cur, currentPositionMs)
                 syncMediaService(cur, currentMetadata, false)
             } else {
+                isPlaying = true
                 try {
                     if (exoPlayer.playbackState == Player.STATE_ENDED) {
                         exoPlayer.seekTo(0L)
@@ -450,7 +496,6 @@ fun MMPApp() {
                     }
                     exoPlayer.volume = 1f
                     exoPlayer.play()
-                    isPlaying = true
                     syncMediaService(cur, currentMetadata, true)
                 } catch (_: Throwable) {}
             }
@@ -466,22 +511,29 @@ fun MMPApp() {
     fun toggleShuffle() {
         val newShuffle = !isShuffleEnabled
         isShuffleEnabled = newShuffle
+        prefs.edit().putBoolean("saved_shuffle_enabled", newShuffle).apply()
         val cur = currentTrack
         if (newShuffle && currentQueue.size > 1) {
-            currentQueue = if (cur != null) {
+            val shuffled = if (cur != null) {
                 listOf(cur) + currentQueue.filter { it.id != cur.id }.shuffled()
             } else {
                 currentQueue.shuffled()
             }
+            currentQueue = shuffled
+            StorageHelper.saveLastQueue(prefs, shuffled)
         }
+        syncMediaService(cur, currentMetadata, isPlaying)
     }
 
     fun cycleRepeatMode() {
-        repeatMode = when (repeatMode) {
+        val nextMode = when (repeatMode) {
             RepeatMode.OFF -> RepeatMode.ALL
             RepeatMode.ALL -> RepeatMode.ONE
             RepeatMode.ONE -> RepeatMode.OFF
         }
+        repeatMode = nextMode
+        prefs.edit().putInt("saved_repeat_mode", nextMode.ordinal).apply()
+        syncMediaService(currentTrack, currentMetadata, isPlaying)
     }
 
     SideEffect {
@@ -490,6 +542,9 @@ fun MMPApp() {
         PlayerBridge.onToggle = { togglePlayPause() }
         PlayerBridge.onNext = { playNextTrack() }
         PlayerBridge.onPrev = { playPrevTrack() }
+        PlayerBridge.onSeekTo = { pos -> safeSeekTo(pos) }
+        PlayerBridge.onToggleShuffle = { toggleShuffle() }
+        PlayerBridge.onCycleRepeat = { cycleRepeatMode() }
     }
 
     LaunchedEffect(sleepTimerRemainingSec) {
@@ -508,10 +563,15 @@ fun MMPApp() {
         while (isPlaying && currentTrack != null) {
             delay(40L)
             if (isMediaPlayerPrepared && (try { exoPlayer.isPlaying } catch (_: Throwable) { false })) {
+                val trk = currentTrack ?: break
                 currentPositionMs = try { exoPlayer.currentPosition.coerceAtLeast(0L) } catch (_: Throwable) { currentPositionMs }
+                PlayerBridge.currentPositionMs = currentPositionMs
+
+                // Плавное затухание и переключение трека (Crossfade)
                 try {
                     val cfSec = prefs.getInt("crossfade_sec", 0)
-                    val dur = (currentTrack?.durationMs ?: 0L).coerceAtLeast(1L)
+                    val playerDur = exoPlayer.duration
+                    val dur = if (playerDur > 1000L) playerDur else trk.durationMs.coerceAtLeast(1L)
                     if (cfSec > 0 && dur > cfSec * 2000L) {
                         val cfMs = cfSec * 1000f
                         val pos = currentPositionMs.toFloat()
@@ -522,6 +582,27 @@ fun MMPApp() {
                             else -> 1f
                         }
                         exoPlayer.volume = targetVol
+
+                        // Если осталось меньше 350 мс в режиме Crossfade — плавно включаем следующий трек
+                        if (rem in 1f..350f && crossfadeTriggeredForTrackId != trk.id && !stopAfterCurrentTrack) {
+                            crossfadeTriggeredForTrackId = trk.id
+                            when (repeatMode) {
+                                RepeatMode.ONE -> {
+                                    exoPlayer.seekTo(0L)
+                                    currentPositionMs = 0L
+                                    crossfadeTriggeredForTrackId = null
+                                }
+                                RepeatMode.ALL -> {
+                                    val idx = currentQueue.indexOfFirst { it.id == trk.id }
+                                    if (idx != -1 && idx + 1 < currentQueue.size) playTrack(currentQueue[idx + 1])
+                                    else if (currentQueue.isNotEmpty()) playTrack(currentQueue.first())
+                                }
+                                RepeatMode.OFF -> {
+                                    val idx = currentQueue.indexOfFirst { it.id == trk.id }
+                                    if (idx != -1 && idx + 1 < currentQueue.size) playTrack(currentQueue[idx + 1])
+                                }
+                            }
+                        }
                     } else if (exoPlayer.volume != 1f) {
                         exoPlayer.volume = 1f
                     }
@@ -532,7 +613,6 @@ fun MMPApp() {
                     tickCounter = 0
                     listenedSecondsTotal += 1
                     currentTrackPlayedSeconds += 1
-                    val trk = currentTrack!!
                     val today = StorageHelper.getTodayDateString()
                     artistSecondsAllTime[trk.artist] = (artistSecondsAllTime[trk.artist] ?: 0) + 1
                     val todayRec = dailyStats.getOrPut(today) { DailyStatRecord() }
@@ -855,16 +935,7 @@ fun MMPApp() {
                         onToggleShuffle = { toggleShuffle() },
                         onToggleRepeat = { cycleRepeatMode() },
                         onPlayPause = { togglePlayPause() },
-                        onSeek = { newPos ->
-                            currentPositionMs = newPos
-                            if (isMediaPlayerPrepared && exoPlayer.playbackState != Player.STATE_IDLE) {
-                                try {
-                                    val dur = exoPlayer.duration
-                                    val safeTarget = if (dur > 0L) newPos.coerceIn(0L, (dur - 250L).coerceAtLeast(0L)) else newPos.coerceAtLeast(0L)
-                                    exoPlayer.seekTo(safeTarget)
-                                } catch (_: Throwable) {}
-                            }
-                        },
+                        onSeek = { newPos -> safeSeekTo(newPos) },
                         onNext = { playNextTrack() },
                         onPrev = { playPrevTrack() }
                     )
@@ -887,6 +958,12 @@ fun MMPApp() {
                         playbackPitch = ptc
                         bassBoostStrength = bass
                         reverbPreset = rev
+                        prefs.edit()
+                            .putFloat("saved_speed", spd)
+                            .putFloat("saved_pitch", ptc)
+                            .putInt("saved_fx_bass", bass)
+                            .putInt("saved_fx_reverb", rev)
+                            .apply()
                         try {
                             exoPlayer.playbackParameters = PlaybackParameters(spd, ptc)
                             applySystemEqualizer(exoPlayer.audioSessionId)
@@ -933,11 +1010,13 @@ fun MMPApp() {
                         val item = mutable.removeAt(from)
                         mutable.add(to, item)
                         currentQueue = mutable
+                        StorageHelper.saveLastQueue(prefs, mutable)
                     },
                     onRemoveTrack = { idx ->
                         val mutable = currentQueue.toMutableList()
                         mutable.removeAt(idx)
                         currentQueue = mutable
+                        StorageHelper.saveLastQueue(prefs, mutable)
                     }
                 )
             }
@@ -966,6 +1045,7 @@ fun MMPApp() {
                             scope.launch { currentMetadata = extractTrackMetadata(context, updatedTrack) }
                         }
                         currentQueue = currentQueue.map { if (it.id == target.id) updatedTrack else it }
+                        StorageHelper.saveLastQueue(prefs, currentQueue)
                         trackToEditTags = null
                         Toast.makeText(context, "Сведения о треке обновлены!", Toast.LENGTH_SHORT).show()
                     }

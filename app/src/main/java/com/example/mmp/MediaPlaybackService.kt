@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
@@ -25,10 +26,18 @@ object PlayerBridge {
     var onToggle: (() -> Unit)? = null
     var onNext: (() -> Unit)? = null
     var onPrev: (() -> Unit)? = null
+    var onSeekTo: ((Long) -> Unit)? = null
+    var onToggleShuffle: (() -> Unit)? = null
+    var onCycleRepeat: (() -> Unit)? = null
+
     var currentTitle: String = "MMP"
     var currentArtist: String = "Готов к воспроизведению"
     var currentBitmap: Bitmap? = null
     var isPlaying: Boolean = false
+    var currentPositionMs: Long = 0L
+    var durationMs: Long = 0L
+    var isShuffleEnabled: Boolean = false
+    var repeatModeOrdinal: Int = 0
 }
 
 class MMPWidgetProvider : AppWidgetProvider() {
@@ -109,6 +118,21 @@ class MediaPlaybackService : Service() {
                 override fun onSkipToPrevious() {
                     if (!isUpdatingInternally) PlayerBridge.onPrev?.invoke()
                 }
+                override fun onSeekTo(pos: Long) {
+                    if (!isUpdatingInternally) PlayerBridge.onSeekTo?.invoke(pos)
+                }
+                override fun onSetShuffleMode(shuffleMode: Int) {
+                    if (!isUpdatingInternally) PlayerBridge.onToggleShuffle?.invoke()
+                }
+                override fun onSetRepeatMode(repeatMode: Int) {
+                    if (!isUpdatingInternally) PlayerBridge.onCycleRepeat?.invoke()
+                }
+                override fun onCustomAction(action: String?, extras: Bundle?) {
+                    when (action) {
+                        "ACTION_SHUFFLE" -> PlayerBridge.onToggleShuffle?.invoke()
+                        "ACTION_REPEAT" -> PlayerBridge.onCycleRepeat?.invoke()
+                    }
+                }
             })
             isActive = true
         }
@@ -119,7 +143,9 @@ class MediaPlaybackService : Service() {
             "ACTION_TOGGLE" -> PlayerBridge.onToggle?.invoke()
             "ACTION_NEXT" -> PlayerBridge.onNext?.invoke()
             "ACTION_PREV" -> PlayerBridge.onPrev?.invoke()
-            "ACTION_UPDATE" -> { /* Только обновляем уведомление */ }
+            "ACTION_SHUFFLE" -> PlayerBridge.onToggleShuffle?.invoke()
+            "ACTION_REPEAT" -> PlayerBridge.onCycleRepeat?.invoke()
+            "ACTION_UPDATE" -> { /* Просто обновляем нотификацию */ }
         }
         updateNotification()
         MMPWidgetProvider.updateAllWidgets(this)
@@ -130,26 +156,43 @@ class MediaPlaybackService : Service() {
         try {
             isUpdatingInternally = true
             val state = if (PlayerBridge.isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
-            mediaSession.setPlaybackState(
-                PlaybackStateCompat.Builder()
-                    .setActions(
-                        PlaybackStateCompat.ACTION_PLAY or
-                        PlaybackStateCompat.ACTION_PAUSE or
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
-                    )
-                    .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
-                    .build()
-            )
+            val playbackSpeed = if (PlayerBridge.isPlaying) 1f else 0f
+
+            val playbackActions = PlaybackStateCompat.ACTION_PLAY or
+                PlaybackStateCompat.ACTION_PAUSE or
+                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                PlaybackStateCompat.ACTION_SEEK_TO or
+                PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE or
+                PlaybackStateCompat.ACTION_SET_REPEAT_MODE
+
+            val safePos = PlayerBridge.currentPositionMs.coerceAtLeast(0L)
+            val stateBuilder = PlaybackStateCompat.Builder()
+                .setActions(playbackActions)
+                .setState(state, safePos, playbackSpeed)
+
+            stateBuilder.addCustomAction("ACTION_SHUFFLE", "Перемешать", android.R.drawable.ic_menu_rotate)
+            stateBuilder.addCustomAction("ACTION_REPEAT", "Повтор", android.R.drawable.ic_menu_revert)
+
+            mediaSession.setPlaybackState(stateBuilder.build())
 
             val safeBitmap = PlayerBridge.currentBitmap?.takeIf { !it.isRecycled }
             val metaBuilder = MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, PlayerBridge.currentTitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, PlayerBridge.currentArtist)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, PlayerBridge.durationMs.coerceAtLeast(0L))
             if (safeBitmap != null) {
                 metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, safeBitmap)
             }
             mediaSession.setMetadata(metaBuilder.build())
+            mediaSession.setShuffleMode(if (PlayerBridge.isShuffleEnabled) PlaybackStateCompat.SHUFFLE_MODE_ALL else PlaybackStateCompat.SHUFFLE_MODE_NONE)
+            mediaSession.setRepeatMode(
+                when (PlayerBridge.repeatModeOrdinal) {
+                    1 -> PlaybackStateCompat.REPEAT_MODE_ALL
+                    2 -> PlaybackStateCompat.REPEAT_MODE_ONE
+                    else -> PlaybackStateCompat.REPEAT_MODE_NONE
+                }
+            )
         } catch (_: Throwable) {
         } finally {
             isUpdatingInternally = false
@@ -172,6 +215,14 @@ class MediaPlaybackService : Service() {
             this, 3, Intent(this, MediaPlaybackService::class.java).setAction("ACTION_NEXT"),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val shufflePending = PendingIntent.getService(
+            this, 4, Intent(this, MediaPlaybackService::class.java).setAction("ACTION_SHUFFLE"),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val repeatPending = PendingIntent.getService(
+            this, 5, Intent(this, MediaPlaybackService::class.java).setAction("ACTION_REPEAT"),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
         val playPauseIcon = if (PlayerBridge.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         val safeBitmap = PlayerBridge.currentBitmap?.takeIf { !it.isRecycled }
@@ -184,13 +235,15 @@ class MediaPlaybackService : Service() {
             .setContentIntent(openAppIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(PlayerBridge.isPlaying)
+            .addAction(android.R.drawable.ic_menu_rotate, "Shuffle", shufflePending)
             .addAction(android.R.drawable.ic_media_previous, "Prev", prevPending)
             .addAction(playPauseIcon, "Play/Pause", togglePending)
             .addAction(android.R.drawable.ic_media_next, "Next", nextPending)
+            .addAction(android.R.drawable.ic_menu_revert, "Repeat", repeatPending)
             .setStyle(
                 MediaStyle()
                     .setMediaSession(mediaSession.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
+                    .setShowActionsInCompactView(1, 2, 3)
             )
             .build()
 
