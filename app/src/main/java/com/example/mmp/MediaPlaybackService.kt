@@ -93,8 +93,12 @@ class MediaPlaybackService : Service() {
         createChannel()
         mediaSession = MediaSessionCompat(this, "MMPMediaSession").apply {
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() { PlayerBridge.onPlayPause?.invoke() }
-                override fun onPause() { PlayerBridge.onPlayPause?.invoke() }
+                override fun onPlay() {
+                    if (!PlayerBridge.isPlaying) PlayerBridge.onPlayPause?.invoke()
+                }
+                override fun onPause() {
+                    if (PlayerBridge.isPlaying) PlayerBridge.onPlayPause?.invoke()
+                }
                 override fun onSkipToNext() { PlayerBridge.onNext?.invoke() }
                 override fun onSkipToPrevious() { PlayerBridge.onPrev?.invoke() }
             })

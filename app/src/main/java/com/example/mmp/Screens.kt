@@ -1197,14 +1197,7 @@ fun FullScreenPlayerOverlay(
                         tint = repeatAccent,
                         modifier = Modifier.size(24.dp)
                     )
-                    if (repeatMode == RepeatMode.ONE) {
-                        Box(
-                            modifier = Modifier.align(Alignment.TopEnd).padding(3.dp).size(14.dp).clip(CircleShape).background(Color(0xFF00F5D4)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("1", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                        }
-                    }
+
                 }
             }
 
