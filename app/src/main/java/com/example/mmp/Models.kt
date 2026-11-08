@@ -762,9 +762,7 @@ suspend fun fetchLyricsFromLrclib(
     } catch (_: Throwable) {
         null
     }
-
-
-
+    }
 
     fun saveSoundCloudTracks(prefs: SharedPreferences, tracks: List<Track>) {
         val arr = org.json.JSONArray()
@@ -809,4 +807,4 @@ suspend fun fetchLyricsFromLrclib(
         } catch (_: Throwable) {}
         return list
     }
-}
+

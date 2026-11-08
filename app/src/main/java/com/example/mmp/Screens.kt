@@ -1403,6 +1403,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                         }
                     }
                 } else {
+                    @OptIn(ExperimentalFoundationApi::class)
                     LazyColumn(
                         state = lyricListState,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
