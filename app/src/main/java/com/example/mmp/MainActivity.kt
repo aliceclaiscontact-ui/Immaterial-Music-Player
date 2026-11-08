@@ -920,7 +920,7 @@ fun MMPApp() {
                                     if (exoPlayer.isCommandAvailable(androidx.media3.common.Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
                                         val dur = exoPlayer.duration
                                         val target = if (dur > 0L) clampedPos.coerceIn(0L, (dur - 200L).coerceAtLeast(0L)) else clampedPos
-                                        exoPlayer.seekTo(target)
+                                        try { if (exoPlayer.playbackState != Player.STATE_IDLE && exoPlayer.duration > 0) exoPlayer.seekTo(target.coerceIn(0L, exoPlayer.duration)) } catch (_: Throwable) {}
                                     }
                                 } catch (e: Throwable) {
                                     e.printStackTrace()
