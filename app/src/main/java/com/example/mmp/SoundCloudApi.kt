@@ -32,8 +32,8 @@ object SoundCloudClient {
     private fun httpGet(urlStr: String): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 8000
-            readTimeout = 8000
+            connectTimeout = 10000
+            readTimeout = 10000
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", USER_AGENT)
             setRequestProperty("Accept", "*/*")
@@ -45,7 +45,7 @@ object SoundCloudClient {
         if (!cachedClientId.isNullOrBlank()) return@withContext cachedClientId!!
         try {
             val html = httpGet("https://soundcloud.com/discover")
-            val scriptRegex = Regex("""https://[a-zA-Z0-9\-_.] +\.sndcdn\.com/assets/[^"']+\.js""".replace(" ", ""))
+            val scriptRegex = Regex("""https://[a-zA-Z0-9\-_.]+\.sndcdn\.com/assets/[^"']+\.js""")
             val scriptUrls = scriptRegex.findAll(html).map { it.value }.toList()
 
             val clientRegex = Regex("""client_id[:=]["']([a-zA-Z0-9]{32})["']""")
@@ -119,7 +119,7 @@ object SoundCloudClient {
     }
 
     suspend fun resolveStreamUrl(streamMetaUrl: String): String? = withContext(Dispatchers.IO) {
-        if (streamMetaUrl.startsWith("http") && (streamMetaUrl.contains(".mp3") || streamMetaUrl.contains(".m3u8") || streamMetaUrl.contains("cf-media.sndcdn.com") || streamMetaUrl.contains(" cf-hls-media.sndcdn.com"))) {
+        if (streamMetaUrl.startsWith("http") && (streamMetaUrl.contains(".mp3") || streamMetaUrl.contains(".m3u8") || streamMetaUrl.contains("cf-media.sndcdn.com") || streamMetaUrl.contains("cf-hls-media.sndcdn.com"))) {
             return@withContext streamMetaUrl
         }
         resolvedUrlCache[streamMetaUrl]?.let { return@withContext it }
@@ -147,7 +147,6 @@ object SoundCloudClient {
             if (streamMetaOrDirectUrl.contains("api-v2.soundcloud.com")) {
                 direct = resolveStreamUrl(streamMetaOrDirectUrl)
             }
-            // Если передана временная ссылка из плеера или пустая строка — всегда берем свежую через поиск по треку
             if (direct.isNullOrBlank()) {
                 val query = "$artist $title".trim()
                 val found = searchTracks(query, limit = 8)
@@ -161,34 +160,15 @@ object SoundCloudClient {
                 direct = streamMetaOrDirectUrl
             }
 
-            // Если прямая ссылка протухла или пустая — ищем свежий поток по названию трека
-            if (direct.isNullOrBlank()) {
-                val fallbackSearch = searchTracks("$artist $title", limit = 5)
-                val match = fallbackSearch.firstOrNull { it.streamProgressiveUrl != null }
-                if (match?.streamProgressiveUrl != null) {
-                    direct = resolveStreamUrl(match.streamProgressiveUrl)
-                }
-            }
             var finalUrl = direct ?: return@withContext null
 
             val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "MMP_SoundCloud")
             if (!musicDir.exists()) musicDir.mkdirs()
 
-            val cleanTitle = "${artist.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").take(30)} - ${title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").take(40)}".trim().ifBlank { "sc_track_${System.currentTimeMillis()}" }
-            val outFile = File(musicDir, "$cleanTitle.mp3")
-
-            // Проверяем, работает ли ссылка; если CDN вернул 403/404, обновляем через поиск
-            val testConn = (URL(finalUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10000
-                readTimeout = 10000
-                setRequestProperty("User-Agent", USER_AGENT)
-            }
-            if (testConn.responseCode !in 200..299) {
-                val fallbackSearch = searchTracks("$artist $title", limit = 5)
-                val match = fallbackSearch.firstOrNull { it.streamProgressiveUrl != null }
-                val refreshed = match?.streamProgressiveUrl?.let { resolveStreamUrl(it) }
-                if (!refreshed.isNullOrBlank()) finalUrl = refreshed
-            }
+            val cleanArtist = artist.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().take(30)
+            val cleanTitle = title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().take(40)
+            val fileName = "$cleanArtist - $cleanTitle".trim().ifBlank { "sc_track_${System.currentTimeMillis()}" }
+            val outFile = File(musicDir, "$fileName.mp3")
 
             FileOutputStream(outFile).use { out ->
                 if (!finalUrl.contains(".m3u8")) {
@@ -225,7 +205,7 @@ object SoundCloudClient {
                 return@withContext null
             }
 
-            android.media.MediaScannerConnection.scanFile(
+            MediaScannerConnection.scanFile(
                 context,
                 arrayOf(outFile.absolutePath),
                 arrayOf("audio/mpeg"),
@@ -245,7 +225,7 @@ object SoundCloudClient {
             artist = scTrack.artist,
             album = "SoundCloud",
             durationMs = scTrack.durationMs,
-            uri = android.net.Uri.parse(directHttpUri),
+            uri = Uri.parse(directHttpUri),
             folderName = "SoundCloud",
             folderPath = "SoundCloud",
             filePath = scTrack.streamProgressiveUrl ?: directHttpUri,

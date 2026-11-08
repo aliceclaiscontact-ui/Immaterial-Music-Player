@@ -94,10 +94,14 @@ class MediaPlaybackService : Service() {
         mediaSession = MediaSessionCompat(this, "MMPMediaSession").apply {
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    if (!PlayerBridge.isPlaying) PlayerBridge.onPlayPause?.invoke()
+                    if (!PlayerBridge.isPlaying) {
+                        PlayerBridge.onPlayPause?.invoke()
+                    }
                 }
                 override fun onPause() {
-                    if (PlayerBridge.isPlaying) PlayerBridge.onPlayPause?.invoke()
+                    if (PlayerBridge.isPlaying) {
+                        PlayerBridge.onPlayPause?.invoke()
+                    }
                 }
                 override fun onSkipToNext() { PlayerBridge.onNext?.invoke() }
                 override fun onSkipToPrevious() { PlayerBridge.onPrev?.invoke() }
@@ -111,7 +115,7 @@ class MediaPlaybackService : Service() {
             "ACTION_TOGGLE" -> PlayerBridge.onPlayPause?.invoke()
             "ACTION_NEXT" -> PlayerBridge.onNext?.invoke()
             "ACTION_PREV" -> PlayerBridge.onPrev?.invoke()
-            "ACTION_UPDATE" -> updateNotification()
+            "ACTION_UPDATE" -> { /* Просто обновляем нотификацию без вызова коллбэков */ }
         }
         updateNotification()
         MMPWidgetProvider.updateAllWidgets(this)
