@@ -536,6 +536,37 @@ fun MMPApp() {
         syncMediaService(currentTrack, currentMetadata, isPlaying)
     }
 
+    // Запуск «Моей волны 50/50»
+    fun startMyWave5050() {
+        Toast.makeText(context, "Настраиваем «Мою волну 50/50»...", Toast.LENGTH_SHORT).show()
+        scope.launch {
+            val localPool = if (deviceTracks.isNotEmpty()) deviceTracks.shuffled().take(10) else emptyList()
+            val favoriteArtist = artistSecondsAllTime.maxByOrNull { it.value }?.key
+                ?: currentTrack?.artist
+                ?: "Electronic"
+
+            val scCandidates = SoundCloudClient.searchTracks(favoriteArtist, limit = 25)
+            val scPool = scCandidates.mapNotNull { scTrk ->
+                val progUrl = scTrk.streamProgressiveUrl ?: return@mapNotNull null
+                SoundCloudClient.toTrack(scTrk, progUrl)
+            }.shuffled().take(10)
+
+            val mixed = mutableListOf<Track>()
+            val maxLen = maxOf(localPool.size, scPool.size)
+            for (i in 0 until maxLen) {
+                if (i < localPool.size) mixed.add(localPool[i])
+                if (i < scPool.size) mixed.add(scPool[i])
+            }
+
+            if (mixed.isNotEmpty()) {
+                playTrack(mixed.first(), mixed)
+                Toast.makeText(context, "«Моя волна» включена!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Не удалось сформировать волну", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     SideEffect {
         PlayerBridge.onPlay = { setPlayingState(true) }
         PlayerBridge.onPause = { setPlayingState(false) }
@@ -567,7 +598,6 @@ fun MMPApp() {
                 currentPositionMs = try { exoPlayer.currentPosition.coerceAtLeast(0L) } catch (_: Throwable) { currentPositionMs }
                 PlayerBridge.currentPositionMs = currentPositionMs
 
-                // Плавное затухание и переключение трека (Crossfade)
                 try {
                     val cfSec = prefs.getInt("crossfade_sec", 0)
                     val playerDur = exoPlayer.duration
@@ -583,7 +613,6 @@ fun MMPApp() {
                         }
                         exoPlayer.volume = targetVol
 
-                        // Если осталось меньше 350 мс в режиме Crossfade — плавно включаем следующий трек
                         if (rem in 1f..350f && crossfadeTriggeredForTrackId != trk.id && !stopAfterCurrentTrack) {
                             crossfadeTriggeredForTrackId = trk.id
                             when (repeatMode) {
@@ -640,11 +669,12 @@ fun MMPApp() {
 
     DisposableEffect(Unit) { onDispose { try { exoPlayer.release() } catch (_: Throwable) {} } }
 
-    var selectedBottomTab by remember { mutableStateOf(0) }
+    var selectedBottomTab by remember { mutableIntStateOf(0) }
     var showCreateStep1Sheet by remember { mutableStateOf(false) }
     var showCreateStep2Dialog by remember { mutableStateOf(false) }
     var pendingPlaylistCoverUri by remember { mutableStateOf<String?>(null) }
-    var trackToAddToPlaylist by remember { mutableStateOf<Track?>(null) }
+    var tracksToAddToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var playlistToEdit by remember { mutableStateOf<PlaylistItem?>(null) }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
@@ -735,7 +765,7 @@ fun MMPApp() {
                             },
                             onThemeChange = { themeConfig = it; StorageHelper.saveTheme(prefs, it) },
                             onTrackClick = { playTrack(it, deviceTracks) },
-                            onAddTrackToPlaylistClick = { trackToAddToPlaylist = it },
+                            onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
                             onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
                             onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
                         )
@@ -754,14 +784,18 @@ fun MMPApp() {
                             openedPlaylist = openedPlaylist,
                             openedArtist = openedArtist,
                             openedAlbum = openedAlbum,
-                            onRescanClick = { scope.launch { delay(700); rawDeviceTracks = scanDeviceMusic(context) } },
                             onPlayContext = { queue, track -> playTrack(track, queue) },
                             onTogglePlay = { togglePlayPause() },
                             onToggleShuffle = { toggleShuffle() },
-                            onAddTrackToPlaylistClick = { trackToAddToPlaylist = it },
+                            onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
+                            onAddMultipleTracksToPlaylist = { tracksToAddToPlaylist = it },
                             onSetOpenedPlaylist = { openedPlaylist = it },
                             onSetOpenedArtist = { openedArtist = it },
-                            onSetOpenedAlbum = { openedAlbum = it }
+                            onSetOpenedAlbum = { openedAlbum = it },
+                            onEditPlaylist = { pl ->
+                                pendingPlaylistCoverUri = pl.coverUri
+                                playlistToEdit = pl
+                            }
                         )
                         2 -> SoundCloudScreen(
                             cardShape = cardShape,
@@ -839,7 +873,7 @@ fun MMPApp() {
                                     savedScTracks = upd
                                     StorageHelper.saveSoundCloudTracks(prefs, upd)
                                 }
-                                trackToAddToPlaylist = trkObj
+                                tracksToAddToPlaylist = listOf(trkObj)
                             }
                         )
                     }
@@ -898,7 +932,7 @@ fun MMPApp() {
                                 savedScTracks = upd
                                 StorageHelper.saveSoundCloudTracks(prefs, upd)
                             }
-                            trackToAddToPlaylist = activeTrack
+                            tracksToAddToPlaylist = listOf(activeTrack)
                         },
                         onEditTagsClick = {
                             pendingTagCoverUri = activeTrack.customCoverUri
@@ -1052,17 +1086,65 @@ fun MMPApp() {
                 )
             }
 
+            if (playlistToEdit != null) {
+                val targetPl = playlistToEdit!!
+                EditPlaylistDialog(
+                    playlist = targetPl,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    selectedCoverUri = pendingPlaylistCoverUri,
+                    onPickCoverClick = { coverPickerLauncher.launch(arrayOf("image/*")) },
+                    onDismiss = { playlistToEdit = null },
+                    onSave = { newName, newDesc, newCover ->
+                        val updated = playlists.map { pl ->
+                            if (pl.name == targetPl.name) pl.copy(name = newName, description = newDesc, coverUri = newCover) else pl
+                        }
+                        playlists = updated
+                        StorageHelper.savePlaylists(prefs, updated)
+                        if (openedPlaylist?.name == targetPl.name) {
+                            openedPlaylist = targetPl.copy(name = newName, description = newDesc, coverUri = newCover)
+                        }
+                        playlistToEdit = null
+                        Toast.makeText(context, "Плейлист обновлён!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+
             AnimatedVisibility(
-                visible = trackToAddToPlaylist != null,
+                visible = tracksToAddToPlaylist.isNotEmpty(),
                 enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
                 exit = fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 2 })
             ) {
-                trackToAddToPlaylist?.let { targetTrack ->
-                    AddToPlaylistSheet(targetTrack, playlists, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, { trackToAddToPlaylist = null }, { selectedPl ->
-                        val updatedList = playlists.map { pl -> if (pl.name == selectedPl.name) pl.copy(trackIds = if (pl.trackIds.contains(targetTrack.id)) pl.trackIds else pl.trackIds + targetTrack.id) else pl }
-                        playlists = updatedList; StorageHelper.savePlaylists(prefs, updatedList); Toast.makeText(context, "Добавлено в «${selectedPl.name}»!", Toast.LENGTH_SHORT).show(); trackToAddToPlaylist = null
-                    }, { trackToAddToPlaylist = null; pendingPlaylistCoverUri = null; showCreateStep2Dialog = true })
-                }
+                AddToPlaylistSheet(
+                    tracks = tracksToAddToPlaylist,
+                    playlists = playlists,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onDismiss = { tracksToAddToPlaylist = emptyList() },
+                    onSelectPlaylist = { selectedPl ->
+                        val newIds = tracksToAddToPlaylist.map { it.id }
+                        val updatedList = playlists.map { pl ->
+                            if (pl.name == selectedPl.name) {
+                                val merged = (pl.trackIds + newIds).distinct()
+                                pl.copy(trackIds = merged)
+                            } else pl
+                        }
+                        playlists = updatedList
+                        StorageHelper.savePlaylists(prefs, updatedList)
+                        Toast.makeText(context, "Добавлено в «${selectedPl.name}»!", Toast.LENGTH_SHORT).show()
+                        tracksToAddToPlaylist = emptyList()
+                    },
+                    onCreateNewPlaylistClick = {
+                        pendingPlaylistCoverUri = null
+                        showCreateStep2Dialog = true
+                    }
+                )
             }
 
             AnimatedVisibility(
@@ -1074,8 +1156,15 @@ fun MMPApp() {
             }
 
             if (showCreateStep2Dialog) {
-                CreatePlaylistDetailsDialog(cardShape, expressiveShape, primaryColor, textColor, surfaceColor, pendingPlaylistCoverUri, { coverPickerLauncher.launch(arrayOf("image/*")) }, { showCreateStep2Dialog = false }, { name, coverUri ->
-                    if (name.isNotBlank()) { val updated = playlists + PlaylistItem(name.trim(), coverUri, emptyList()); playlists = updated; StorageHelper.savePlaylists(prefs, updated) }
+                CreatePlaylistDetailsDialog(cardShape, expressiveShape, primaryColor, textColor, surfaceColor, pendingPlaylistCoverUri, { coverPickerLauncher.launch(arrayOf("image/*")) }, { showCreateStep2Dialog = false }, { name, desc, coverUri ->
+                    if (name.isNotBlank()) {
+                        val initIds = tracksToAddToPlaylist.map { it.id }
+                        val newPl = PlaylistItem(name.trim(), coverUri, initIds, desc.trim())
+                        val updated = playlists + newPl
+                        playlists = updated
+                        StorageHelper.savePlaylists(prefs, updated)
+                        tracksToAddToPlaylist = emptyList()
+                    }
                     showCreateStep2Dialog = false
                 })
             }

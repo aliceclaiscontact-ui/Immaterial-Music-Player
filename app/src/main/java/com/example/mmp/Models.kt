@@ -35,6 +35,13 @@ enum class RepeatMode {
     OFF, ALL, ONE
 }
 
+enum class TrackSortMode(val label: String) {
+    DATE_ADDED("Сначала новые"),
+    TITLE("По названию (А-Я)"),
+    ARTIST("По исполнителю"),
+    DURATION("По длительности")
+}
+
 enum class ShapeStyle(val label: String) {
     SQUIRCLE("Плавный (MD3)"),
     COOKIE("Клевер"),
@@ -188,7 +195,8 @@ data class MMPThemeConfig(
 data class PlaylistItem(
     val name: String,
     val coverUri: String? = null,
-    val trackIds: List<Long> = emptyList()
+    val trackIds: List<Long> = emptyList(),
+    val description: String = ""
 )
 
 data class Track(
@@ -550,6 +558,7 @@ object StorageHelper {
             val obj = JSONObject()
             obj.put("name", item.name)
             if (item.coverUri != null) obj.put("coverUri", item.coverUri)
+            obj.put("description", item.description)
             val idsArr = JSONArray()
             item.trackIds.forEach { idsArr.put(it) }
             obj.put("trackIds", idsArr)
@@ -564,9 +573,10 @@ object StorageHelper {
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 val uri = obj.optString("coverUri", "").ifBlank { null }
+                val desc = obj.optString("description", "")
                 val idsArr = obj.optJSONArray("trackIds")
                 val ids = if (idsArr != null) (0 until idsArr.length()).map { idx -> idsArr.getLong(idx) } else emptyList()
-                PlaylistItem(obj.optString("name", "Плейлист"), uri, ids)
+                PlaylistItem(obj.optString("name", "Плейлист"), uri, ids, desc)
             }
         } catch (e: Exception) { emptyList() }
     }

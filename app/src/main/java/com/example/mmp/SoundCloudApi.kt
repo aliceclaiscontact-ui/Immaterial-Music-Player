@@ -23,6 +23,15 @@ data class SoundCloudTrack(
     val streamProgressiveUrl: String?
 )
 
+data class SoundCloudPlaylist(
+    val id: Long,
+    val title: String,
+    val author: String,
+    val artworkUrl: String?,
+    val trackCount: Int,
+    val tracks: List<SoundCloudTrack> = emptyList()
+)
+
 object SoundCloudClient {
     private const val FALLBACK_CLIENT_ID = "2t9loNQH90kzJcsMmUEoeMGjVCvAc2hw"
     private var cachedClientId: String? = null
@@ -66,6 +75,58 @@ object SoundCloudClient {
         FALLBACK_CLIENT_ID
     }
 
+    private fun parseTrackJson(item: JSONObject): SoundCloudTrack? {
+        val id = item.optLong("id", 0L)
+        if (id == 0L) return null
+
+        val policy = item.optString("policy", "")
+        if (policy.equals("SNIPPET", ignoreCase = true)) return null
+
+        val title = item.optString("title", "Без названия")
+        val user = item.optJSONObject("user")
+        val artist = user?.optString("username", "SoundCloud") ?: "SoundCloud"
+        val rawArtwork = item.optString("artwork_url", "").takeIf { it.isNotBlank() && it != "null" }
+            ?: user?.optString("avatar_url", "").takeIf { it.isNotBlank() && it != "null" }
+        val artwork = rawArtwork?.replace("-large", "-t500x500")
+        val duration = item.optLong("duration", 0L)
+
+        val media = item.optJSONObject("media")
+        val transcodings = media?.optJSONArray("transcodings")
+        var selectedStreamUrl: String? = null
+
+        if (transcodings != null && transcodings.length() > 0) {
+            for (t in 0 until transcodings.length()) {
+                val tr = transcodings.getJSONObject(t)
+                val format = tr.optJSONObject("format")?.optString("protocol", "") ?: ""
+                val snippet = tr.optBoolean("snipped", false)
+                if (snippet) continue
+
+                if (format == "progressive") {
+                    val u = tr.optString("url", "")
+                    if (u.isNotBlank()) {
+                        selectedStreamUrl = u
+                        break
+                    }
+                }
+            }
+            if (selectedStreamUrl.isNullOrBlank()) {
+                for (t in 0 until transcodings.length()) {
+                    val tr = transcodings.getJSONObject(t)
+                    if (!tr.optBoolean("snipped", false)) {
+                        val u = tr.optString("url", "")
+                        if (u.isNotBlank()) {
+                            selectedStreamUrl = u
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        if (selectedStreamUrl.isNullOrBlank()) return null
+        return SoundCloudTrack(id, title, artist, artwork, duration, selectedStreamUrl)
+    }
+
     suspend fun searchTracks(query: String, limit: Int = 35): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
         val cid = getOrExtractClientId()
         val encodedQ = URLEncoder.encode(query, "UTF-8")
@@ -79,38 +140,55 @@ object SoundCloudClient {
 
             for (i in 0 until collection.length()) {
                 val item = collection.getJSONObject(i)
+                parseTrackJson(item)?.let { result.add(it) }
+            }
+            result
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    suspend fun searchPlaylists(query: String, limit: Int = 20): List<SoundCloudPlaylist> = withContext(Dispatchers.IO) {
+        val cid = getOrExtractClientId()
+        val encodedQ = URLEncoder.encode(query, "UTF-8")
+        val endpoint = "https://api-v2.soundcloud.com/search/playlists?q=$encodedQ&client_id=$cid&limit=$limit"
+
+        try {
+            val response = httpGet(endpoint)
+            val root = JSONObject(response)
+            val collection = root.optJSONArray("collection") ?: JSONArray()
+            val result = mutableListOf<SoundCloudPlaylist>()
+
+            for (i in 0 until collection.length()) {
+                val item = collection.getJSONObject(i)
                 val id = item.optLong("id", 0L)
-                val title = item.optString("title", "Без названия")
+                if (id == 0L) continue
+
+                val title = item.optString("title", "Плейлист")
                 val user = item.optJSONObject("user")
-                val artist = user?.optString("username", "SoundCloud") ?: "SoundCloud"
+                val author = user?.optString("username", "SoundCloud") ?: "SoundCloud"
                 val rawArtwork = item.optString("artwork_url", "").takeIf { it.isNotBlank() && it != "null" }
+                    ?: user?.optString("avatar_url", "").takeIf { it.isNotBlank() && it != "null" }
                 val artwork = rawArtwork?.replace("-large", "-t500x500")
-                val duration = item.optLong("duration", 0L)
+                val trackCount = item.optInt("track_count", 0)
 
-                val media = item.optJSONObject("media")
-                val transcodings = media?.optJSONArray("transcodings")
-                var selectedStreamUrl: String? = null
-
-                if (transcodings != null && transcodings.length() > 0) {
-                    for (t in 0 until transcodings.length()) {
-                        val tr = transcodings.getJSONObject(t)
-                        val format = tr.optJSONObject("format")?.optString("protocol", "") ?: ""
-                        if (format == "progressive") {
-                            val u = tr.optString("url", "")
-                            if (u.isNotBlank()) {
-                                selectedStreamUrl = u
-                                break
-                            }
-                        }
-                    }
-                    if (selectedStreamUrl.isNullOrBlank()) {
-                        selectedStreamUrl = transcodings.getJSONObject(0).optString("url", "")
-                    }
+                val tracksArr = item.optJSONArray("tracks") ?: JSONArray()
+                val playlistTracks = mutableListOf<SoundCloudTrack>()
+                for (j in 0 until tracksArr.length()) {
+                    val trkObj = tracksArr.optJSONObject(j) ?: continue
+                    parseTrackJson(trkObj)?.let { playlistTracks.add(it) }
                 }
 
-                if (id != 0L && !selectedStreamUrl.isNullOrBlank()) {
-                    result.add(SoundCloudTrack(id, title, artist, artwork, duration, selectedStreamUrl))
-                }
+                result.add(
+                    SoundCloudPlaylist(
+                        id = id,
+                        title = title,
+                        author = author,
+                        artworkUrl = artwork,
+                        trackCount = if (trackCount > 0) trackCount else playlistTracks.size,
+                        tracks = playlistTracks
+                    )
+                )
             }
             result
         } catch (_: Throwable) {
@@ -160,7 +238,7 @@ object SoundCloudClient {
                 direct = streamMetaOrDirectUrl
             }
 
-            var finalUrl = direct ?: return@withContext null
+            val finalUrl = direct ?: return@withContext null
 
             val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "MMP_SoundCloud")
             if (!musicDir.exists()) musicDir.mkdirs()

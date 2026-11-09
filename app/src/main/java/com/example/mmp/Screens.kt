@@ -15,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -46,6 +47,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -138,7 +140,7 @@ fun HomeScreen(
     onImportTheme: () -> Unit
 ) {
     val context = LocalContext.current
-    var activeSubTab by remember { mutableStateOf(0) }
+    var activeSubTab by remember { mutableIntStateOf(0) }
     var selectedDateFilter by remember { mutableStateOf("ALL") }
 
     val activeArtistSeconds = run {
@@ -326,7 +328,10 @@ fun HomeScreen(
                                 surfaceColor = surfaceColor,
                                 badgeText = "$playCount просл.",
                                 showCoverThumb = true,
+                                isSelected = false,
+                                isSelectionMode = false,
                                 onAddToPlaylist = { onAddTrackToPlaylistClick(track) },
+                                onLongClick = {},
                                 onClick = { onTrackClick(track) }
                             )
                         }
@@ -383,9 +388,57 @@ fun SoundCloudScreen(
     var query by remember { mutableStateOf(scPrefs.getString("sc_saved_query", "") ?: "") }
     var isSearching by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<SoundCloudTrack>>(emptyList()) }
+    var playlistResults by remember { mutableStateOf<List<SoundCloudPlaylist>>(emptyList()) }
+    var openedScPlaylist by remember { mutableStateOf<SoundCloudPlaylist?>(null) }
     var activeTab by remember { mutableIntStateOf(0) }
-    var statusMessage by remember { mutableStateOf("Введите имя, автора или название альбома") }
+    var searchType by remember { mutableIntStateOf(0) } // 0 = Треки, 1 = Плейлисты
+    var statusMessage by remember { mutableStateOf("Введите имя, автора или название") }
     val scope = rememberCoroutineScope()
+
+    if (openedScPlaylist != null) {
+        val pl = openedScPlaylist!!
+        BackHandler { openedScPlaylist = null }
+        LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+            item {
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { openedScPlaylist = null }) {
+                        Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(pl.title, fontSize = 22.sp, fontWeight = FontWeight.Black, color = textColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Автор: ${pl.author} • Треков: ${pl.tracks.size}", color = textColor.copy(0.6f), fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+            items(pl.tracks, key = { it.id }) { scTrack ->
+                val isLiked = likedScTracks.any { kotlin.math.abs(it.id) == kotlin.math.abs(scTrack.id) }
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onPlaySoundCloudTrack(scTrack, pl.tracks) }.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val dummyTrack = remember(scTrack) {
+                        Track(id = -scTrack.id, uri = Uri.EMPTY, title = scTrack.title, artist = scTrack.artist, album = pl.title, durationMs = scTrack.durationMs, mimeType = "audio/mpeg", sizeBytes = 0L, customCoverUri = scTrack.artworkUrl ?: pl.artworkUrl)
+                    }
+                    TrackCoverThumb(dummyTrack, expressiveShape, primaryColor, 46)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(scTrack.title, color = textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${scTrack.artist} • ${formatDuration(scTrack.durationMs)}", color = textColor.copy(0.6f), fontSize = 11.sp, maxLines = 1)
+                    }
+                    IconButton(onClick = { onToggleLikeScTrack(scTrack) }, modifier = Modifier.size(34.dp)) {
+                        Icon(if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null, tint = if (isLiked) primaryColor else textColor.copy(0.6f), modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = { onAddScToPlaylist(scTrack) }, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.Filled.Add, null, tint = primaryColor, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+        return
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(modifier = Modifier.height(12.dp))
@@ -409,6 +462,11 @@ fun SoundCloudScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         if (activeTab == 0) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                ExpressiveFilterPill("Треки", searchType == 0, primaryColor, textColor) { searchType = 0 }
+                ExpressiveFilterPill("Плейлисты", searchType == 1, primaryColor, textColor) { searchType = 1 }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -420,7 +478,7 @@ fun SoundCloudScreen(
                         query = it
                         scPrefs.edit().putString("sc_saved_query", it).apply()
                     },
-                    placeholder = { Text("Введите имя, автора или название альбома", color = textColor.copy(0.5f), fontSize = 13.sp) },
+                    placeholder = { Text(if (searchType == 0) "Поиск треков SoundCloud" else "Поиск плейлистов SoundCloud", color = textColor.copy(0.5f), fontSize = 13.sp) },
                     singleLine = true,
                     shape = cardShape,
                     modifier = Modifier.weight(1f)
@@ -432,12 +490,16 @@ fun SoundCloudScreen(
                             statusMessage = ""
                             scPrefs.edit().putString("sc_saved_query", query).apply()
                             scope.launch {
-                                val found = SoundCloudClient.searchTracks(query.trim())
-                                isSearching = false
-                                results = found
-                                if (found.isEmpty()) {
-                                    statusMessage = "Ничего не найдено в SoundCloud"
+                                if (searchType == 0) {
+                                    val found = SoundCloudClient.searchTracks(query.trim())
+                                    results = found
+                                    if (found.isEmpty()) statusMessage = "Ничего не найдено в SoundCloud"
+                                } else {
+                                    val found = SoundCloudClient.searchPlaylists(query.trim())
+                                    playlistResults = found
+                                    if (found.isEmpty()) statusMessage = "Плейлисты не найдены"
                                 }
+                                isSearching = false
                             }
                         }
                     },
@@ -459,12 +521,35 @@ fun SoundCloudScreen(
                         Text("Ищем в SoundCloud...", color = textColor.copy(0.7f), fontSize = 13.sp)
                     }
                 }
-            } else if (results.isEmpty()) {
+            } else if (searchType == 0 && results.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                         Icon(Icons.Filled.CloudQueue, null, tint = primaryColor.copy(0.45f), modifier = Modifier.size(56.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(statusMessage, color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            } else if (searchType == 1 && playlistResults.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(statusMessage, color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 15.sp)
+                }
+            } else if (searchType == 1) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                    items(playlistResults, key = { it.id }) { pl ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { openedScPlaylist = pl }.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(modifier = Modifier.size(50.dp).clip(expressiveShape).background(primaryColor.copy(0.2f)), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.QueueMusic, null, tint = primaryColor)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(pl.title, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${pl.author} • ${pl.trackCount} треков", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1)
+                            }
+                            Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
+                        }
                     }
                 }
             } else {
@@ -534,6 +619,8 @@ fun SoundCloudScreen(
                             surfaceColor = surfaceColor,
                             badgeText = "SC ❤️",
                             showCoverThumb = true,
+                            isSelected = false,
+                            isSelectionMode = false,
                             onAddToPlaylist = {
                                 onAddScToPlaylist(
                                     SoundCloudTrack(
@@ -546,6 +633,7 @@ fun SoundCloudScreen(
                                     )
                                 )
                             },
+                            onLongClick = {},
                             onClick = { onPlaySavedScTrack(savedTrack) }
                         )
                     }
@@ -570,6 +658,7 @@ fun CleanHeaderLayout(
     isPlaying: Boolean,
     isShuffleEnabled: Boolean,
     onBack: () -> Unit,
+    onEditPlaylistClick: (() -> Unit)? = null,
     onPlayContext: (List<Track>, Track) -> Unit,
     onTogglePlay: () -> Unit,
     onToggleShuffle: () -> Unit,
@@ -591,8 +680,15 @@ fun CleanHeaderLayout(
     LazyColumn(modifier = Modifier.fillMaxSize().background(bgColor)) {
         item {
             Column(modifier = Modifier.fillMaxWidth().background(bgColor).padding(horizontal = 20.dp, vertical = 14.dp)) {
-                IconButton(onClick = onBack, modifier = Modifier.size(40.dp).clip(CircleShape).background(surfaceColor)) {
-                    Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack, modifier = Modifier.size(40.dp).clip(CircleShape).background(surfaceColor)) {
+                        Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp))
+                    }
+                    if (onEditPlaylistClick != null) {
+                        IconButton(onClick = onEditPlaylistClick, modifier = Modifier.size(40.dp).clip(CircleShape).background(surfaceColor)) {
+                            Icon(Icons.Filled.Edit, "Изменить", tint = primaryColor, modifier = Modifier.size(20.dp))
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
@@ -635,7 +731,7 @@ fun CleanHeaderLayout(
         } else {
             items(tracks, key = { it.id }) { track ->
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    TrackListItem(track, RoundedCornerShape(16.dp), expressiveShape, primaryColor, textColor, surfaceColor, null, true, { onAddTrackToPlaylistClick(track) }) { onPlayContext(tracks, track) }
+                    TrackListItem(track, RoundedCornerShape(16.dp), expressiveShape, primaryColor, textColor, surfaceColor, null, true, false, false, { onAddTrackToPlaylistClick(track) }, {}) { onPlayContext(tracks, track) }
                 }
             }
         }
@@ -660,7 +756,8 @@ fun AppleMusicArtistScreen(
     onPlayContext: (List<Track>, Track) -> Unit,
     onTogglePlay: () -> Unit,
     onToggleShuffle: () -> Unit,
-    onAddTrackToPlaylistClick: (Track) -> Unit
+    onAddTrackToPlaylistClick: (Track) -> Unit,
+    onAddMultipleTracksToPlaylist: (List<Track>) -> Unit
 ) {
     BackHandler { onBack() }
     val context = LocalContext.current
@@ -669,87 +766,162 @@ fun AppleMusicArtistScreen(
     var showSearchBar by remember { mutableStateOf(false) }
     val isArtistPlaying = isPlaying && currentTrack != null && artistTracks.any { it.id == currentTrack.id }
 
+    val selectedTrackIds = remember { mutableStateListOf<Long>() }
+    val isSelectionMode = selectedTrackIds.isNotEmpty()
+
     LaunchedEffect(artistTracks) {
         for (trk in artistTracks) { val bmp = loadTrackThumbnail(context, trk); if (bmp != null) { heroBitmap = bmp; break } }
     }
 
     val filteredTracks = run { if (searchQuery.isBlank()) artistTracks else artistTracks.filter { it.title.contains(searchQuery, ignoreCase = true) } }
 
-    LazyColumn(modifier = Modifier.fillMaxSize().background(bgColor)) {
-        item {
-            Box(modifier = Modifier.fillMaxWidth().height(410.dp)) {
-                val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                if (validHero != null) {
-                    Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp), alpha = 0.7f)
-                    Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                } else {
-                    Box(modifier = Modifier.fillMaxSize().background(surfaceColor), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(110.dp))
-                    }
-                }
-                Box(
-                    modifier = Modifier.fillMaxSize().background(
-                        Brush.verticalGradient(colors = listOf(Color.Black.copy(0.25f), Color.Transparent, bgColor.copy(0.88f), bgColor))
-                    )
-                )
-
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 18.dp, start = 16.dp, end = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack, modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(0.45f))) {
-                        Icon(Icons.Filled.ArrowBackIosNew, "Назад", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(artistName, color = textColor, fontSize = 38.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { onToggleShuffle(); if (artistTracks.isNotEmpty()) onPlayContext(artistTracks.shuffled(), artistTracks.random()) }) {
-                            Icon(Icons.Filled.Shuffle, "Shuffle", tint = if (isShuffleEnabled) primaryColor else textColor, modifier = Modifier.size(28.dp))
-                        }
-                        Box(
-                            modifier = Modifier.size(56.dp).clip(CircleShape).background(primaryColor).clickable {
-                                if (isArtistPlaying) onTogglePlay()
-                                else if (artistTracks.isNotEmpty()) onPlayContext(artistTracks, artistTracks.first())
-                            },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(34.dp))
-                        }
-                        IconButton(onClick = { showSearchBar = !showSearchBar }) {
-                            Icon(Icons.Filled.Search, "Search", tint = textColor, modifier = Modifier.size(28.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        if (showSearchBar) {
+    Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
             item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Поиск трека у $artistName...", color = textColor.copy(0.5f)) },
-                    singleLine = true,
-                    shape = cardShape,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-                )
+                Box(modifier = Modifier.fillMaxWidth().height(410.dp)) {
+                    val validHero = heroBitmap?.takeIf { !it.isRecycled }
+                    if (validHero != null) {
+                        Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp), alpha = 0.7f)
+                        Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize().background(surfaceColor), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(110.dp))
+                        }
+                    }
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(colors = listOf(Color.Black.copy(0.25f), Color.Transparent, bgColor.copy(0.88f), bgColor))
+                        )
+                    )
+
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 18.dp, start = 16.dp, end = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onBack, modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(0.45f))) {
+                            Icon(Icons.Filled.ArrowBackIosNew, "Назад", tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(artistName, color = textColor, fontSize = 38.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { onToggleShuffle(); if (artistTracks.isNotEmpty()) onPlayContext(artistTracks.shuffled(), artistTracks.random()) }) {
+                                Icon(Icons.Filled.Shuffle, "Shuffle", tint = if (isShuffleEnabled) primaryColor else textColor, modifier = Modifier.size(28.dp))
+                            }
+                            Box(
+                                modifier = Modifier.size(56.dp).clip(CircleShape).background(primaryColor).clickable {
+                                    if (isArtistPlaying) onTogglePlay()
+                                    else if (artistTracks.isNotEmpty()) onPlayContext(artistTracks, artistTracks.first())
+                                },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(34.dp))
+                            }
+                            IconButton(onClick = { showSearchBar = !showSearchBar }) {
+                                Icon(Icons.Filled.Search, "Search", tint = textColor, modifier = Modifier.size(28.dp))
+                            }
+                        }
+                    }
+                }
             }
+
+            if (showSearchBar) {
+                item {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Поиск трека у $artistName...", color = textColor.copy(0.5f)) },
+                        singleLine = true,
+                        shape = cardShape,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
+            item {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Песни", color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(Icons.Filled.ChevronRight, null, tint = textColor.copy(0.6f))
+                    }
+                    if (isSelectionMode) {
+                        TextButton(onClick = {
+                            if (selectedTrackIds.size == artistTracks.size) selectedTrackIds.clear()
+                            else {
+                                selectedTrackIds.clear()
+                                selectedTrackIds.addAll(artistTracks.map { it.id })
+                            }
+                        }) {
+                            Text(if (selectedTrackIds.size == artistTracks.size) "Снять всё" else "Выбрать всё", color = primaryColor, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            items(filteredTracks, key = { it.id }) { track ->
+                val isSel = selectedTrackIds.contains(track.id)
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    TrackListItem(
+                        track = track,
+                        cardShape = cardShape,
+                        expressiveShape = expressiveShape,
+                        primaryColor = primaryColor,
+                        textColor = textColor,
+                        surfaceColor = surfaceColor,
+                        badgeText = null,
+                        showCoverThumb = true,
+                        isSelected = isSel,
+                        isSelectionMode = isSelectionMode,
+                        onAddToPlaylist = { onAddTrackToPlaylistClick(track) },
+                        onLongClick = {
+                            if (!isSel) selectedTrackIds.add(track.id)
+                        },
+                        onClick = {
+                            if (isSelectionMode) {
+                                if (isSel) selectedTrackIds.remove(track.id) else selectedTrackIds.add(track.id)
+                            } else {
+                                onPlayContext(artistTracks, track)
+                            }
+                        }
+                    )
+                }
+            }
+            item { Spacer(modifier = Modifier.height(140.dp)) }
         }
 
-        item {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Songs", color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                Spacer(modifier = Modifier.width(6.dp))
-                Icon(Icons.Filled.ChevronRight, null, tint = textColor.copy(0.6f))
+        if (isSelectionMode) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = surfaceColor,
+                tonalElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Выбрано: ${selectedTrackIds.size}", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { selectedTrackIds.clear() }) {
+                            Text("Отмена", color = textColor.copy(0.7f))
+                        }
+                        Button(
+                            onClick = {
+                                val selectedTracks = artistTracks.filter { selectedTrackIds.contains(it.id) }
+                                onAddMultipleTracksToPlaylist(selectedTracks)
+                                selectedTrackIds.clear()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("В плейлист", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
-
-        items(filteredTracks, key = { it.id }) { track ->
-            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                TrackListItem(track, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, null, true, { onAddTrackToPlaylistClick(track) }) { onPlayContext(artistTracks, track) }
-            }
-        }
-        item { Spacer(modifier = Modifier.height(120.dp)) }
     }
 }
 
@@ -769,98 +941,217 @@ fun LibraryScreen(
     openedPlaylist: PlaylistItem?,
     openedArtist: String?,
     openedAlbum: String?,
-    onRescanClick: () -> Unit,
     onPlayContext: (List<Track>, Track) -> Unit,
     onTogglePlay: () -> Unit,
     onToggleShuffle: () -> Unit,
     onAddTrackToPlaylistClick: (Track) -> Unit,
+    onAddMultipleTracksToPlaylist: (List<Track>) -> Unit,
     onSetOpenedPlaylist: (PlaylistItem?) -> Unit,
     onSetOpenedArtist: (String?) -> Unit,
-    onSetOpenedAlbum: (String?) -> Unit
+    onSetOpenedAlbum: (String?) -> Unit,
+    onEditPlaylist: (PlaylistItem) -> Unit
 ) {
-    var category by remember { mutableStateOf(0) }
+    var category by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
+    var isSearchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var sortMode by remember { mutableStateOf(TrackSortMode.DATE_ADDED) }
+    var showSortMenu by remember { mutableStateOf(false) }
+
+    val selectedTrackIds = remember { mutableStateListOf<Long>() }
+    val isSelectionMode = selectedTrackIds.isNotEmpty()
 
     if (openedArtist != null) {
         val artistTracks = run { tracks.filter { it.artist.equals(openedArtist, ignoreCase = true) } }
-        AppleMusicArtistScreen(openedArtist, artistTracks, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, bgColor, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedArtist(null) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
+        AppleMusicArtistScreen(openedArtist, artistTracks, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, bgColor, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedArtist(null) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick, onAddMultipleTracksToPlaylist)
         return
     }
 
     if (openedPlaylist != null) {
         val currentPl = playlists.find { it.name == openedPlaylist.name } ?: openedPlaylist
         val plTracks = run { val map = tracks.associateBy { it.id }; currentPl.trackIds.mapNotNull { map[it] } }
-        CleanHeaderLayout(currentPl.name, "Ваш плейлист • ${plTracks.size} треков", plTracks, currentPl.coverUri, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedPlaylist(null) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
+        CleanHeaderLayout(currentPl.name, if (currentPl.description.isNotBlank()) currentPl.description else "Плейлист • ${plTracks.size} треков", plTracks, currentPl.coverUri, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedPlaylist(null) }, { onEditPlaylist(currentPl) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
         return
     }
 
     if (openedAlbum != null) {
         val albumTracks = run { tracks.filter { it.album == openedAlbum } }
         val artistName = albumTracks.firstOrNull()?.artist ?: "Неизвестный исполнитель"
-        CleanHeaderLayout(openedAlbum, "Альбом • $artistName", albumTracks, null, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedAlbum(null) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
+        CleanHeaderLayout(openedAlbum, "Альбом • $artistName", albumTracks, null, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedAlbum(null) }, null, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Моя медиатека", fontSize = 28.sp, fontWeight = FontWeight.Black, color = textColor)
-            IconButton(onClick = onRescanClick, modifier = Modifier.clip(CircleShape).background(surfaceColor)) { Icon(Icons.Filled.Refresh, null, tint = textColor) }
+    val sortedTracks = remember(tracks, sortMode, searchQuery) {
+        val filtered = if (searchQuery.isBlank()) tracks else tracks.filter {
+            it.title.contains(searchQuery, ignoreCase = true) || it.artist.contains(searchQuery, ignoreCase = true)
         }
-        Spacer(modifier = Modifier.height(14.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            item { ExpressiveFilterPill("Треки (${tracks.size})", category == 0, primaryColor, textColor) { category = 0 } }
-            item { ExpressiveFilterPill("Плейлисты (${playlists.size})", category == 1, primaryColor, textColor) { category = 1 } }
-            item { ExpressiveFilterPill("Авторы", category == 2, primaryColor, textColor) { category = 2 } }
-            item { ExpressiveFilterPill("Альбомы", category == 3, primaryColor, textColor) { category = 3 } }
+        when (sortMode) {
+            TrackSortMode.DATE_ADDED -> filtered
+            TrackSortMode.TITLE -> filtered.sortedBy { it.title.lowercase() }
+            TrackSortMode.ARTIST -> filtered.sortedBy { it.artist.lowercase() }
+            TrackSortMode.DURATION -> filtered.sortedByDescending { it.durationMs }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+    }
 
-        AnimatedContent(targetState = category, label = "") { cat ->
-            when (cat) {
-                0 -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
-                    items(tracks, key = { it.id }) { track -> TrackListItem(track, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, null, true, { onAddTrackToPlaylistClick(track) }) { onPlayContext(tracks, track) } }
+    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Медиатека", fontSize = 28.sp, fontWeight = FontWeight.Black, color = textColor)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(onClick = { isSearchActive = !isSearchActive }, modifier = Modifier.clip(CircleShape).background(if (isSearchActive) primaryColor else surfaceColor)) {
+                        Icon(Icons.Filled.Search, "Поиск", tint = if (isSearchActive) Color.Black else textColor)
+                    }
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }, modifier = Modifier.clip(CircleShape).background(surfaceColor)) {
+                            Icon(Icons.Filled.Sort, "Сортировка", tint = primaryColor)
+                        }
+                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }, modifier = Modifier.background(surfaceColor)) {
+                            TrackSortMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(mode.label, color = if (sortMode == mode) primaryColor else textColor, fontWeight = FontWeight.SemiBold) },
+                                    onClick = {
+                                        sortMode = mode
+                                        showSortMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
-                1 -> {
-                    if (playlists.isEmpty()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("У вас пока нет плейлистов! :-(", color = textColor.copy(0.65f), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
-                    else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
-                        items(playlists) { pl ->
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedPlaylist(pl) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                val bmp = run { if (pl.coverUri != null) { try { context.contentResolver.openInputStream(Uri.parse(pl.coverUri))?.use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null } } else null }
-                                Box(modifier = Modifier.size(54.dp).clip(expressiveShape).background(primaryColor.copy(0.25f)), contentAlignment = Alignment.Center) {
-                                    if (bmp != null) Image(bmp.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                    else PlaylistGridCover(pl.trackIds, tracks, primaryColor, 54)
+            }
+
+            AnimatedVisibility(visible = isSearchActive) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Поиск по названию или автору...", color = textColor.copy(0.5f), fontSize = 13.sp) },
+                    singleLine = true,
+                    shape = cardShape,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                ExpressiveFilterPill("Треки (${sortedTracks.size})", category == 0, primaryColor, textColor) { category = 0 }
+                ExpressiveFilterPill("Плейлисты (${playlists.size})", category == 1, primaryColor, textColor) { category = 1 }
+                ExpressiveFilterPill("Авторы", category == 2, primaryColor, textColor) { category = 2 }
+                ExpressiveFilterPill("Альбомы", category == 3, primaryColor, textColor) { category = 3 }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+
+            AnimatedContent(targetState = category, label = "") { cat ->
+                when (cat) {
+                    0 -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                        items(sortedTracks, key = { it.id }) { track ->
+                            val isSel = selectedTrackIds.contains(track.id)
+                            TrackListItem(
+                                track = track,
+                                cardShape = cardShape,
+                                expressiveShape = expressiveShape,
+                                primaryColor = primaryColor,
+                                textColor = textColor,
+                                surfaceColor = surfaceColor,
+                                badgeText = null,
+                                showCoverThumb = true,
+                                isSelected = isSel,
+                                isSelectionMode = isSelectionMode,
+                                onAddToPlaylist = { onAddTrackToPlaylistClick(track) },
+                                onLongClick = {
+                                    if (!isSel) selectedTrackIds.add(track.id)
+                                },
+                                onClick = {
+                                    if (isSelectionMode) {
+                                        if (isSel) selectedTrackIds.remove(track.id) else selectedTrackIds.add(track.id)
+                                    } else {
+                                        onPlayContext(sortedTracks, track)
+                                    }
                                 }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column(modifier = Modifier.weight(1f)) { Text(pl.name, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("Треков: ${pl.trackIds.size}", color = textColor.copy(0.6f), fontSize = 12.sp) }
-                                Icon(Icons.Filled.ChevronRight, null, tint = textColor.copy(0.5f))
+                            )
+                        }
+                    }
+                    1 -> {
+                        if (playlists.isEmpty()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("У вас пока нет плейлистов! :-(", color = textColor.copy(0.65f), fontSize = 17.sp, fontWeight = FontWeight.Bold) }
+                        else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                            items(playlists) { pl ->
+                                Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedPlaylist(pl) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    val bmp = run { if (pl.coverUri != null) { try { context.contentResolver.openInputStream(Uri.parse(pl.coverUri))?.use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null } } else null }
+                                    Box(modifier = Modifier.size(54.dp).clip(expressiveShape).background(primaryColor.copy(0.25f)), contentAlignment = Alignment.Center) {
+                                        if (bmp != null) Image(bmp.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                        else PlaylistGridCover(pl.trackIds, tracks, primaryColor, 54)
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(pl.name, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        Text("Треков: ${pl.trackIds.size}", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                    }
+                                    IconButton(onClick = { onEditPlaylist(pl) }) {
+                                        Icon(Icons.Filled.Edit, "Изменить", tint = primaryColor, modifier = Modifier.size(20.dp))
+                                    }
+                                    Icon(Icons.Filled.ChevronRight, null, tint = textColor.copy(0.5f))
+                                }
+                            }
+                        }
+                    }
+                    2 -> {
+                        val artists = run { tracks.groupBy { it.artist } }
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                            items(artists.keys.toList()) { artist ->
+                                val artistTrackList = artists[artist] ?: emptyList()
+                                Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedArtist(artist) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    if (artistTrackList.isNotEmpty()) { TrackCoverThumb(artistTrackList.first(), CircleShape, primaryColor, 46); Spacer(modifier = Modifier.width(12.dp)) }
+                                    Column(modifier = Modifier.weight(1f)) { Text(artist, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${artistTrackList.size} треков", color = textColor.copy(0.6f), fontSize = 12.sp) }
+                                    Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
+                                }
+                            }
+                        }
+                    }
+                    else -> {
+                        val albums = run { tracks.groupBy { it.album } }
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                            items(albums.keys.toList()) { album ->
+                                val albumTrackList = albums[album] ?: emptyList()
+                                Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedAlbum(album) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    if (albumTrackList.isNotEmpty()) { TrackCoverThumb(albumTrackList.first(), expressiveShape, primaryColor, 50); Spacer(modifier = Modifier.width(12.dp)) }
+                                    Column(modifier = Modifier.weight(1f)) { Text(album, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${albumTrackList.firstOrNull()?.artist ?: ""} • ${albumTrackList.size} тр.", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                    Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
+                                }
                             }
                         }
                     }
                 }
-                2 -> {
-                    val artists = run { tracks.groupBy { it.artist } }
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
-                        items(artists.keys.toList()) { artist ->
-                            val artistTrackList = artists[artist] ?: emptyList()
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedArtist(artist) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (artistTrackList.isNotEmpty()) { TrackCoverThumb(artistTrackList.first(), CircleShape, primaryColor, 46); Spacer(modifier = Modifier.width(12.dp)) }
-                                Column(modifier = Modifier.weight(1f)) { Text(artist, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${artistTrackList.size} треков", color = textColor.copy(0.6f), fontSize = 12.sp) }
-                                Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
-                            }
+            }
+        }
+
+        if (isSelectionMode) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 90.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = surfaceColor,
+                tonalElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Выбрано: ${selectedTrackIds.size}", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { selectedTrackIds.clear() }) {
+                            Text("Отмена", color = textColor.copy(0.7f))
                         }
-                    }
-                }
-                else -> {
-                    val albums = run { tracks.groupBy { it.album } }
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
-                        items(albums.keys.toList()) { album ->
-                            val albumTrackList = albums[album] ?: emptyList()
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedAlbum(album) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (albumTrackList.isNotEmpty()) { TrackCoverThumb(albumTrackList.first(), expressiveShape, primaryColor, 50); Spacer(modifier = Modifier.width(12.dp)) }
-                                Column(modifier = Modifier.weight(1f)) { Text(album, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${albumTrackList.firstOrNull()?.artist ?: ""} • ${albumTrackList.size} тр.", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                                Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
-                            }
+                        Button(
+                            onClick = {
+                                val selectedTracks = tracks.filter { selectedTrackIds.contains(it.id) }
+                                onAddMultipleTracksToPlaylist(selectedTracks)
+                                selectedTrackIds.clear()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("В плейлист", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -885,8 +1176,8 @@ fun MiniPlayerBar(
     onSwipeNext: () -> Unit,
     onSwipePrev: () -> Unit
 ) {
-    var dragX by remember { mutableStateOf(0f) }
-    var dragY by remember { mutableStateOf(0f) }
+    var dragX by remember { mutableFloatStateOf(0f) }
+    var dragY by remember { mutableFloatStateOf(0f) }
 
     Row(
         modifier = Modifier
@@ -975,7 +1266,7 @@ fun FullScreenPlayerOverlay(
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVol = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
-    var currentVol by remember { mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()) }
+    var currentVol by remember { mutableFloatStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()) }
 
     var showFullLyricsOverlay by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -1016,7 +1307,6 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            // Безопасный масштаб без вылета при паузе
             val targetScale = if (isPlaying) 1f else 0.94f
             val coverScale by animateFloatAsState(targetValue = targetScale, animationSpec = tween(250), label = "coverScale")
             Box(
@@ -1411,7 +1701,6 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                                 (distance * 1.0f).coerceAtMost(3.0f)
                             } else 0f
 
-                            // Текст без масштабирования и без цветного акцента (чистый белый и читаемый)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1507,7 +1796,7 @@ fun CurvedSleepTimerDialog(
     onDismiss: () -> Unit,
     onApplyTimer: (Int, Boolean) -> Unit
 ) {
-    var selectedMinutes by remember { mutableStateOf(currentMinutes.coerceIn(0, 120)) }
+    var selectedMinutes by remember { mutableIntStateOf(currentMinutes.coerceIn(0, 120)) }
     var stopEndTrack by remember { mutableStateOf(stopAfterCurrentTrack) }
 
     AlertDialog(
@@ -1642,9 +1931,9 @@ fun SettingsAndThemeEditor(
     val presets = listOf("Neon Pink" to 0xFFFF66C4, "Acid Lime" to 0xFFA6FF00, "Electric Violet" to 0xFF9D4EDD, "Cyber Cyan" to 0xFF00F5D4, "Sunset Coral" to 0xFFFF5E5B, "Pure Gold" to 0xFFFFBE0B)
 
     var showCustomColorPicker by remember { mutableStateOf(false) }
-    var customRed by remember { mutableStateOf(((themeConfig.primaryHex shr 16) and 0xFF).toFloat()) }
-    var customGreen by remember { mutableStateOf(((themeConfig.primaryHex shr 8) and 0xFF).toFloat()) }
-    var customBlue by remember { mutableStateOf((themeConfig.primaryHex and 0xFF).toFloat()) }
+    var customRed by remember { mutableFloatStateOf(((themeConfig.primaryHex shr 16) and 0xFF).toFloat()) }
+    var customGreen by remember { mutableFloatStateOf(((themeConfig.primaryHex shr 8) and 0xFF).toFloat()) }
+    var customBlue by remember { mutableFloatStateOf((themeConfig.primaryHex and 0xFF).toFloat()) }
 
     val foldersMap = remember(allRawTracks) { allRawTracks.groupBy { it.folderPath } }
 
@@ -1664,7 +1953,7 @@ fun SettingsAndThemeEditor(
                             border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
                         ) {
                             Text(
-                                "v1.1.3",
+                                "v1.1.4",
                                 color = primaryColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
@@ -1760,8 +2049,8 @@ fun SettingsAndThemeEditor(
                     }
                     item {
                         Text("Режим оформления", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 8.dp)) {
-                            items(ThemeMode.entries) { mode ->
+                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            ThemeMode.entries.forEach { mode ->
                                 ExpressiveFilterPill(mode.label, themeConfig.themeMode == mode, primaryColor, textColor) {
                                     onThemeChange(themeConfig.copy(themeMode = mode, bgHex = if (mode == ThemeMode.LIGHT || mode == ThemeMode.ADAPTIVE_LIGHT) 0xFFF7F5FA else 0xFF0D0D12))
                                 }
@@ -1981,6 +2270,55 @@ fun SettingsAndThemeEditor(
 }
 
 @Composable
+fun EditPlaylistDialog(
+    playlist: PlaylistItem,
+    cardShape: Shape,
+    expressiveShape: Shape,
+    primaryColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    selectedCoverUri: String?,
+    onPickCoverClick: () -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String?) -> Unit
+) {
+    var name by remember { mutableStateOf(playlist.name) }
+    var desc by remember { mutableStateOf(playlist.description) }
+    val context = LocalContext.current
+    val effectiveCover = selectedCoverUri ?: playlist.coverUri
+    val coverBitmap = run {
+        if (effectiveCover != null && !effectiveCover.startsWith("http")) {
+            try { context.contentResolver.openInputStream(Uri.parse(effectiveCover))?.use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null }
+        } else null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = cardShape,
+        containerColor = surfaceColor,
+        title = { Text("Настройки плейлиста", color = textColor, fontWeight = FontWeight.Black, fontSize = 18.sp) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.size(100.dp).clip(expressiveShape).background(primaryColor.copy(0.2f)).border(1.dp, primaryColor, expressiveShape).clickable { onPickCoverClick() }, contentAlignment = Alignment.Center) {
+                    if (coverBitmap != null) Image(coverBitmap.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    else Icon(Icons.Filled.AddPhotoAlternate, null, tint = primaryColor, modifier = Modifier.size(32.dp))
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Название") }, singleLine = true, shape = cardShape, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("Описание") }, maxLines = 3, shape = cardShape, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(name.trim(), desc.trim(), effectiveCover) }, colors = ButtonDefaults.buttonColors(containerColor = primaryColor), shape = RoundedCornerShape(50)) {
+                Text("Сохранить", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = textColor.copy(0.7f)) } }
+    )
+}
+
+@Composable
 fun EditTrackTagsDialog(
     track: Track,
     cardShape: Shape,
@@ -2099,22 +2437,60 @@ fun DockVerticalItem(icon: ImageVector, label: String, selected: Boolean, primar
 
 @Composable
 fun ExpressiveFilterPill(text: String, selected: Boolean, primaryColor: Color, textColor: Color = Color.White, onClick: () -> Unit) {
-    Box(modifier = Modifier.clip(RoundedCornerShape(50)).background(if (selected) primaryColor else textColor.copy(0.08f)).border(1.dp, if (selected) primaryColor else textColor.copy(0.16f), RoundedCornerShape(50)).clickable { onClick() }.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(text, color = if (selected) Color.Black else textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, softWrap = false)
+    Box(modifier = Modifier.clip(RoundedCornerShape(50)).background(if (selected) primaryColor else textColor.copy(0.08f)).border(1.dp, if (selected) primaryColor else textColor.copy(0.16f), RoundedCornerShape(50)).clickable { onClick() }.padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Text(text, color = if (selected) Color.Black else textColor, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false)
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TrackListItem(track: Track, cardShape: Shape, expressiveShape: Shape, primaryColor: Color, textColor: Color = Color.White, surfaceColor: Color = Color.White.copy(0.06f), badgeText: String? = null, showCoverThumb: Boolean = true, onAddToPlaylist: (() -> Unit)? = null, onClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onClick() }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (showCoverThumb) { TrackCoverThumb(track, expressiveShape, primaryColor, 44); Spacer(modifier = Modifier.width(12.dp)) }
+fun TrackListItem(
+    track: Track,
+    cardShape: Shape,
+    expressiveShape: Shape,
+    primaryColor: Color,
+    textColor: Color = Color.White,
+    surfaceColor: Color = Color.White.copy(0.06f),
+    badgeText: String? = null,
+    showCoverThumb: Boolean = true,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
+    onAddToPlaylist: (() -> Unit)? = null,
+    onLongClick: () -> Unit = {},
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(if (isSelected) primaryColor.copy(0.22f) else surfaceColor)
+            .border(if (isSelected) 1.5.dp else 0.dp, primaryColor, cardShape)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isSelectionMode) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onClick() },
+                colors = CheckboxDefaults.colors(checkedColor = primaryColor, checkmarkColor = Color.Black)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        if (showCoverThumb) {
+            TrackCoverThumb(track, expressiveShape, primaryColor, 44)
+            Spacer(modifier = Modifier.width(12.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(track.title, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(modifier = Modifier.height(2.dp))
             Text(if (badgeText != null) "$badgeText • ${track.artist} • ${formatMillis(track.durationMs)}" else "${track.artist} • ${formatMillis(track.durationMs)}", color = if (badgeText != null) primaryColor else textColor.copy(0.6f), fontWeight = if (badgeText != null) FontWeight.SemiBold else FontWeight.Normal, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(modifier = Modifier.width(8.dp))
-        if (onAddToPlaylist != null) {
+        if (!isSelectionMode && onAddToPlaylist != null) {
             IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(32.dp).clip(CircleShape)) {
                 Icon(Icons.Filled.Add, null, tint = primaryColor, modifier = Modifier.size(22.dp))
             }
@@ -2123,14 +2499,25 @@ fun TrackListItem(track: Track, cardShape: Shape, expressiveShape: Shape, primar
 }
 
 @Composable
-fun AddToPlaylistSheet(track: Track, playlists: List<PlaylistItem>, cardShape: Shape, expressiveShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color, onDismiss: () -> Unit, onSelectPlaylist: (PlaylistItem) -> Unit, onCreateNewPlaylistClick: () -> Unit) {
+fun AddToPlaylistSheet(
+    tracks: List<Track>,
+    playlists: List<PlaylistItem>,
+    cardShape: Shape,
+    expressiveShape: Shape,
+    primaryColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    onDismiss: () -> Unit,
+    onSelectPlaylist: (PlaylistItem) -> Unit,
+    onCreateNewPlaylistClick: () -> Unit
+) {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.55f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.15f), cardShape).clickable(enabled = false, onClick = {}).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(modifier = Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.3f)))
             Spacer(modifier = Modifier.height(14.dp))
             Text("В какой плейлист добавить?", color = textColor, fontWeight = FontWeight.Black, fontSize = 19.sp)
             Spacer(modifier = Modifier.height(4.dp))
-            Text(track.title, color = primaryColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (tracks.size == 1) tracks.first().title else "Выбрано треков: ${tracks.size}", color = primaryColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(modifier = Modifier.height(14.dp))
             if (playlists.isEmpty()) {
                 Text("У вас пока нет плейлистов! :-(", color = textColor.copy(0.65f), fontSize = 14.sp)
@@ -2165,15 +2552,16 @@ fun CreateMenuSheet(cardShape: Shape, expressiveShape: Shape, primaryColor: Colo
             Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(primaryColor.copy(0.18f)).border(1.dp, primaryColor, cardShape).clickable { onSelectPlaylist() }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(modifier = Modifier.size(44.dp).clip(expressiveShape).background(primaryColor), contentAlignment = Alignment.Center) { Icon(Icons.Filled.LibraryAdd, null, tint = Color.Black) }
                 Spacer(modifier = Modifier.width(14.dp))
-                Column { Text("Плейлист", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("Выбрать свою обложку и название", color = textColor.copy(0.65f), fontSize = 12.sp) }
+                Column { Text("Плейлист", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("Выбрать свою обложку, имя и описание", color = textColor.copy(0.65f), fontSize = 12.sp) }
             }
         }
     }
 }
 
 @Composable
-fun CreatePlaylistDetailsDialog(cardShape: Shape, expressiveShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color, selectedCoverUri: String?, onPickCoverClick: () -> Unit, onDismiss: () -> Unit, onCreate: (String, String?) -> Unit) {
+fun CreatePlaylistDetailsDialog(cardShape: Shape, expressiveShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color, selectedCoverUri: String?, onPickCoverClick: () -> Unit, onDismiss: () -> Unit, onCreate: (String, String, String?) -> Unit) {
     var name by remember { mutableStateOf("") }
+    var desc by remember { mutableStateOf("") }
     val context = LocalContext.current
     val coverBitmap = run { if (selectedCoverUri != null) { try { context.contentResolver.openInputStream(Uri.parse(selectedCoverUri))?.use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null } } else null }
 
@@ -2187,10 +2575,12 @@ fun CreatePlaylistDetailsDialog(cardShape: Shape, expressiveShape: Shape, primar
                     else Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.AddPhotoAlternate, null, tint = primaryColor, modifier = Modifier.size(32.dp)); Spacer(modifier = Modifier.height(4.dp)); Text("Обложка", color = textColor.copy(0.8f), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(value = name, onValueChange = { name = it }, placeholder = { Text("Название плейлиста", color = textColor.copy(0.45f)) }, singleLine = true, shape = cardShape, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = textColor, unfocusedTextColor = textColor, focusedBorderColor = primaryColor, unfocusedBorderColor = textColor.copy(0.25f)))
+                OutlinedTextField(value = name, onValueChange = { name = it }, placeholder = { Text("Название плейлиста", color = textColor.copy(0.45f)) }, singleLine = true, shape = cardShape)
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = desc, onValueChange = { desc = it }, placeholder = { Text("Описание (необязательно)", color = textColor.copy(0.45f)) }, maxLines = 3, shape = cardShape)
             }
         },
-        confirmButton = { Button(onClick = { onCreate(name, selectedCoverUri) }, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Создать", color = Color.Black, fontWeight = FontWeight.Bold) } },
+        confirmButton = { Button(onClick = { onCreate(name, desc, selectedCoverUri) }, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Создать", color = Color.Black, fontWeight = FontWeight.Bold) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = textColor.copy(0.7f)) } }
     )
 }
@@ -2311,34 +2701,34 @@ fun WavySlider(
 
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
+    var sliderWidthPx by remember { mutableFloatStateOf(1f) }
     val displayProgress = if (isDragging) dragProgress else value.coerceIn(0f, 1f)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(36.dp)
-            .pointerInput(Unit) {
+            .onGloballyPositioned { coordinates ->
+                sliderWidthPx = coordinates.size.width.toFloat().coerceAtLeast(1f)
+            }
+            .pointerInput(sliderWidthPx) {
                 detectTapGestures(
                     onPress = { offset ->
-                        val w = size.width.toFloat()
-                        if (w > 0f) {
-                            val targetFrac = (offset.x / w).coerceIn(0f, 1f)
-                            onSeekCommit(targetFrac)
-                        }
+                        val targetFrac = (offset.x / sliderWidthPx).coerceIn(0f, 1f)
+                        dragProgress = targetFrac
+                        onSeekCommit(targetFrac)
                     }
                 )
             }
-            .pointerInput(Unit) {
+            .pointerInput(sliderWidthPx) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         isDragging = true
-                        val w = size.width.toFloat()
-                        if (w > 0f) dragProgress = (offset.x / w).coerceIn(0f, 1f)
+                        dragProgress = (offset.x / sliderWidthPx).coerceIn(0f, 1f)
                     },
                     onDrag = { change, _ ->
                         change.consume()
-                        val w = size.width.toFloat()
-                        if (w > 0f) dragProgress = (change.position.x / w).coerceIn(0f, 1f)
+                        dragProgress = (change.position.x / sliderWidthPx).coerceIn(0f, 1f)
                     },
                     onDragEnd = {
                         isDragging = false
