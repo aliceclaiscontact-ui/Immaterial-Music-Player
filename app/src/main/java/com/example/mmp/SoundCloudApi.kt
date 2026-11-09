@@ -86,7 +86,7 @@ object SoundCloudClient {
         val user = item.optJSONObject("user")
         val artist = user?.optString("username", "SoundCloud") ?: "SoundCloud"
         val rawArtwork = item.optString("artwork_url", "").takeIf { it.isNotBlank() && it != "null" }
-            ?: user?.optString("avatar_url", "").takeIf { it.isNotBlank() && it != "null" }
+            ?: user?.optString("avatar_url", "")?.takeIf { it.isNotBlank() && it != "null" }
         val artwork = rawArtwork?.replace("-large", "-t500x500")
         val duration = item.optLong("duration", 0L)
 
@@ -168,7 +168,7 @@ object SoundCloudClient {
                 val user = item.optJSONObject("user")
                 val author = user?.optString("username", "SoundCloud") ?: "SoundCloud"
                 val rawArtwork = item.optString("artwork_url", "").takeIf { it.isNotBlank() && it != "null" }
-                    ?: user?.optString("avatar_url", "").takeIf { it.isNotBlank() && it != "null" }
+                    ?: user?.optString("avatar_url", "")?.takeIf { it.isNotBlank() && it != "null" }
                 val artwork = rawArtwork?.replace("-large", "-t500x500")
                 val trackCount = item.optInt("track_count", 0)
 
