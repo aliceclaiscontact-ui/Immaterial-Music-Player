@@ -40,6 +40,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,6 +67,49 @@ fun MMPApp() {
             emptyList()
         }
         mutableStateOf<List<Track>>(initialList)
+    }
+
+    var scSearchQuery by remember { mutableStateOf(prefs.getString("sc_saved_query", "") ?: "") }
+    var scSearchResults by remember {
+        val cachedJson = prefs.getString("sc_cached_results_json", null)
+        val list = mutableListOf<SoundCloudTrack>()
+        if (cachedJson != null) {
+            try {
+                val arr = JSONArray(cachedJson)
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    list.add(
+                        SoundCloudTrack(
+                            id = o.getLong("id"),
+                            title = o.getString("title"),
+                            artist = o.getString("artist"),
+                            artworkUrl = o.optString("artworkUrl", "").takeIf { it.isNotBlank() },
+                            durationMs = o.getLong("durationMs"),
+                            streamProgressiveUrl = o.optString("streamUrl", "").takeIf { it.isNotBlank() }
+                        )
+                    )
+                }
+            } catch (_: Throwable) {}
+        }
+        mutableStateOf<List<SoundCloudTrack>>(list)
+    }
+
+    fun saveScSearchResults(results: List<SoundCloudTrack>) {
+        try {
+            val arr = JSONArray()
+            for (item in results.take(40)) {
+                val o = JSONObject().apply {
+                    put("id", item.id)
+                    put("title", item.title)
+                    put("artist", item.artist)
+                    put("artworkUrl", item.artworkUrl ?: "")
+                    put("durationMs", item.durationMs)
+                    put("streamUrl", item.streamProgressiveUrl ?: "")
+                }
+                arr.put(o)
+            }
+            prefs.edit().putString("sc_cached_results_json", arr.toString()).apply()
+        } catch (_: Throwable) {}
     }
 
     var showAudioFxDialog by remember { mutableStateOf(false) }
@@ -536,14 +581,13 @@ fun MMPApp() {
         syncMediaService(currentTrack, currentMetadata, isPlaying)
     }
 
-    // Запуск «Моей волны 50/50»
     fun startMyWave5050() {
         Toast.makeText(context, "Настраиваем «Мою волну 50/50»...", Toast.LENGTH_SHORT).show()
         scope.launch {
             val localPool = if (deviceTracks.isNotEmpty()) deviceTracks.shuffled().take(10) else emptyList()
             val favoriteArtist = artistSecondsAllTime.maxByOrNull { it.value }?.key
                 ?: currentTrack?.artist
-                ?: "Electronic"
+                ?: "Hyperpop"
 
             val scCandidates = SoundCloudClient.searchTracks(favoriteArtist, limit = 25)
             val scPool = scCandidates.mapNotNull { scTrk ->
@@ -560,7 +604,7 @@ fun MMPApp() {
 
             if (mixed.isNotEmpty()) {
                 playTrack(mixed.first(), mixed)
-                Toast.makeText(context, "«Моя волна» включена!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "«Моя волна» играет!", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(context, "Не удалось сформировать волну", Toast.LENGTH_SHORT).show()
             }
@@ -766,6 +810,7 @@ fun MMPApp() {
                             onThemeChange = { themeConfig = it; StorageHelper.saveTheme(prefs, it) },
                             onTrackClick = { playTrack(it, deviceTracks) },
                             onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
+                            onStartMyWaveClick = { startMyWave5050() },
                             onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
                             onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
                         )
@@ -804,6 +849,19 @@ fun MMPApp() {
                             textColor = textColor,
                             surfaceColor = surfaceColor,
                             likedScTracks = likedScTracks,
+                            searchResults = scSearchResults,
+                            searchQuery = scSearchQuery,
+                            onQueryChange = {
+                                scSearchQuery = it
+                                prefs.edit().putString("sc_saved_query", it).apply()
+                            },
+                            onSearchCommit = { q, type ->
+                                scope.launch {
+                                    val found = SoundCloudClient.searchTracks(q)
+                                    scSearchResults = found
+                                    saveScSearchResults(found)
+                                }
+                            },
                             onPlaySoundCloudTrack = { scTrack, allResults ->
                                 val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
                                 Toast.makeText(context, "Подключаемся к SoundCloud...", Toast.LENGTH_SHORT).show()

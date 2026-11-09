@@ -41,17 +41,23 @@ object SoundCloudClient {
     private fun httpGet(urlStr: String): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 10000
-            readTimeout = 10000
+            connectTimeout = 12000
+            readTimeout = 12000
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", USER_AGENT)
             setRequestProperty("Accept", "*/*")
         }
+        val code = conn.responseCode
+        if (code in 400..499) {
+            cachedClientId = null
+            resolvedUrlCache.clear()
+            throw IllegalStateException("HTTP $code")
+        }
         return conn.inputStream.bufferedReader().use { it.readText() }
     }
 
-    suspend fun getOrExtractClientId(): String = withContext(Dispatchers.IO) {
-        if (!cachedClientId.isNullOrBlank()) return@withContext cachedClientId!!
+    suspend fun getOrExtractClientId(forceRefresh: Boolean = false): String = withContext(Dispatchers.IO) {
+        if (!forceRefresh && !cachedClientId.isNullOrBlank()) return@withContext cachedClientId!!
         try {
             val html = httpGet("https://soundcloud.com/discover")
             val scriptRegex = Regex("""https://[a-zA-Z0-9\-_.]+\.sndcdn\.com/assets/[^"']+\.js""")
@@ -75,7 +81,7 @@ object SoundCloudClient {
         FALLBACK_CLIENT_ID
     }
 
-    private fun parseTrackJson(item: JSONObject): SoundCloudTrack? {
+    fun parseTrackJson(item: JSONObject): SoundCloudTrack? {
         val id = item.optLong("id", 0L)
         if (id == 0L) return null
 
@@ -148,6 +154,49 @@ object SoundCloudClient {
         }
     }
 
+    suspend fun fetchFullPlaylist(playlistId: Long): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
+        val cid = getOrExtractClientId()
+        val endpoint = "https://api-v2.soundcloud.com/playlists/$playlistId?client_id=$cid"
+        try {
+            val resp = httpGet(endpoint)
+            val root = JSONObject(resp)
+            val tracksArr = root.optJSONArray("tracks") ?: JSONArray()
+            val fullTracks = mutableListOf<SoundCloudTrack>()
+            val missingIds = mutableListOf<Long>()
+
+            for (i in 0 until tracksArr.length()) {
+                val trkObj = tracksArr.optJSONObject(i) ?: continue
+                val parsed = parseTrackJson(trkObj)
+                if (parsed != null) {
+                    fullTracks.add(parsed)
+                } else {
+                    val mid = trkObj.optLong("id", 0L)
+                    if (mid != 0L) missingIds.add(mid)
+                }
+            }
+
+            // Догружаем недостающие треки батчами
+            if (missingIds.isNotEmpty()) {
+                val chunks = missingIds.chunked(30)
+                for (chunk in chunks) {
+                    val idsStr = chunk.joinToString(",")
+                    val batchUrl = "https://api-v2.soundcloud.com/tracks?ids=$idsStr&client_id=$cid"
+                    try {
+                        val batchResp = httpGet(batchUrl)
+                        val arr = JSONArray(batchResp)
+                        for (k in 0 until arr.length()) {
+                            val o = arr.optJSONObject(k) ?: continue
+                            parseTrackJson(o)?.let { fullTracks.add(it) }
+                        }
+                    } catch (_: Throwable) {}
+                }
+            }
+            fullTracks
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
     suspend fun searchPlaylists(query: String, limit: Int = 20): List<SoundCloudPlaylist> = withContext(Dispatchers.IO) {
         val cid = getOrExtractClientId()
         val encodedQ = URLEncoder.encode(query, "UTF-8")
@@ -167,10 +216,6 @@ object SoundCloudClient {
                 val title = item.optString("title", "Плейлист")
                 val user = item.optJSONObject("user")
                 val author = user?.optString("username", "SoundCloud") ?: "SoundCloud"
-                val rawArtwork = item.optString("artwork_url", "").takeIf { it.isNotBlank() && it != "null" }
-                    ?: user?.optString("avatar_url", "")?.takeIf { it.isNotBlank() && it != "null" }
-                val artwork = rawArtwork?.replace("-large", "-t500x500")
-                val trackCount = item.optInt("track_count", 0)
 
                 val tracksArr = item.optJSONArray("tracks") ?: JSONArray()
                 val playlistTracks = mutableListOf<SoundCloudTrack>()
@@ -179,13 +224,23 @@ object SoundCloudClient {
                     parseTrackJson(trkObj)?.let { playlistTracks.add(it) }
                 }
 
+                var rawArtwork = item.optString("artwork_url", "").takeIf { it.isNotBlank() && it != "null" }
+                if (rawArtwork.isNullOrBlank() && playlistTracks.isNotEmpty()) {
+                    rawArtwork = playlistTracks.firstOrNull { !it.artworkUrl.isNullOrBlank() }?.artworkUrl
+                }
+                if (rawArtwork.isNullOrBlank()) {
+                    rawArtwork = user?.optString("avatar_url", "")?.takeIf { it.isNotBlank() && it != "null" }
+                }
+                val artwork = rawArtwork?.replace("-large", "-t500x500")
+                val trackCount = item.optInt("track_count", playlistTracks.size)
+
                 result.add(
                     SoundCloudPlaylist(
                         id = id,
                         title = title,
                         author = author,
                         artworkUrl = artwork,
-                        trackCount = if (trackCount > 0) trackCount else playlistTracks.size,
+                        trackCount = maxOf(trackCount, playlistTracks.size),
                         tracks = playlistTracks
                     )
                 )
@@ -202,9 +257,9 @@ object SoundCloudClient {
         }
         resolvedUrlCache[streamMetaUrl]?.let { return@withContext it }
 
-        val cid = getOrExtractClientId()
-        val sep = if (streamMetaUrl.contains("?")) "&" else "?"
-        val target = "$streamMetaUrl${sep}client_id=$cid"
+        var cid = getOrExtractClientId()
+        var sep = if (streamMetaUrl.contains("?")) "&" else "?"
+        var target = "$streamMetaUrl${sep}client_id=$cid"
 
         try {
             val resp = httpGet(target)
@@ -212,11 +267,23 @@ object SoundCloudClient {
             val direct = json.optString("url", "")
             if (direct.isNotBlank()) {
                 resolvedUrlCache[streamMetaUrl] = direct
-                direct
-            } else null
+                return@withContext direct
+            }
         } catch (_: Throwable) {
-            null
+            try {
+                cid = getOrExtractClientId(forceRefresh = true)
+                sep = if (streamMetaUrl.contains("?")) "&" else "?"
+                target = "$streamMetaUrl${sep}client_id=$cid"
+                val resp = httpGet(target)
+                val json = JSONObject(resp)
+                val direct = json.optString("url", "")
+                if (direct.isNotBlank()) {
+                    resolvedUrlCache[streamMetaUrl] = direct
+                    return@withContext direct
+                }
+            } catch (_: Throwable) {}
         }
+        null
     }
 
     suspend fun downloadTrackToDevice(context: Context, title: String, artist: String, streamMetaOrDirectUrl: String): File? = withContext(Dispatchers.IO) {
@@ -226,7 +293,7 @@ object SoundCloudClient {
                 direct = resolveStreamUrl(streamMetaOrDirectUrl)
             }
             if (direct.isNullOrBlank()) {
-                val query = "$artist $title".trim()
+                val query = "$artist$title".trim()
                 val found = searchTracks(query, limit = 8)
                 val best = found.firstOrNull { it.title.equals(title, ignoreCase = true) && it.streamProgressiveUrl != null }
                     ?: found.firstOrNull { it.streamProgressiveUrl != null }
