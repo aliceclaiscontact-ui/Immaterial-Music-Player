@@ -840,6 +840,10 @@ fun MMPApp() {
                             onEditPlaylist = { pl ->
                                 pendingPlaylistCoverUri = pl.coverUri
                                 playlistToEdit = pl
+                            },
+                            onCreateNewPlaylistClick = {
+                                pendingPlaylistCoverUri = null
+                                showCreateStep2Dialog = true
                             }
                         )
                         2 -> SoundCloudScreen(

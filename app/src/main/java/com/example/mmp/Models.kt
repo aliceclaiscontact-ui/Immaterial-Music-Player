@@ -27,6 +27,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -43,15 +44,15 @@ enum class TrackSortMode(val label: String) {
 }
 
 enum class ShapeStyle(val label: String) {
-    SQUIRCLE("Плавный (MD3)"),
+    SQUIRCLE("Плавный"),
     COOKIE("Клевер"),
-    STAR("Звезда (Burst)"),
-    FLOWER("Цветок (MD3)"),
-    HEXAGON("Шестиугольник"),
+    STAR("Звезда"),
+    FLOWER("Цветок"),
+    HEXAGON("Шестигранник"),
     HEART("Сердце"),
     ARCH("Арка"),
     SHARP("Острый"),
-    CYBER("Срезанный")
+    CYBER("Срез")
 }
 
 fun ShapeStyle.toCardShape(): Shape = when (this) {
@@ -143,8 +144,8 @@ fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
 enum class ThemeMode(val label: String) {
     DARK("Тёмная"),
     LIGHT("Светлая"),
-    ADAPTIVE("Adaptive (Тёмная)"),
-    ADAPTIVE_LIGHT("Adaptive (Светлая)")
+    ADAPTIVE("Adaptive"),
+    ADAPTIVE_LIGHT("Adaptive Светлая")
 }
 
 data class MMPThemeConfig(
@@ -223,9 +224,15 @@ data class TrackTagOverride(
     val lyrics: String? = null
 )
 
-data class LyricLine(
+data class LyricWord(
     val timeMs: Long,
     val text: String
+)
+
+data class LyricLine(
+    val timeMs: Long,
+    val text: String,
+    val words: List<LyricWord> = emptyList()
 )
 
 data class DetailedMetadata(
@@ -275,13 +282,15 @@ fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
     } catch (_: Exception) { fallbackHex }
 }
 
+// Парсинг как обычного LRC, так и пословного формата <00:12.34>слово
 fun parseLrcText(raw: String): List<LyricLine> {
     if (raw.isBlank()) return emptyList()
     val lines = mutableListOf<LyricLine>()
-    val regex = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?](.*)""")
-    val rawLines = raw.lines()
-    for (line in rawLines) {
-        val match = regex.find(line.trim())
+    val lineRegex = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?](.*)""")
+    val wordRegex = Regex("""<(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?>([^<]*)""")
+
+    for (line in raw.lines()) {
+        val match = lineRegex.find(line.trim())
         if (match != null) {
             val min = match.groupValues[1].toLongOrNull() ?: 0L
             val sec = match.groupValues[2].toLongOrNull() ?: 0L
@@ -292,14 +301,35 @@ fun parseLrcText(raw: String): List<LyricLine> {
                 3 -> fracStr.toLongOrNull() ?: 0L
                 else -> 0L
             }
-            val txt = match.groupValues[4].trim()
-            if (txt.isNotEmpty()) {
-                lines.add(LyricLine(min * 60000L + sec * 1000L + ms, txt))
+            val content = match.groupValues[4].trim()
+            val lineTime = min * 60000L + sec * 1000L + ms
+
+            val words = mutableListOf<LyricWord>()
+            val wordMatches = wordRegex.findAll(content).toList()
+            if (wordMatches.isNotEmpty()) {
+                for (wm in wordMatches) {
+                    val wMin = wm.groupValues[1].toLongOrNull() ?: 0L
+                    val wSec = wm.groupValues[2].toLongOrNull() ?: 0L
+                    val wFrac = wm.groupValues[3]
+                    val wMs = when (wFrac.length) {
+                        1 -> (wFrac.toLongOrNull() ?: 0L) * 100L
+                        2 -> (wFrac.toLongOrNull() ?: 0L) * 10L
+                        3 -> wFrac.toLongOrNull() ?: 0L
+                        else -> 0L
+                    }
+                    val wTxt = wm.groupValues[4]
+                    words.add(LyricWord(wMin * 60000L + wSec * 1000L + wMs, wTxt))
+                }
+            }
+
+            val cleanText = if (words.isNotEmpty()) content.replace(Regex("""<[^>]+>"""), "") else content
+            if (cleanText.isNotBlank()) {
+                lines.add(LyricLine(lineTime, cleanText, words))
             }
         }
     }
     if (lines.isNotEmpty()) return lines.sortedBy { it.timeMs }
-    return rawLines.map { it.trim() }.filter { it.isNotEmpty() }.mapIndexed { idx, s ->
+    return raw.lines().map { it.trim() }.filter { it.isNotEmpty() }.mapIndexed { idx, s ->
         LyricLine(idx * 4000L, s)
     }
 }
@@ -582,9 +612,9 @@ object StorageHelper {
     }
 
     fun saveSoundCloudTracks(prefs: SharedPreferences, tracks: List<Track>) {
-        val arr = org.json.JSONArray()
+        val arr = JSONArray()
         tracks.forEach { t ->
-            val obj = org.json.JSONObject()
+            val obj = JSONObject()
             obj.put("id", t.id)
             obj.put("uri", t.uri.toString())
             obj.put("title", t.title)
@@ -601,13 +631,13 @@ object StorageHelper {
         val raw = prefs.getString("saved_sc_tracks_v1", null) ?: return emptyList()
         val list = mutableListOf<Track>()
         try {
-            val arr = org.json.JSONArray(raw)
+            val arr = JSONArray(raw)
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 list.add(
                     Track(
                         id = o.optLong("id"),
-                        uri = android.net.Uri.parse(o.optString("uri")),
+                        uri = Uri.parse(o.optString("uri")),
                         title = o.optString("title", "SoundCloud Track"),
                         artist = o.optString("artist", "SoundCloud"),
                         album = o.optString("album", "SoundCloud"),
@@ -804,6 +834,7 @@ fun formatMillis(ms: Long): String {
     return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }
 
+// Поиск в LRCLIB с обязательной сверкой длительности, чтобы ремиксы не замещали оригинал!
 suspend fun fetchLyricsFromLrclib(
     artist: String,
     title: String,
@@ -811,23 +842,19 @@ suspend fun fetchLyricsFromLrclib(
     customQuery: String? = null
 ): String? = withContext(Dispatchers.IO) {
     try {
-        val cleanTitle = title
-            .replace(Regex("""\s*\(.*?\)\s*"""), " ")
-            .replace(Regex("""\s*\[.*?]\s*"""), " ")
-            .trim()
         val cleanArtist = if (artist.contains("Неизвестный", ignoreCase = true)) "" else artist.trim()
+        val targetSec = (durationMs / 1000L).coerceAtLeast(1L)
 
         if (customQuery.isNullOrBlank() && cleanArtist.isNotEmpty()) {
-            val durSec = (durationMs / 1000L).coerceAtLeast(1L)
             val exactUrl = "https://lrclib.net/api/get?artist_name=" +
                 URLEncoder.encode(cleanArtist, "UTF-8") +
-                "&track_name=" + URLEncoder.encode(cleanTitle, "UTF-8") +
-                "&duration=$durSec"
+                "&track_name=" + URLEncoder.encode(title.trim(), "UTF-8") +
+                "&duration=$targetSec"
             val conn = (URL(exactUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 6000
                 readTimeout = 6000
-                setRequestProperty("User-Agent", "MMP-Android/2.6 (https://github.com/aliceclaiscontact-ui)")
+                setRequestProperty("User-Agent", "MMP-Android/2.6")
             }
             if (conn.responseCode == 200) {
                 val resp = conn.inputStream.bufferedReader().use { it.readText() }
@@ -839,27 +866,37 @@ suspend fun fetchLyricsFromLrclib(
             }
         }
 
-        val query = customQuery?.takeIf { it.isNotBlank() } ?: "$cleanArtist $cleanTitle".trim()
+        val query = customQuery?.takeIf { it.isNotBlank() } ?: "$cleanArtist $title".trim()
         val searchUrl = "https://lrclib.net/api/search?q=" + URLEncoder.encode(query, "UTF-8")
         val searchConn = (URL(searchUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 6000
             readTimeout = 6000
-            setRequestProperty("User-Agent", "MMP-Android/2.6 (https://github.com/aliceclaiscontact-ui)")
+            setRequestProperty("User-Agent", "MMP-Android/2.6")
         }
         if (searchConn.responseCode == 200) {
             val resp = searchConn.inputStream.bufferedReader().use { it.readText() }
             val arr = JSONArray(resp)
-            var fallbackPlain: String? = null
+            var bestSynced: String? = null
+            var bestPlain: String? = null
+            var minDiff = Long.MAX_VALUE
+
             for (i in 0 until arr.length()) {
                 val item = arr.getJSONObject(i)
+                val dur = item.optLong("duration", 0L)
+                val diff = abs(dur - targetSec)
                 val synced = item.optString("syncedLyrics", "").takeIf { it.isNotBlank() && it != "null" }
-                if (synced != null) return@withContext synced
-                if (fallbackPlain == null) {
-                    fallbackPlain = item.optString("plainLyrics", "").takeIf { it.isNotBlank() && it != "null" }
+                val plain = item.optString("plainLyrics", "").takeIf { it.isNotBlank() && it != "null" }
+
+                // Выбираем трек, длительность которого совпадает точнее всего (в пределах 3 секунд)
+                if (diff < minDiff && diff <= 3) {
+                    minDiff = diff
+                    if (synced != null) bestSynced = synced
+                    if (plain != null) bestPlain = plain
                 }
             }
-            return@withContext fallbackPlain
+            if (bestSynced != null) return@withContext bestSynced
+            if (bestPlain != null) return@withContext bestPlain
         }
         null
     } catch (_: Throwable) {
