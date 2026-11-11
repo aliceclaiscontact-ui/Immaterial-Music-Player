@@ -14,8 +14,10 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -45,13 +47,23 @@ import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        setContent { MMPApp() }
+        setContent {
+            MMPApp(onThemeLightChanged = { isLight ->
+                val barStyle = if (isLight) {
+                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                }
+                enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+            })
+        }
     }
 }
 
 @Composable
-fun MMPApp() {
+fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
@@ -68,6 +80,10 @@ fun MMPApp() {
         }
         mutableStateOf<List<Track>>(initialList)
     }
+
+    var downloadingPlaylistTitle by remember { mutableStateOf<String?>(null) }
+    var downloadPlaylistCurrent by remember { mutableIntStateOf(0) }
+    var downloadPlaylistTotal by remember { mutableIntStateOf(0) }
 
     var scSearchQuery by remember { mutableStateOf(prefs.getString("sc_saved_query", "") ?: "") }
     var scSearchResults by remember {
@@ -513,6 +529,7 @@ fun MMPApp() {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 isPlaying = false
                 isMediaPlayerPrepared = false
+                SoundCloudClient.clearCache()
                 Toast.makeText(context, "Ошибка потока: ${error.errorCodeName}", Toast.LENGTH_SHORT).show()
             }
         }
@@ -586,7 +603,7 @@ fun MMPApp() {
         scope.launch {
             val localPool = if (deviceTracks.isNotEmpty()) deviceTracks.shuffled().take(10) else emptyList()
             val favoriteArtist = artistSecondsAllTime.maxByOrNull { it.value }?.key
-                ?: currentTrack?.artist
+                ?: currentTrack?.let { splitArtists(it.artist).firstOrNull() }
                 ?: "Hyperpop"
 
             val scCandidates = SoundCloudClient.searchTracks(favoriteArtist, limit = 25)
@@ -687,9 +704,13 @@ fun MMPApp() {
                     listenedSecondsTotal += 1
                     currentTrackPlayedSeconds += 1
                     val today = StorageHelper.getTodayDateString()
-                    artistSecondsAllTime[trk.artist] = (artistSecondsAllTime[trk.artist] ?: 0) + 1
                     val todayRec = dailyStats.getOrPut(today) { DailyStatRecord() }
-                    todayRec.artistSeconds[trk.artist] = (todayRec.artistSeconds[trk.artist] ?: 0) + 1
+
+                    val artistsList = splitArtists(trk.artist)
+                    for (art in artistsList) {
+                        artistSecondsAllTime[art] = (artistSecondsAllTime[art] ?: 0) + 1
+                        todayRec.artistSeconds[art] = (todayRec.artistSeconds[art] ?: 0) + 1
+                    }
                     dailyStats[today] = todayRec
 
                     if (currentTrackPlayedSeconds >= 20 && !currentTrackRecorded20Sec) {
@@ -744,6 +765,7 @@ fun MMPApp() {
     val primaryColor by animateColorAsState(Color(effectivePrimaryHex), tween(500), label = "")
     val secondaryColor = Color(themeConfig.secondaryHex)
     val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
+    LaunchedEffect(isLightMode) { onThemeLightChanged(isLightMode) }
     val bgColor by animateColorAsState(if (isLightMode) Color(0xFFF6F5FA) else Color(0xFF0D0D12), tween(400), label = "")
     val textColor = if (isLightMode) Color(0xFF14141C) else Color.White
     val surfaceColor = if (isLightMode) Color(0xFFE9E7F2) else Color(0xFF1A1A26)
@@ -766,6 +788,8 @@ fun MMPApp() {
         try { if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) { context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${context.packageName}") }) } } catch (_: Throwable) {}
     }
 
+    val allMergedTracks = remember(deviceTracks, savedScTracks) { (deviceTracks + savedScTracks).distinctBy { it.id } }
+
     MaterialTheme(colorScheme = if (isLightMode) lightColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor) else darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)) {
         Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
             Box(modifier = Modifier.fillMaxSize().blur(themeConfig.blurIntensity.dp * 3)) {
@@ -775,7 +799,7 @@ fun MMPApp() {
 
             val hideDock = selectedBottomTab == 1 && (openedPlaylist != null || openedArtist != null || openedAlbum != null)
 
-            Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(bottom = if (hideDock) 92.dp else 162.dp)) {
+            Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = if (hideDock) 82.dp else 152.dp)) {
                 AnimatedContent(targetState = selectedBottomTab, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) }, label = "") { tab ->
                     when (tab) {
                         0 -> HomeScreen(
@@ -815,7 +839,7 @@ fun MMPApp() {
                             onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
                         )
                         1 -> LibraryScreen(
-                            tracks = (deviceTracks + savedScTracks).distinctBy { it.id },
+                            tracks = allMergedTracks,
                             playlists = playlists,
                             cardShape = cardShape,
                             expressiveShape = expressiveShape,
@@ -844,6 +868,13 @@ fun MMPApp() {
                             onCreateNewPlaylistClick = {
                                 pendingPlaylistCoverUri = null
                                 showCreateStep2Dialog = true
+                            },
+                            onRescanClick = {
+                                Toast.makeText(context, "Обновляем медиатеку...", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    rawDeviceTracks = scanDeviceMusic(context)
+                                    Toast.makeText(context, "Медиатека обновлена!", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         )
                         2 -> SoundCloudScreen(
@@ -859,7 +890,7 @@ fun MMPApp() {
                                 scSearchQuery = it
                                 prefs.edit().putString("sc_saved_query", it).apply()
                             },
-                            onSearchCommit = { q, type ->
+                            onSearchCommit = { q, _ ->
                                 scope.launch {
                                     val found = SoundCloudClient.searchTracks(q)
                                     scSearchResults = found
@@ -914,6 +945,28 @@ fun MMPApp() {
                                     }
                                 }
                             },
+                            onDownloadScPlaylist = { scPl ->
+                                if (downloadingPlaylistTitle != null) {
+                                    Toast.makeText(context, "Дождитесь завершения текущего скачивания", Toast.LENGTH_SHORT).show()
+                                    return@SoundCloudScreen
+                                }
+                                downloadingPlaylistTitle = scPl.title
+                                downloadPlaylistCurrent = 0
+                                downloadPlaylistTotal = scPl.trackCount
+                                scope.launch {
+                                    val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { cur, tot ->
+                                        downloadPlaylistCurrent = cur
+                                        downloadPlaylistTotal = tot
+                                    }
+                                    downloadingPlaylistTitle = null
+                                    Toast.makeText(context, "Плейлист сохранён: $count треков в Music/Playlists", Toast.LENGTH_LONG).show()
+                                    delay(700)
+                                    rawDeviceTracks = scanDeviceMusic(context)
+                                }
+                            },
+                            downloadingPlaylistTitle = downloadingPlaylistTitle,
+                            downloadPlaylistCurrent = downloadPlaylistCurrent,
+                            downloadPlaylistTotal = downloadPlaylistTotal,
                             onToggleLikeScTrack = { scTrack ->
                                 val progUrl = scTrack.streamProgressiveUrl ?: ""
                                 val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
@@ -942,7 +995,7 @@ fun MMPApp() {
                 }
             }
 
-            Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).windowInsetsPadding(WindowInsets.navigationBars), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 MiniPlayerBar(
                     track = currentTrack,
                     metadata = currentMetadata,
@@ -1182,6 +1235,7 @@ fun MMPApp() {
             ) {
                 AddToPlaylistSheet(
                     tracks = tracksToAddToPlaylist,
+                    allTracks = allMergedTracks,
                     playlists = playlists,
                     cardShape = cardShape,
                     expressiveShape = expressiveShape,
@@ -1225,6 +1279,9 @@ fun MMPApp() {
                         val updated = playlists + newPl
                         playlists = updated
                         StorageHelper.savePlaylists(prefs, updated)
+                        if (initIds.isNotEmpty()) {
+                            Toast.makeText(context, "Плейлист «${name.trim()}» создан, треки добавлены!", Toast.LENGTH_SHORT).show()
+                        }
                         tracksToAddToPlaylist = emptyList()
                     }
                     showCreateStep2Dialog = false

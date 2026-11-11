@@ -24,6 +24,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.PI
@@ -257,6 +258,25 @@ object CoverCache {
     fun remove(id: Long) { cache.remove(id) }
 }
 
+fun splitArtists(rawArtist: String): List<String> {
+    if (rawArtist.isBlank() || rawArtist == "<unknown>") return listOf("Неизвестный исполнитель")
+    val delimiters = Regex("""(?i)\s*(?:,|&|;|/|\bfeat\.?|\bft\.?|\bwith\b)\s*""")
+    return rawArtist.split(delimiters)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .ifEmpty { listOf(rawArtist.trim()) }
+}
+
+fun getTopArtistsOver25(artistSeconds: Map<String, Int>): List<Pair<String, Int>> {
+    val totalSec = artistSeconds.values.sum()
+    if (totalSec <= 0) return emptyList()
+    return artistSeconds.entries
+        .map { it.key to (((it.value.toFloat() / totalSec) * 100).toInt()) }
+        .filter { it.second > 25 }
+        .sortedByDescending { it.second }
+}
+
 fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
     if (bitmap == null || bitmap.isRecycled) return fallbackHex
     return try {
@@ -282,7 +302,6 @@ fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
     } catch (_: Exception) { fallbackHex }
 }
 
-// Парсинг как обычного LRC, так и пословного формата <00:12.34>слово
 fun parseLrcText(raw: String): List<LyricLine> {
     if (raw.isBlank()) return emptyList()
     val lines = mutableListOf<LyricLine>()
@@ -337,7 +356,23 @@ fun parseLrcText(raw: String): List<LyricLine> {
 object StorageHelper {
     fun getTodayDateString(): String = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
 
+    fun checkAndResetYearlyStats(prefs: SharedPreferences) {
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        val savedYear = prefs.getInt("stats_current_year", currentYear)
+        if (currentYear > savedYear) {
+            prefs.edit()
+                .putInt("stats_current_year", currentYear)
+                .putInt("listened_seconds_total", 0)
+                .remove("artist_listen_seconds")
+                .remove("track_play_counts_all")
+                .apply()
+        } else if (!prefs.contains("stats_current_year")) {
+            prefs.edit().putInt("stats_current_year", currentYear).apply()
+        }
+    }
+
     fun getOrInitFirstLaunchDate(context: Context, prefs: SharedPreferences): String {
+        checkAndResetYearlyStats(prefs)
         val existing = prefs.getString("first_launch_date_v2", null)
         if (!existing.isNullOrBlank()) return existing
 
@@ -834,7 +869,6 @@ fun formatMillis(ms: Long): String {
     return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }
 
-// Поиск в LRCLIB с обязательной сверкой длительности, чтобы ремиксы не замещали оригинал!
 suspend fun fetchLyricsFromLrclib(
     artist: String,
     title: String,
@@ -888,7 +922,6 @@ suspend fun fetchLyricsFromLrclib(
                 val synced = item.optString("syncedLyrics", "").takeIf { it.isNotBlank() && it != "null" }
                 val plain = item.optString("plainLyrics", "").takeIf { it.isNotBlank() && it != "null" }
 
-                // Выбираем трек, длительность которого совпадает точнее всего (в пределах 3 секунд)
                 if (diff < minDiff && diff <= 3) {
                     minDiff = diff
                     if (synced != null) bestSynced = synced
