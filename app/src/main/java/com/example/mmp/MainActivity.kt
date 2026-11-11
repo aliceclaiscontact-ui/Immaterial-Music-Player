@@ -39,7 +39,10 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -185,11 +188,19 @@ fun MMPApp(
     }
 
     val exoPlayer = remember {
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(YouTubeMusicClient.STREAM_USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
         ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -1186,15 +1197,8 @@ fun MMPApp(
                                         }
                                         downloadingPlaylistTitle = null
                                         Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
-                                        delay(1200)
-                                        val rescanned = scanDeviceMusic(context)
-                                        val mergedMap = LinkedHashMap<String, Track>()
-                                        for (t in rescanned) mergedMap[t.filePath.ifBlank { t.id.toString() }] = t
-                                        for (t in rawDeviceTracks) {
-                                            val key = t.filePath.ifBlank { t.id.toString() }
-                                            if (!mergedMap.containsKey(key)) mergedMap[key] = t
-                                        }
-                                        rawDeviceTracks = mergedMap.values.toList()
+                                        delay(1000)
+                                        rawDeviceTracks = scanDeviceMusic(context)
                                     }
                                 },
                                 downloadingPlaylistTitle = downloadingPlaylistTitle,

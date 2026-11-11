@@ -23,28 +23,61 @@ data class YtMusicTrack(
 )
 
 object YouTubeMusicClient {
+    const val STREAM_USER_AGENT = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) Cronet/132.0.6808.3"
     private val streamCache = mutableMapOf<String, String>()
+    private var cachedVisitorData: String? = null
+
     private val pipedInstances = listOf(
         "https://pipedapi.kavin.rocks",
         "https://pipedapi.adminforge.de",
-        "https://pipedapi.reallyaweso.me",
         "https://api.piped.private.coffee"
     )
 
     fun clearCache() {
         streamCache.clear()
+        cachedVisitorData = null
     }
 
-    private fun httpPostJson(urlStr: String, bodyJson: String, clientName: String = "WEB_REMIX", clientVersion: String = "1.20260101.01.00"): String {
+    private fun getVisitorData(): String {
+        cachedVisitorData?.let { return it }
+        try {
+            val conn = (URL("https://music.youtube.com").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8000
+                readTimeout = 8000
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36")
+            }
+            val html = conn.inputStream.bufferedReader().use { it.readText() }
+            val match = Regex(""""VISITOR_DATA":"([^"]+)"""").find(html)
+            if (match != null) {
+                val vd = match.groupValues[1]
+                cachedVisitorData = vd
+                return vd
+            }
+        } catch (_: Throwable) {}
+        return "Cgt0VjRfX19fX19fXyjh9_65BjIKCgJVUxIEGgAgSw%3D%3D"
+    }
+
+    private fun httpPostJson(
+        urlStr: String,
+        bodyJson: String,
+        clientId: String,
+        clientVersion: String,
+        userAgent: String,
+        visitorData: String? = null
+    ): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 12000
             readTimeout = 12000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36")
-            setRequestProperty("X-YouTube-Client-Name", if (clientName == "ANDROID_MUSIC") "21" else "67")
+            setRequestProperty("User-Agent", userAgent)
+            setRequestProperty("X-YouTube-Client-Name", clientId)
             setRequestProperty("X-YouTube-Client-Version", clientVersion)
+            if (!visitorData.isNullOrBlank()) {
+                setRequestProperty("X-Goog-Visitor-Id", visitorData)
+            }
             setRequestProperty("Origin", "https://music.youtube.com")
         }
         conn.outputStream.use { it.write(bodyJson.toByteArray(Charsets.UTF_8)) }
@@ -59,33 +92,40 @@ object YouTubeMusicClient {
             requestMethod = "GET"
             connectTimeout = 10000
             readTimeout = 10000
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0")
+            setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0")
         }
         if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP_${conn.responseCode}")
         return conn.inputStream.bufferedReader().use { it.readText() }
     }
 
     suspend fun searchTracks(query: String, limit: Int = 30): List<YtMusicTrack> = withContext(Dispatchers.IO) {
-        // 1. Попытка через InnerTube WEB_REMIX (YouTube Music)
+        val vd = getVisitorData()
         try {
             val payload = JSONObject().apply {
                 put("context", JSONObject().apply {
                     put("client", JSONObject().apply {
                         put("clientName", "WEB_REMIX")
                         put("clientVersion", "1.20260101.01.00")
+                        put("visitorData", vd)
                         put("hl", "ru")
                         put("gl", "US")
                     })
                 })
                 put("query", query)
-                put("params", "EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D") // Фильтр "Песни"
+                put("params", "EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D")
             }
-            val resp = httpPostJson("https://music.youtube.com/youtubei/v1/search?prettyPrint=false", payload.toString())
+            val resp = httpPostJson(
+                "https://music.youtube.com/youtubei/v1/search?prettyPrint=false",
+                payload.toString(),
+                clientId = "67",
+                clientVersion = "1.20260101.01.00",
+                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+                visitorData = vd
+            )
             val parsed = parseInnerTubeSearch(resp)
             if (parsed.isNotEmpty()) return@withContext parsed.take(limit)
         } catch (_: Throwable) {}
 
-        // 2. Резервный поиск через Piped API (music_songs)
         val enc = URLEncoder.encode(query, "UTF-8")
         for (instance in pipedInstances) {
             try {
@@ -114,7 +154,6 @@ object YouTubeMusicClient {
         val results = mutableListOf<YtMusicTrack>()
         val seenIds = mutableSetOf<String>()
         try {
-            // Рекурсивный поиск объектов musicResponsiveListItemRenderer
             val root = JSONObject(jsonStr)
             findMusicItemsRecursive(root, results, seenIds)
         } catch (_: Throwable) {}
@@ -198,19 +237,44 @@ object YouTubeMusicClient {
         return YtMusicTrack(videoId, title, artist, bestThumb, durationMs)
     }
 
+    private fun extractAudioFromPlayerJson(resp: String): String? {
+        val root = JSONObject(resp)
+        val streamingData = root.optJSONObject("streamingData") ?: return null
+        val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: return null
+        var bestUrl: String? = null
+        var bestBitrate = 0
+        for (i in 0 until adaptive.length()) {
+            val fmt = adaptive.optJSONObject(i) ?: continue
+            val mime = fmt.optString("mimeType", "")
+            if (mime.startsWith("audio/")) {
+                val url = fmt.optString("url", "")
+                val bitrate = fmt.optInt("bitrate", 0)
+                if (url.isNotBlank() && bitrate >= bestBitrate) {
+                    bestBitrate = bitrate
+                    bestUrl = url
+                }
+            }
+        }
+        return bestUrl
+    }
+
     suspend fun resolveAudioStreamUrl(videoId: String, forceRefresh: Boolean = false): String? = withContext(Dispatchers.IO) {
         if (!forceRefresh) {
             streamCache[videoId]?.let { return@withContext it }
         }
+        val vd = getVisitorData()
 
-        // 1. InnerTube ANDROID_MUSIC player (отдает прямые m4a/opus потоки без шифрования подписи)
+        // 1. InnerTube ANDROID_VR (не требует poToken и отдает прямые ссылки)
         try {
             val payload = JSONObject().apply {
                 put("context", JSONObject().apply {
                     put("client", JSONObject().apply {
-                        put("clientName", "ANDROID_MUSIC")
-                        put("clientVersion", "7.16.53")
-                        put("androidSdkVersion", 34)
+                        put("clientName", "ANDROID_VR")
+                        put("clientVersion", "1.60.19")
+                        put("deviceMake", "Oculus")
+                        put("deviceModel", "Quest 3")
+                        put("androidSdkVersion", 32)
+                        put("visitorData", vd)
                         put("hl", "ru")
                         put("gl", "US")
                     })
@@ -220,38 +284,56 @@ object YouTubeMusicClient {
                 put("racyCheckOk", true)
             }
             val resp = httpPostJson(
-                "https://music.youtube.com/youtubei/v1/player?prettyPrint=false",
+                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
                 payload.toString(),
-                clientName = "ANDROID_MUSIC",
-                clientVersion = "7.16.53"
+                clientId = "28",
+                clientVersion = "1.60.19",
+                userAgent = STREAM_USER_AGENT,
+                visitorData = vd
             )
-            val root = JSONObject(resp)
-            val streamingData = root.optJSONObject("streamingData")
-            val adaptive = streamingData?.optJSONArray("adaptiveFormats")
-            var bestUrl: String? = null
-            var bestBitrate = 0
-
-            if (adaptive != null) {
-                for (i in 0 until adaptive.length()) {
-                    val fmt = adaptive.optJSONObject(i) ?: continue
-                    val mime = fmt.optString("mimeType", "")
-                    if (mime.startsWith("audio/")) {
-                        val url = fmt.optString("url", "")
-                        val bitrate = fmt.optInt("bitrate", 0)
-                        if (url.isNotBlank() && bitrate >= bestBitrate) {
-                            bestBitrate = bitrate
-                            bestUrl = url
-                        }
-                    }
-                }
-            }
-            if (!bestUrl.isNullOrBlank()) {
-                streamCache[videoId] = bestUrl
-                return@withContext bestUrl
+            val url = extractAudioFromPlayerJson(resp)
+            if (!url.isNullOrBlank()) {
+                streamCache[videoId] = url
+                return@withContext url
             }
         } catch (_: Throwable) {}
 
-        // 2. Резерв через Piped API /streams/{videoId}
+        // 2. InnerTube IOS fallback
+        try {
+            val payload = JSONObject().apply {
+                put("context", JSONObject().apply {
+                    put("client", JSONObject().apply {
+                        put("clientName", "IOS")
+                        put("clientVersion", "20.10.4")
+                        put("deviceMake", "Apple")
+                        put("deviceModel", "iPhone16,2")
+                        put("osName", "iOS")
+                        put("osVersion", "18.3.2.22D82")
+                        put("visitorData", vd)
+                        put("hl", "ru")
+                        put("gl", "US")
+                    })
+                })
+                put("videoId", videoId)
+                put("contentCheckOk", true)
+                put("racyCheckOk", true)
+            }
+            val resp = httpPostJson(
+                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                payload.toString(),
+                clientId = "5",
+                clientVersion = "20.10.4",
+                userAgent = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+                visitorData = vd
+            )
+            val url = extractAudioFromPlayerJson(resp)
+            if (!url.isNullOrBlank()) {
+                streamCache[videoId] = url
+                return@withContext url
+            }
+        } catch (_: Throwable) {}
+
+        // 3. Piped API fallback
         for (instance in pipedInstances) {
             try {
                 val resp = httpGet("$instance/streams/$videoId")
@@ -294,7 +376,7 @@ object YouTubeMusicClient {
             val conn = (URL(streamUrl).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000
                 readTimeout = 20000
-                setRequestProperty("User-Agent", "com.google.android.apps.youtube.music/7.16.53 (Linux; U; Android 14)")
+                setRequestProperty("User-Agent", STREAM_USER_AGENT)
             }
             FileOutputStream(outFile).use { out ->
                 conn.inputStream.use { inp -> inp.copyTo(out) }

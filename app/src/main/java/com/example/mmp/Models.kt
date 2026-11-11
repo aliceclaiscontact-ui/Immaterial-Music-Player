@@ -292,20 +292,58 @@ fun getTopArtistsOver25(artistSeconds: Map<String, Int>): List<Pair<String, Int>
         .sortedByDescending { it.second }
 }
 
+fun buildTrackFromLocalFile(file: File, fallbackAlbum: String = "Playlists", fallbackCover: String? = null): Track {
+    val rawName = file.nameWithoutExtension
+    val parts = rawName.split(" - ", limit = 2)
+    val artist = if (parts.size == 2) parts[0].trim() else "SoundCloud"
+    val title = if (parts.size == 2) parts[1].trim() else rawName
+    var durationMs = 0L
+    try {
+        val mmr = MediaMetadataRetriever()
+        mmr.setDataSource(file.absolutePath)
+        durationMs = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        mmr.release()
+    } catch (_: Throwable) {}
+    val stableId = (file.absolutePath.hashCode().toLong() and 0x7FFFFFFFL) + 900_000_000L
+    val parent = file.parentFile
+    return Track(
+        id = stableId,
+        uri = Uri.fromFile(file),
+        title = title.ifBlank { rawName },
+        artist = artist.ifBlank { "SoundCloud" },
+        album = parent?.name ?: fallbackAlbum,
+        durationMs = durationMs.coerceAtLeast(5000L),
+        mimeType = if (file.extension.equals("m4a", true)) "audio/mp4" else "audio/mpeg",
+        sizeBytes = file.length(),
+        filePath = file.absolutePath,
+        folderPath = parent?.absolutePath ?: "/Music",
+        folderName = parent?.name ?: fallbackAlbum,
+        customCoverUri = fallbackCover
+    )
+}
+
 fun resolvePlaylistTracks(playlist: PlaylistItem, allTracks: List<Track>): List<Track> {
     val byId = allTracks.associateBy { it.id }
     val byPath = allTracks.filter { it.filePath.isNotBlank() }.associateBy { it.filePath }
     val result = mutableListOf<Track>()
-    val seenIds = mutableSetOf<Long>()
+    val seenKeys = mutableSetOf<String>()
 
     for (id in playlist.trackIds) {
-        byId[id]?.let {
-            if (seenIds.add(it.id)) result.add(it)
+        byId[id]?.let { trk ->
+            val key = trk.filePath.ifBlank { trk.id.toString() }
+            if (seenKeys.add(key)) result.add(trk)
         }
     }
     for (path in playlist.trackFilePaths) {
-        byPath[path]?.let {
-            if (seenIds.add(it.id)) result.add(it)
+        if (path.isBlank()) continue
+        val existing = byPath[path]
+        if (existing != null) {
+            if (seenKeys.add(path)) result.add(existing)
+        } else {
+            val f = File(path)
+            if (f.exists() && f.length() > 1024L && seenKeys.add(path)) {
+                result.add(buildTrackFromLocalFile(f, playlist.name, playlist.coverUri))
+            }
         }
     }
     return result
@@ -797,7 +835,7 @@ object StorageHelper {
             obj.put("trackFilePaths", pathsArr)
             arr.put(obj)
         }
-        prefs.edit().putString("user_playlists_v3", arr.toString()).apply()
+        prefs.edit().putString("user_playlists_v3", arr.toString()).commit()
     }
 
     fun loadPlaylists(prefs: SharedPreferences): List<PlaylistItem> {
@@ -875,7 +913,7 @@ fun applyOverridesToTrack(track: Track, overrides: Map<Long, TrackTagOverride>):
 }
 
 suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatchers.IO) {
-    val trackList = mutableListOf<Track>()
+    val byPath = LinkedHashMap<String, Track>()
     val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
     } else {
@@ -919,12 +957,35 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
 
                 if (duration >= 5000L) {
                     val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
-                    trackList.add(Track(id, contentUri, title, artist, album, duration, mime, size, path, folderPath, folderName))
+                    val key = path.ifBlank { id.toString() }
+                    byPath[key] = Track(id, contentUri, title, artist, album, duration, mime, size, path, folderPath, folderName)
                 }
             }
         }
     } catch (_: Exception) {}
-    trackList
+
+    // Прямое сканирование скачанных папок Imma3, чтобы треки не пропадали до индексации MediaStore
+    try {
+        val musicRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val subDirs = listOf(
+            File(musicRoot, "Playlists"),
+            File(musicRoot, "MMP_SoundCloud"),
+            File(musicRoot, "Imma3_YTMusic")
+        )
+        for (dir in subDirs) {
+            if (dir.exists() && dir.isDirectory) {
+                dir.walkTopDown().forEach { f ->
+                    if (f.isFile && f.length() > 2048L && f.extension.lowercase() in listOf("mp3", "m4a", "flac", "wav", "ogg")) {
+                        if (!byPath.containsKey(f.absolutePath)) {
+                            byPath[f.absolutePath] = buildTrackFromLocalFile(f, f.parentFile?.name ?: "Playlists")
+                        }
+                    }
+                }
+            }
+        }
+    } catch (_: Throwable) {}
+
+    byPath.values.toList()
 }
 
 fun decodeSampledBitmap(bytes: ByteArray, reqMaxSide: Int = 512): Bitmap? {
@@ -968,7 +1029,11 @@ suspend fun loadTrackThumbnail(context: Context, track: Track): Bitmap? = withCo
     if (track.uri.scheme?.startsWith("http") == true) return@withContext null
     val retriever = MediaMetadataRetriever()
     try {
-        retriever.setDataSource(context, track.uri)
+        if (track.uri.scheme == "file" && track.filePath.isNotBlank()) {
+            retriever.setDataSource(track.filePath)
+        } else {
+            retriever.setDataSource(context, track.uri)
+        }
         retriever.embeddedPicture?.let { decodeSampledBitmap(it, 256)?.also { bmp -> CoverCache.put(track.id, bmp) } }
     } catch (_: Throwable) { null } finally { try { retriever.release() } catch (_: Throwable) {} }
 }
@@ -983,7 +1048,11 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
         }
 
         if (!isHttpStream) {
-            retriever.setDataSource(context, track.uri)
+            if (track.uri.scheme == "file" && track.filePath.isNotBlank()) {
+                retriever.setDataSource(track.filePath)
+            } else {
+                retriever.setDataSource(context, track.uri)
+            }
             if (bitmap == null) {
                 val artBytes = retriever.embeddedPicture
                 bitmap = if (artBytes != null) decodeSampledBitmap(artBytes, 600)?.also { CoverCache.put(track.id, it) } else null
