@@ -353,6 +353,28 @@ fun parseLrcText(raw: String): List<LyricLine> {
     }
 }
 
+// Офлайн кэш текстов в файлы приложения
+fun getOfflineLyricsFile(context: Context, artist: String, title: String): File {
+    val dir = File(context.filesDir, "lyrics_offline")
+    if (!dir.exists()) dir.mkdirs()
+    val clean = "${artist}_$title".replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().take(60)
+    return File(dir, "$clean.lrc")
+}
+
+fun saveOfflineLyrics(context: Context, artist: String, title: String, lrcText: String) {
+    try {
+        val f = getOfflineLyricsFile(context, artist, title)
+        f.writeText(lrcText)
+    } catch (_: Throwable) {}
+}
+
+fun loadOfflineLyrics(context: Context, artist: String, title: String): String? {
+    return try {
+        val f = getOfflineLyricsFile(context, artist, title)
+        if (f.exists() && f.canRead()) f.readText() else null
+    } catch (_: Throwable) { null }
+}
+
 object StorageHelper {
     fun getTodayDateString(): String = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
 
@@ -850,14 +872,19 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
         var lyricsList = emptyList<LyricLine>()
         if (!track.customLyrics.isNullOrBlank()) {
             lyricsList = parseLrcText(track.customLyrics)
-        } else if (track.filePath.isNotBlank()) {
-            try {
-                val audioFile = File(track.filePath)
-                val lrcFile = File(audioFile.parentFile, audioFile.nameWithoutExtension + ".lrc")
-                if (lrcFile.exists() && lrcFile.canRead()) {
-                    lyricsList = parseLrcText(lrcFile.readText())
-                }
-            } catch (_: Throwable) {}
+        } else {
+            val offlineSaved = loadOfflineLyrics(context, track.artist, track.title)
+            if (!offlineSaved.isNullOrBlank()) {
+                lyricsList = parseLrcText(offlineSaved)
+            } else if (track.filePath.isNotBlank()) {
+                try {
+                    val audioFile = File(track.filePath)
+                    val lrcFile = File(audioFile.parentFile, audioFile.nameWithoutExtension + ".lrc")
+                    if (lrcFile.exists() && lrcFile.canRead()) {
+                        lyricsList = parseLrcText(lrcFile.readText())
+                    }
+                } catch (_: Throwable) {}
+            }
         }
 
         DetailedMetadata(bitmap, if (cleanKbps == 999L) "Lossless" else "$cleanKbps kbps", sampleRateStr, format, lyricsList)

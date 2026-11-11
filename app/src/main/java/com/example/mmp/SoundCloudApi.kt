@@ -263,15 +263,17 @@ object SoundCloudClient {
         emptyList()
     }
 
-    suspend fun resolveStreamUrl(streamMetaUrl: String): String? = withContext(Dispatchers.IO) {
-        if (streamMetaUrl.startsWith("http") && (streamMetaUrl.contains(".mp3") || streamMetaUrl.contains(".m3u8") || streamMetaUrl.contains("cf-media.sndcdn.com") || streamMetaUrl.contains("cf-hls-media.sndcdn.com"))) {
+    suspend fun resolveStreamUrl(streamMetaUrl: String, forceRefresh: Boolean = false): String? = withContext(Dispatchers.IO) {
+        if (!forceRefresh && streamMetaUrl.startsWith("http") && (streamMetaUrl.contains(".mp3") || streamMetaUrl.contains(".m3u8") || streamMetaUrl.contains("cf-media.sndcdn.com") || streamMetaUrl.contains("cf-hls-media.sndcdn.com"))) {
             return@withContext streamMetaUrl
         }
-        resolvedUrlCache[streamMetaUrl]?.let { return@withContext it }
+        if (!forceRefresh) {
+            resolvedUrlCache[streamMetaUrl]?.let { return@withContext it }
+        }
 
         for (attempt in 0..1) {
             try {
-                val cid = getOrExtractClientId(forceRefresh = attempt == 1)
+                val cid = getOrExtractClientId(forceRefresh = forceRefresh || attempt == 1)
                 val sep = if (streamMetaUrl.contains("?")) "&" else "?"
                 val target = "$streamMetaUrl${sep}client_id=$cid"
                 val resp = httpGet(target)
@@ -373,7 +375,7 @@ object SoundCloudClient {
     suspend fun downloadEntirePlaylist(
         context: Context,
         playlist: SoundCloudPlaylist,
-        onProgress: (current: Int, total: Int) -> Unit
+        onTrackSaved: (track: Track, current: Int, total: Int) -> Unit
     ): Int = withContext(Dispatchers.IO) {
         val tracksToDownload = if (playlist.tracks.size < playlist.trackCount) {
             fetchFullPlaylist(playlist.id).ifEmpty { playlist.tracks }
@@ -385,15 +387,30 @@ object SoundCloudClient {
         val targetSubDir = "Playlists/$cleanPlName"
         var downloadedCount = 0
 
-        tracksToDownload.forEachIndexed { index, track ->
-            val streamUrl = track.streamProgressiveUrl ?: ""
+        tracksToDownload.forEachIndexed { index, scTrk ->
+            val streamUrl = scTrk.streamProgressiveUrl ?: ""
             if (streamUrl.isNotBlank()) {
-                val file = downloadTrackToDevice(context, track.title, track.artist, streamUrl, targetSubDir)
-                if (file != null) downloadedCount++
+                val file = downloadTrackToDevice(context, scTrk.title, scTrk.artist, streamUrl, targetSubDir)
+                if (file != null) {
+                    downloadedCount++
+                    val localTrack = Track(
+                        id = System.currentTimeMillis() + index,
+                        uri = Uri.fromFile(file),
+                        title = scTrk.title,
+                        artist = scTrk.artist,
+                        album = cleanPlName,
+                        durationMs = scTrk.durationMs,
+                        mimeType = "audio/mpeg",
+                        sizeBytes = file.length(),
+                        filePath = file.absolutePath,
+                        folderPath = file.parentFile?.absolutePath ?: "",
+                        folderName = cleanPlName,
+                        customCoverUri = scTrk.artworkUrl ?: playlist.artworkUrl
+                    )
+                    onTrackSaved(localTrack, index + 1, tracksToDownload.size)
+                }
             }
-            onProgress(index + 1, tracksToDownload.size)
         }
-
         downloadedCount
     }
 

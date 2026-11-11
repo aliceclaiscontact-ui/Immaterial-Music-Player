@@ -315,10 +315,23 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
 
     fun searchAndCacheOnlineLyrics(track: Track, customQuery: String? = null, showFeedback: Boolean = false) {
         scope.launch {
+            val offlineSaved = loadOfflineLyrics(context, track.artist, track.title)
+            if (!offlineSaved.isNullOrBlank()) {
+                val parsed = parseLrcText(offlineSaved)
+                if (currentTrack?.id == track.id) {
+                    currentMetadata = currentMetadata.copy(lyrics = parsed)
+                }
+                if (showFeedback) {
+                    Toast.makeText(context, "Текст загружен из памяти устройства", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
             isSearchingOnlineLyrics = true
             val foundLrc = fetchLyricsFromLrclib(track.artist, track.title, track.durationMs, customQuery)
             isSearchingOnlineLyrics = false
             if (!foundLrc.isNullOrBlank()) {
+                saveOfflineLyrics(context, track.artist, track.title, foundLrc)
                 val updatedMap = tagOverrides.toMutableMap()
                 val existing = updatedMap[track.id]
                 updatedMap[track.id] = TrackTagOverride(
@@ -336,7 +349,7 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                     currentMetadata = currentMetadata.copy(lyrics = parsed)
                 }
                 if (showFeedback) {
-                    Toast.makeText(context, "Текст найден в базе LRCLIB и сохранён!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Текст сохранён для офлайн-доступа!", Toast.LENGTH_SHORT).show()
                 }
             } else if (showFeedback) {
                 Toast.makeText(context, "Текст в базе LRCLIB не найден", Toast.LENGTH_SHORT).show()
@@ -447,6 +460,7 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
         val clamped = targetMs.coerceIn(0L, (maxDur - 300L).coerceAtLeast(0L))
         currentPositionMs = clamped
         StorageHelper.saveLastPlayedState(prefs, cur, clamped)
+
         if (isMediaPlayerPrepared) {
             try {
                 val st = exoPlayer.playbackState
@@ -455,8 +469,23 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                     val finalPos = if (playerDur > 0L) clamped.coerceIn(0L, (playerDur - 300L).coerceAtLeast(0L)) else clamped
                     exoPlayer.seekTo(finalPos)
                     syncMediaService(cur, currentMetadata, isPlaying)
+                } else if (st == Player.STATE_IDLE || st == Player.STATE_ENDED) {
+                    playTrack(cur, null, clamped)
                 }
-            } catch (_: Throwable) {}
+            } catch (_: Throwable) {
+                scope.launch {
+                    val rawUrl = cur.filePath.ifBlank { cur.uri.toString() }
+                    if (rawUrl.contains("api-v2.soundcloud.com")) {
+                        val fresh = SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = true)
+                        if (fresh != null) {
+                            val refreshed = cur.copy(uri = Uri.parse(fresh))
+                            playTrack(refreshed, null, clamped)
+                        }
+                    }
+                }
+            }
+        } else {
+            playTrack(cur, null, clamped)
         }
     }
 
@@ -527,10 +556,23 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                isPlaying = false
                 isMediaPlayerPrepared = false
                 SoundCloudClient.clearCache()
-                Toast.makeText(context, "Ошибка потока: ${error.errorCodeName}", Toast.LENGTH_SHORT).show()
+                val cur = currentTrack
+                if (cur != null && (cur.folderName == "SoundCloud" || cur.uri.toString().contains("sndcdn"))) {
+                    scope.launch {
+                        val rawUrl = cur.filePath.ifBlank { cur.uri.toString() }
+                        val fresh = SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = true)
+                        if (fresh != null) {
+                            val refreshed = cur.copy(uri = Uri.parse(fresh))
+                            currentTrack = refreshed
+                            playTrack(refreshed, null, currentPositionMs)
+                            return@launch
+                        }
+                    }
+                }
+                isPlaying = false
+                Toast.makeText(context, "Восстанавливаем поток...", Toast.LENGTH_SHORT).show()
             }
         }
         exoPlayer.addListener(listener)
@@ -953,13 +995,33 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                                 downloadingPlaylistTitle = scPl.title
                                 downloadPlaylistCurrent = 0
                                 downloadPlaylistTotal = scPl.trackCount
+
+                                val cleanPlName = scPl.title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().ifBlank { "Playlist_${scPl.id}" }
+                                var createdPl = playlists.find { it.name == cleanPlName }
+                                if (createdPl == null) {
+                                    createdPl = PlaylistItem(name = cleanPlName, coverUri = scPl.artworkUrl, trackIds = emptyList(), description = "SoundCloud: ${scPl.author}")
+                                    playlists = playlists + createdPl
+                                    StorageHelper.savePlaylists(prefs, playlists)
+                                }
+
                                 scope.launch {
-                                    val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { cur, tot ->
+                                    Toast.makeText(context, "Скачивание плейлиста началось...", Toast.LENGTH_SHORT).show()
+                                    val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { newTrk, cur, tot ->
                                         downloadPlaylistCurrent = cur
                                         downloadPlaylistTotal = tot
+                                        val currentList = StorageHelper.loadPlaylists(prefs)
+                                        val updated = currentList.map { pl ->
+                                            if (pl.name == cleanPlName) {
+                                                val merged = (pl.trackIds + newTrk.id).distinct()
+                                                pl.copy(trackIds = merged, coverUri = pl.coverUri ?: newTrk.customCoverUri)
+                                            } else pl
+                                        }
+                                        playlists = updated
+                                        StorageHelper.savePlaylists(prefs, updated)
+                                        rawDeviceTracks = (rawDeviceTracks + newTrk).distinctBy { it.id }
                                     }
                                     downloadingPlaylistTitle = null
-                                    Toast.makeText(context, "Плейлист сохранён: $count треков в Music/Playlists", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
                                     delay(700)
                                     rawDeviceTracks = scanDeviceMusic(context)
                                 }
