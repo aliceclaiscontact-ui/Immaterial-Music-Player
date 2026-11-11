@@ -85,6 +85,9 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
     var downloadPlaylistCurrent by remember { mutableIntStateOf(0) }
     var downloadPlaylistTotal by remember { mutableIntStateOf(0) }
 
+    var loopPointAMs by remember { mutableStateOf<Long?>(null) }
+    var loopPointBMs by remember { mutableStateOf<Long?>(null) }
+
     var scSearchQuery by remember { mutableStateOf(prefs.getString("sc_saved_query", "") ?: "") }
     var scSearchResults by remember {
         val cachedJson = prefs.getString("sc_cached_results_json", null)
@@ -358,6 +361,10 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
     }
 
     fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L) {
+        if (currentTrack?.id != track.id) {
+            loopPointAMs = null
+            loopPointBMs = null
+        }
         if (newQueue != null) {
             val builtQueue = if (isShuffleEnabled) {
                 listOf(track) + newQueue.filter { it.id != track.id }.shuffled()
@@ -692,7 +699,7 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
         }
     }
 
-    LaunchedEffect(isPlaying, currentTrack) {
+    LaunchedEffect(isPlaying, currentTrack, loopPointAMs, loopPointBMs) {
         var tickCounter = 0
         while (isPlaying && currentTrack != null) {
             delay(40L)
@@ -700,6 +707,15 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                 val trk = currentTrack ?: break
                 currentPositionMs = try { exoPlayer.currentPosition.coerceAtLeast(0L) } catch (_: Throwable) { currentPositionMs }
                 PlayerBridge.currentPositionMs = currentPositionMs
+
+                val ptA = loopPointAMs
+                val ptB = loopPointBMs
+                if (ptA != null && ptB != null && ptB > ptA + 400L) {
+                    if (currentPositionMs >= ptB) {
+                        exoPlayer.seekTo(ptA)
+                        currentPositionMs = ptA
+                    }
+                }
 
                 try {
                     val cfSec = prefs.getInt("crossfade_sec", 0)
@@ -999,7 +1015,7 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                                 val cleanPlName = scPl.title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().ifBlank { "Playlist_${scPl.id}" }
                                 var createdPl = playlists.find { it.name == cleanPlName }
                                 if (createdPl == null) {
-                                    createdPl = PlaylistItem(name = cleanPlName, coverUri = scPl.artworkUrl, trackIds = emptyList(), description = "SoundCloud: ${scPl.author}")
+                                    createdPl = PlaylistItem(name = cleanPlName, coverUri = scPl.artworkUrl, trackIds = emptyList(), description = "SoundCloud: ${scPl.author}", trackFilePaths = emptyList())
                                     playlists = playlists + createdPl
                                     StorageHelper.savePlaylists(prefs, playlists)
                                 }
@@ -1012,17 +1028,18 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                                         val currentList = StorageHelper.loadPlaylists(prefs)
                                         val updated = currentList.map { pl ->
                                             if (pl.name == cleanPlName) {
-                                                val merged = (pl.trackIds + newTrk.id).distinct()
-                                                pl.copy(trackIds = merged, coverUri = pl.coverUri ?: newTrk.customCoverUri)
+                                                val mergedIds = (pl.trackIds + newTrk.id).distinct()
+                                                val mergedPaths = if (newTrk.filePath.isNotBlank()) (pl.trackFilePaths + newTrk.filePath).distinct() else pl.trackFilePaths
+                                                pl.copy(trackIds = mergedIds, trackFilePaths = mergedPaths, coverUri = pl.coverUri ?: newTrk.customCoverUri)
                                             } else pl
                                         }
                                         playlists = updated
                                         StorageHelper.savePlaylists(prefs, updated)
-                                        rawDeviceTracks = (rawDeviceTracks + newTrk).distinctBy { it.id }
+                                        rawDeviceTracks = (rawDeviceTracks + newTrk).distinctBy { it.filePath.ifBlank { it.id.toString() } }
                                     }
                                     downloadingPlaylistTitle = null
                                     Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
-                                    delay(700)
+                                    delay(900)
                                     rawDeviceTracks = scanDeviceMusic(context)
                                 }
                             },
@@ -1095,6 +1112,10 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                         sleepTimerRemainingSec = sleepTimerRemainingSec,
                         stopAfterCurrentTrack = stopAfterCurrentTrack,
                         isSearchingOnlineLyrics = isSearchingOnlineLyrics,
+                        loopPointAMs = loopPointAMs,
+                        loopPointBMs = loopPointBMs,
+                        onSetLoopPointA = { loopPointAMs = it },
+                        onSetLoopPointB = { loopPointBMs = it },
                         cardShape = cardShape,
                         expressiveShape = expressiveShape,
                         primaryColor = primaryColor,
@@ -1307,10 +1328,12 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                     onDismiss = { tracksToAddToPlaylist = emptyList() },
                     onSelectPlaylist = { selectedPl ->
                         val newIds = tracksToAddToPlaylist.map { it.id }
+                        val newPaths = tracksToAddToPlaylist.mapNotNull { it.filePath.takeIf { p -> p.isNotBlank() } }
                         val updatedList = playlists.map { pl ->
                             if (pl.name == selectedPl.name) {
-                                val merged = (pl.trackIds + newIds).distinct()
-                                pl.copy(trackIds = merged)
+                                val mergedIds = (pl.trackIds + newIds).distinct()
+                                val mergedPaths = (pl.trackFilePaths + newPaths).distinct()
+                                pl.copy(trackIds = mergedIds, trackFilePaths = mergedPaths)
                             } else pl
                         }
                         playlists = updatedList
@@ -1337,7 +1360,8 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                 CreatePlaylistDetailsDialog(cardShape, expressiveShape, primaryColor, textColor, surfaceColor, pendingPlaylistCoverUri, { coverPickerLauncher.launch(arrayOf("image/*")) }, { showCreateStep2Dialog = false }, { name, desc, coverUri ->
                     if (name.isNotBlank()) {
                         val initIds = tracksToAddToPlaylist.map { it.id }
-                        val newPl = PlaylistItem(name.trim(), coverUri, initIds, desc.trim())
+                        val initPaths = tracksToAddToPlaylist.mapNotNull { it.filePath.takeIf { p -> p.isNotBlank() } }
+                        val newPl = PlaylistItem(name.trim(), coverUri, initIds, desc.trim(), initPaths)
                         val updated = playlists + newPl
                         playlists = updated
                         StorageHelper.savePlaylists(prefs, updated)

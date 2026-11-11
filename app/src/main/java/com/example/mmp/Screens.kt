@@ -21,6 +21,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -46,6 +47,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -61,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Locale
@@ -85,16 +88,16 @@ fun TrackCoverThumb(track: Track, shape: Shape, primaryColor: Color, sizeDp: Int
 }
 
 @Composable
-fun PlaylistGridCover(trackIds: List<Long>, allTracks: List<Track>, primaryColor: Color, sizeDp: Int = 54) {
+fun PlaylistGridCover(tracks: List<Track>, primaryColor: Color, sizeDp: Int = 54) {
     val context = LocalContext.current
-    val tracks = remember(trackIds, allTracks) { val map = allTracks.associateBy { it.id }; trackIds.mapNotNull { map[it] }.take(4) }
+    val previewTracks = remember(tracks) { tracks.take(4) }
     val bitmaps = remember { mutableStateListOf<Bitmap?>(null, null, null, null) }
-    LaunchedEffect(tracks) { tracks.forEachIndexed { index, track -> bitmaps[index] = loadTrackThumbnail(context, track) } }
+    LaunchedEffect(previewTracks) { previewTracks.forEachIndexed { index, track -> bitmaps[index] = loadTrackThumbnail(context, track) } }
 
     Box(modifier = Modifier.size(sizeDp.dp).clip(RoundedCornerShape(12.dp)).background(primaryColor.copy(0.18f))) {
-        if (tracks.isEmpty()) {
+        if (previewTracks.isEmpty()) {
             Icon(Icons.Filled.QueueMusic, null, tint = primaryColor, modifier = Modifier.align(Alignment.Center))
-        } else if (tracks.size < 4) {
+        } else if (previewTracks.size < 4) {
             val b0 = bitmaps[0]?.takeIf { !it.isRecycled }
             if (b0 != null) Image(b0.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             else Icon(Icons.Filled.QueueMusic, null, tint = primaryColor, modifier = Modifier.align(Alignment.Center))
@@ -116,16 +119,21 @@ fun PlaylistGridCover(trackIds: List<Long>, allTracks: List<Track>, primaryColor
 @Composable
 fun PlaylistThumb(playlist: PlaylistItem, allTracks: List<Track>, expressiveShape: Shape, primaryColor: Color, sizeDp: Int = 48) {
     val context = LocalContext.current
-    val bmp = remember(playlist.coverUri) {
+    var coverBmp by remember(playlist.coverUri) { mutableStateOf<Bitmap?>(null) }
+    val resolvedTracks = remember(playlist, allTracks) { resolvePlaylistTracks(playlist, allTracks) }
+
+    LaunchedEffect(playlist.coverUri) {
         if (playlist.coverUri != null) {
-            try { context.contentResolver.openInputStream(Uri.parse(playlist.coverUri))?.use { BitmapFactory.decodeStream(it) } } catch (_: Exception) { null }
-        } else null
+            coverBmp = loadBitmapFromUriOrHttp(context, playlist.coverUri, 256)
+        }
     }
+
     Box(modifier = Modifier.size(sizeDp.dp).clip(expressiveShape).background(primaryColor.copy(0.2f)), contentAlignment = Alignment.Center) {
-        if (bmp != null) {
-            Image(bmp.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        val valid = coverBmp?.takeIf { !it.isRecycled }
+        if (valid != null) {
+            Image(valid.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
-            PlaylistGridCover(playlist.trackIds, allTracks, primaryColor, sizeDp)
+            PlaylistGridCover(resolvedTracks, primaryColor, sizeDp)
         }
     }
 }
@@ -782,7 +790,7 @@ fun CleanHeaderLayout(
                 Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
                     val validHero = heroBitmap?.takeIf { !it.isRecycled }
                     if (validHero != null) Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks.map { it.id }, tracks, primaryColor, 210)
+                    else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks, primaryColor, 210)
                     else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(90.dp))
                 }
                 Spacer(modifier = Modifier.height(20.dp))
@@ -1042,7 +1050,6 @@ fun LibraryScreen(
     onRescanClick: () -> Unit
 ) {
     var category by remember { mutableIntStateOf(0) }
-    val context = LocalContext.current
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var sortMode by remember { mutableStateOf(TrackSortMode.DATE_ADDED) }
@@ -1061,7 +1068,7 @@ fun LibraryScreen(
 
     if (openedPlaylist != null) {
         val currentPl = playlists.find { it.name == openedPlaylist.name } ?: openedPlaylist
-        val plTracks = run { val map = tracks.associateBy { it.id }; currentPl.trackIds.mapNotNull { map[it] } }
+        val plTracks = remember(currentPl, tracks) { resolvePlaylistTracks(currentPl, tracks) }
         CleanHeaderLayout(currentPl.name, if (currentPl.description.isNotBlank()) currentPl.description else "Плейлист • ${plTracks.size} треков", plTracks, currentPl.coverUri, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedPlaylist(null) }, { onEditPlaylist(currentPl) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
         return
     }
@@ -1239,12 +1246,13 @@ fun LibraryScreen(
                         }
 
                         items(filteredPlaylists) { pl ->
+                            val plCount = resolvePlaylistTracks(pl, tracks).size
                             Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedPlaylist(pl) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 PlaylistThumb(pl, tracks, expressiveShape, primaryColor, 54)
                                 Spacer(modifier = Modifier.width(14.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(pl.name, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Треков: ${pl.trackIds.size}", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                    Text("Треков: $plCount", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                                 IconButton(onClick = { onEditPlaylist(pl) }) {
                                     Icon(Icons.Filled.Edit, "Изменить", tint = primaryColor, modifier = Modifier.size(20.dp))
@@ -1398,6 +1406,10 @@ fun FullScreenPlayerOverlay(
     sleepTimerRemainingSec: Int,
     stopAfterCurrentTrack: Boolean,
     isSearchingOnlineLyrics: Boolean,
+    loopPointAMs: Long?,
+    loopPointBMs: Long?,
+    onSetLoopPointA: (Long?) -> Unit,
+    onSetLoopPointB: (Long?) -> Unit,
     cardShape: Shape,
     expressiveShape: Shape,
     primaryColor: Color,
@@ -1421,12 +1433,22 @@ fun FullScreenPlayerOverlay(
     onPrev: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVol = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
     var currentVol by remember { mutableFloatStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()) }
 
     var showFullLyricsOverlay by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    var showAbLooperBar by remember { mutableStateOf(loopPointAMs != null || loopPointBMs != null) }
+    var doubleTapFeedback by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(doubleTapFeedback) {
+        if (doubleTapFeedback != null) {
+            delay(850L)
+            doubleTapFeedback = null
+        }
+    }
 
     BackHandler {
         if (showFullLyricsOverlay) showFullLyricsOverlay = false else onDismiss()
@@ -1466,6 +1488,9 @@ fun FullScreenPlayerOverlay(
 
             val targetScale = if (isPlaying) 1f else 0.94f
             val coverScale by animateFloatAsState(targetValue = targetScale, animationSpec = tween(250), label = "coverScale")
+            var coverWidthPx by remember { mutableFloatStateOf(1f) }
+            var swipeDownY by remember { mutableFloatStateOf(0f) }
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1474,11 +1499,60 @@ fun FullScreenPlayerOverlay(
                     .clip(expressiveShape)
                     .background(textColor.copy(0.08f))
                     .border(1.dp, textColor.copy(0.18f), expressiveShape)
-                    .clickable { showFullLyricsOverlay = true },
+                    .onGloballyPositioned { coverWidthPx = it.size.width.toFloat().coerceAtLeast(1f) }
+                    .pointerInput(track.id) {
+                        detectDragGestures(
+                            onDragStart = { swipeDownY = 0f },
+                            onDrag = { change, drag ->
+                                change.consume()
+                                swipeDownY += drag.y
+                            },
+                            onDragEnd = {
+                                if (swipeDownY > 110f) onDismiss()
+                            }
+                        )
+                    }
+                    .pointerInput(track.id, currentPosMs) {
+                        detectTapGestures(
+                            onTap = { showFullLyricsOverlay = true },
+                            onDoubleTap = { offset ->
+                                val relX = offset.x / coverWidthPx
+                                when {
+                                    relX < 0.35f -> {
+                                        onSeek((currentPosMs - 10000L).coerceAtLeast(0L))
+                                        doubleTapFeedback = "-10 сек"
+                                    }
+                                    relX > 0.65f -> {
+                                        onSeek((currentPosMs + 10000L).coerceAtMost(track.durationMs.coerceAtLeast(1L)))
+                                        doubleTapFeedback = "+10 сек"
+                                    }
+                                    else -> {
+                                        onPlayPause()
+                                        doubleTapFeedback = if (isPlaying) "Пауза" else "Играет"
+                                    }
+                                }
+                            }
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (validArt != null) Image(validArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(105.dp))
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = doubleTapFeedback != null,
+                    enter = fadeIn(tween(150)) + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut(tween(200))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(0.68f))
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        Text(doubleTapFeedback ?: "", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    }
+                }
             }
 
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -1521,6 +1595,24 @@ fun FullScreenPlayerOverlay(
                                 onDismissRequest = { showMoreMenu = false },
                                 modifier = Modifier.background(surfaceColor)
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("Повтор фрагмента (A-B Лупер)", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = { Icon(Icons.Filled.Loop, null, tint = primaryColor) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showAbLooperBar = !showAbLooperBar
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Поделиться карточкой трека", color = textColor, fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = { Icon(Icons.Filled.Share, null, tint = primaryColor) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        scope.launch {
+                                            shareTrackCardImage(context, track, metadata, primaryColor.toArgb())
+                                        }
+                                    }
+                                )
                                 DropdownMenuItem(
                                     text = { Text("Настройка звука (Speed / Pitch / FX)", color = textColor, fontWeight = FontWeight.SemiBold) },
                                     leadingIcon = { Icon(Icons.Filled.GraphicEq, null, tint = primaryColor) },
@@ -1566,6 +1658,53 @@ fun FullScreenPlayerOverlay(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = showAbLooperBar) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(primaryColor.copy(0.16f))
+                            .border(1.dp, primaryColor.copy(0.45f), RoundedCornerShape(50))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = { onSetLoopPointA(currentPosMs) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                if (loopPointAMs != null) "A: ${formatMillis(loopPointAMs)}" else "Точка A",
+                                color = if (loopPointAMs != null) primaryColor else textColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                        TextButton(
+                            onClick = { onSetLoopPointB(currentPosMs) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                if (loopPointBMs != null) "B: ${formatMillis(loopPointBMs)}" else "Точка B",
+                                color = if (loopPointBMs != null) primaryColor else textColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                onSetLoopPointA(null)
+                                onSetLoopPointB(null)
+                                showAbLooperBar = false
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Filled.Close, "Сброс цикла", tint = textColor.copy(0.7f), modifier = Modifier.size(16.dp))
                         }
                     }
                 }
@@ -2774,13 +2913,14 @@ fun AddToPlaylistSheet(
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.heightIn(max = 260.dp)) {
                     items(playlists) { pl ->
+                        val plCount = resolvePlaylistTracks(pl, allTracks).size
                         Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(textColor.copy(0.06f)).clickable { onSelectPlaylist(pl) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 PlaylistThumb(pl, allTracks, expressiveShape, primaryColor, 46)
                                 Spacer(modifier = Modifier.width(14.dp))
                                 Column {
                                     Text(pl.name, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Треков: ${pl.trackIds.size}", color = textColor.copy(0.6f), fontSize = 11.sp)
+                                    Text("Треков: $plCount", color = textColor.copy(0.6f), fontSize = 11.sp)
                                 }
                             }
                             Icon(Icons.Filled.Add, null, tint = primaryColor)

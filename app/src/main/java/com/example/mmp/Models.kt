@@ -1,13 +1,22 @@
 package com.example.mmp
 
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import android.util.LruCache
 import androidx.compose.foundation.shape.CutCornerShape
@@ -198,7 +207,8 @@ data class PlaylistItem(
     val name: String,
     val coverUri: String? = null,
     val trackIds: List<Long> = emptyList(),
-    val description: String = ""
+    val description: String = "",
+    val trackFilePaths: List<String> = emptyList()
 )
 
 data class Track(
@@ -277,6 +287,118 @@ fun getTopArtistsOver25(artistSeconds: Map<String, Int>): List<Pair<String, Int>
         .sortedByDescending { it.second }
 }
 
+fun resolvePlaylistTracks(playlist: PlaylistItem, allTracks: List<Track>): List<Track> {
+    val byId = allTracks.associateBy { it.id }
+    val byPath = allTracks.filter { it.filePath.isNotBlank() }.associateBy { it.filePath }
+    val result = mutableListOf<Track>()
+    val seenIds = mutableSetOf<Long>()
+
+    for (id in playlist.trackIds) {
+        byId[id]?.let {
+            if (seenIds.add(it.id)) result.add(it)
+        }
+    }
+    for (path in playlist.trackFilePaths) {
+        byPath[path]?.let {
+            if (seenIds.add(it.id)) result.add(it)
+        }
+    }
+    return result
+}
+
+suspend fun shareTrackCardImage(
+    context: Context,
+    track: Track,
+    metadata: DetailedMetadata,
+    primaryColorInt: Int
+) = withContext(Dispatchers.IO) {
+    try {
+        val w = 1080
+        val h = 1350
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f, 0f, w.toFloat(), h.toFloat(),
+                intArrayOf(0xFF0D0D14.toInt(), primaryColorInt, 0xFF141422.toInt()),
+                floatArrayOf(0f, 0.45f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bgPaint)
+
+        val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xD912121C.toInt()
+        }
+        val cardRect = RectF(80f, 120f, w - 80f, h - 120f)
+        canvas.drawRoundRect(cardRect, 64f, 64f, cardPaint)
+
+        val artSize = 760
+        val artLeft = (w - artSize) / 2f
+        val artTop = 200f
+        val artBmp = metadata.coverArt?.takeIf { !it.isRecycled }
+        if (artBmp != null) {
+            val scaled = Bitmap.createScaledBitmap(artBmp, artSize, artSize, true)
+            val saveCount = canvas.save()
+            val clipPath = android.graphics.Path().apply {
+                addRoundRect(RectF(artLeft, artTop, artLeft + artSize, artTop + artSize), 48f, 48f, android.graphics.Path.Direction.CW)
+            }
+            canvas.clipPath(clipPath)
+            canvas.drawBitmap(scaled, artLeft, artTop, null)
+            canvas.restoreToCount(saveCount)
+        } else {
+            val phPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = primaryColorInt }
+            canvas.drawRoundRect(RectF(artLeft, artTop, artLeft + artSize, artTop + artSize), 48f, 48f, phPaint)
+        }
+
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = 56f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val safeTitle = if (track.title.length > 26) track.title.take(25) + "…" else track.title
+        canvas.drawText(safeTitle, 160f, 1050f, titlePaint)
+
+        val artistPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xCCFFFFFF.toInt()
+            textSize = 40f
+        }
+        val safeArtist = if (track.artist.length > 32) track.artist.take(31) + "…" else track.artist
+        canvas.drawText(safeArtist, 160f, 1115f, artistPaint)
+
+        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryColorInt
+            textSize = 32f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        canvas.drawText("Imma3 • ${metadata.formatName} • ${metadata.bitrateKbps}", 160f, 1185f, badgePaint)
+
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "Imma3_${System.currentTimeMillis()}.png")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Imma3")
+            }
+        }
+        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        if (uri != null) {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                bmp.compress(Bitmap.CompressFormat.PNG, 95, out)
+            }
+            withContext(Dispatchers.Main) {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/png"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_TEXT, "Слушаю «${track.title}» — ${track.artist} в Imma3")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "Поделиться карточкой трека").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
+    } catch (_: Throwable) {}
+}
+
 fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
     if (bitmap == null || bitmap.isRecycled) return fallbackHex
     return try {
@@ -353,7 +475,6 @@ fun parseLrcText(raw: String): List<LyricLine> {
     }
 }
 
-// Офлайн кэш текстов в файлы приложения
 fun getOfflineLyricsFile(context: Context, artist: String, title: String): File {
     val dir = File(context.filesDir, "lyrics_offline")
     if (!dir.exists()) dir.mkdirs()
@@ -649,6 +770,9 @@ object StorageHelper {
             val idsArr = JSONArray()
             item.trackIds.forEach { idsArr.put(it) }
             obj.put("trackIds", idsArr)
+            val pathsArr = JSONArray()
+            item.trackFilePaths.forEach { pathsArr.put(it) }
+            obj.put("trackFilePaths", pathsArr)
             arr.put(obj)
         }
         prefs.edit().putString("user_playlists_v3", arr.toString()).apply()
@@ -663,7 +787,9 @@ object StorageHelper {
                 val desc = obj.optString("description", "")
                 val idsArr = obj.optJSONArray("trackIds")
                 val ids = if (idsArr != null) (0 until idsArr.length()).map { idx -> idsArr.getLong(idx) } else emptyList()
-                PlaylistItem(obj.optString("name", "Плейлист"), uri, ids, desc)
+                val pathsArr = obj.optJSONArray("trackFilePaths")
+                val paths = if (pathsArr != null) (0 until pathsArr.length()).map { idx -> pathsArr.getString(idx) } else emptyList()
+                PlaylistItem(obj.optString("name", "Плейлист"), uri, ids, desc, paths)
             }
         } catch (e: Exception) { emptyList() }
     }
