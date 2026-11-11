@@ -43,6 +43,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -72,6 +73,221 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+
+@Composable
+fun YouTubeMusicLogoBadge(sizeDp: Int = 44) {
+    Canvas(modifier = Modifier.size(sizeDp.dp)) {
+        val r = size.minDimension / 2f
+        drawCircle(color = Color(0xFFFF0033), radius = r)
+        drawCircle(
+            color = Color.White,
+            radius = r * 0.62f,
+            style = Stroke(width = size.minDimension * 0.06f)
+        )
+        val path = Path().apply {
+            val left = center.x - r * 0.22f
+            val right = center.x + r * 0.34f
+            val top = center.y - r * 0.28f
+            val bottom = center.y + r * 0.28f
+            moveTo(left, top)
+            lineTo(right, center.y)
+            lineTo(left, bottom)
+            close()
+        }
+        drawPath(path = path, color = Color.White)
+    }
+}
+
+@Composable
+fun SoundCloudLogoBadge(sizeDp: Int = 44) {
+    Canvas(modifier = Modifier.size(sizeDp.dp)) {
+        val r = size.minDimension / 2f
+        drawCircle(color = Color(0xFFFF5500), radius = r)
+        val barWidth = size.minDimension * 0.055f
+        val baseLine = center.y + r * 0.26f
+        val heights = listOf(0.22f, 0.36f, 0.48f, 0.42f, 0.56f)
+        val startX = center.x - r * 0.46f
+        heights.forEachIndexed { idx, hRatio ->
+            val x = startX + idx * (barWidth * 1.65f)
+            drawLine(
+                color = Color.White,
+                start = Offset(x, baseLine),
+                end = Offset(x, baseLine - r * hRatio),
+                strokeWidth = barWidth,
+                cap = StrokeCap.Round
+            )
+        }
+        drawCircle(
+            color = Color.White,
+            radius = r * 0.22f,
+            center = Offset(center.x + r * 0.26f, baseLine - r * 0.22f)
+        )
+    }
+}
+
+@Composable
+fun AimpStyleOnboardingOverlay(
+    selectedProvider: StreamingProvider,
+    cardShape: Shape,
+    expressiveShape: Shape,
+    primaryColor: Color,
+    bgColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    onSelectProvider: (StreamingProvider) -> Unit,
+    onFinishOnboarding: () -> Unit
+) {
+    var step by remember { mutableIntStateOf(0) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bgColor)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(cardShape)
+                .background(surfaceColor)
+                .border(1.dp, textColor.copy(0.14f), cardShape)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                repeat(3) { idx ->
+                    Box(
+                        modifier = Modifier
+                            .width(if (step == idx) 28.dp else 8.dp)
+                            .height(8.dp)
+                            .clip(CircleShape)
+                            .background(if (step == idx) primaryColor else textColor.copy(0.22f))
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            when (step) {
+                0 -> {
+                    Box(
+                        modifier = Modifier.size(76.dp).clip(expressiveShape).background(primaryColor.copy(0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(42.dp))
+                    }
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Text("Добро пожаловать в Imma3", color = textColor, fontSize = 24.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        "Модульный аудиоплеер с живой физикой Material Design 3 Expressive, эквалайзером, офлайн-текстами и стримингом без ограничений.",
+                        color = textColor.copy(0.72f),
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp
+                    )
+                }
+                1 -> {
+                    Box(
+                        modifier = Modifier.size(76.dp).clip(expressiveShape).background(primaryColor.copy(0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.TouchApp, null, tint = primaryColor, modifier = Modifier.size(42.dp))
+                    }
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Text("Жесты и управление", color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Text("• Двойной тап слева/справа обложки: перемотка ±10 сек", color = textColor.copy(0.85f), fontSize = 13.sp)
+                        Text("• Двойной тап по центру обложки: Пауза / Плей", color = textColor.copy(0.85f), fontSize = 13.sp)
+                        Text("• Тап по обложке: синхронный текст (работает и без интернета)", color = textColor.copy(0.85f), fontSize = 13.sp)
+                        Text("• В меню «⋮» доступен A-B Лупер и генератор карточки трека", color = textColor.copy(0.85f), fontSize = 13.sp)
+                    }
+                }
+                else -> {
+                    Text("Выбери источник стриминга", color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Ты всегда сможешь переключить платформу в Настройках", color = textColor.copy(0.65f), fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(cardShape)
+                            .background(if (selectedProvider == StreamingProvider.YOUTUBE_MUSIC) primaryColor.copy(0.2f) else textColor.copy(0.06f))
+                            .border(if (selectedProvider == StreamingProvider.YOUTUBE_MUSIC) 1.5.dp else 1.dp, if (selectedProvider == StreamingProvider.YOUTUBE_MUSIC) primaryColor else textColor.copy(0.14f), cardShape)
+                            .clickable { onSelectProvider(StreamingProvider.YOUTUBE_MUSIC) }
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        YouTubeMusicLogoBadge(42)
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("YouTube Music", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("Полный каталог песен и ремиксов без подписки Go+", color = textColor.copy(0.65f), fontSize = 12.sp)
+                        }
+                        RadioButton(
+                            selected = selectedProvider == StreamingProvider.YOUTUBE_MUSIC,
+                            onClick = { onSelectProvider(StreamingProvider.YOUTUBE_MUSIC) },
+                            colors = RadioButtonDefaults.colors(selectedColor = primaryColor)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(cardShape)
+                            .background(if (selectedProvider == StreamingProvider.SOUNDCLOUD) primaryColor.copy(0.2f) else textColor.copy(0.06f))
+                            .border(if (selectedProvider == StreamingProvider.SOUNDCLOUD) 1.5.dp else 1.dp, if (selectedProvider == StreamingProvider.SOUNDCLOUD) primaryColor else textColor.copy(0.14f), cardShape)
+                            .clickable { onSelectProvider(StreamingProvider.SOUNDCLOUD) }
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SoundCloudLogoBadge(42)
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("SoundCloud", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("Плейлисты, андеграунд и скачивание альбомов", color = textColor.copy(0.65f), fontSize = 12.sp)
+                        }
+                        RadioButton(
+                            selected = selectedProvider == StreamingProvider.SOUNDCLOUD,
+                            onClick = { onSelectProvider(StreamingProvider.SOUNDCLOUD) },
+                            colors = RadioButtonDefaults.colors(selectedColor = primaryColor)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(26.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                if (step > 0) {
+                    TextButton(onClick = { step -= 1 }) {
+                        Text("Назад", color = textColor.copy(0.75f), fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Spacer(modifier = Modifier.width(10.dp))
+                }
+
+                Button(
+                    onClick = {
+                        if (step < 2) step += 1 else onFinishOnboarding()
+                    },
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                ) {
+                    Text(if (step < 2) "Далее" else "Начать слушать", color = Color.Black, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun TrackCoverThumb(track: Track, shape: Shape, primaryColor: Color, sizeDp: Int = 48) {
@@ -151,6 +367,7 @@ fun HomeScreen(
     isBatteryIgnored: Boolean,
     minDurationSec: Int,
     excludedFolders: Set<String>,
+    activeStreamingProvider: StreamingProvider,
     cardShape: Shape,
     expressiveShape: Shape,
     themeConfig: MMPThemeConfig,
@@ -161,6 +378,8 @@ fun HomeScreen(
     onRequestBatteryIgnore: () -> Unit,
     onMinDurationChange: (Int) -> Unit,
     onToggleFolderExclusion: (String) -> Unit,
+    onStreamingProviderSelected: (StreamingProvider) -> Unit,
+    onRestartAppClick: () -> Unit,
     onThemeChange: (MMPThemeConfig) -> Unit,
     onTrackClick: (Track) -> Unit,
     onAddTrackToPlaylistClick: (Track) -> Unit,
@@ -249,7 +468,7 @@ fun HomeScreen(
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column {
                                         Text("Моя волна (50/50)", color = textColor, fontWeight = FontWeight.Black, fontSize = 16.sp)
-                                        Text("50% твоих треков + 50% SoundCloud", color = textColor.copy(0.65f), fontSize = 12.sp)
+                                        Text("50% твоих треков + 50% ${activeStreamingProvider.title}", color = textColor.copy(0.65f), fontSize = 12.sp)
                                     }
                                 }
                                 Icon(Icons.Filled.PlayArrow, null, tint = primaryColor, modifier = Modifier.size(32.dp))
@@ -375,6 +594,7 @@ fun HomeScreen(
                     isBatteryIgnored = isBatteryIgnored,
                     minDurationSec = minDurationSec,
                     excludedFolders = excludedFolders,
+                    activeStreamingProvider = activeStreamingProvider,
                     cardShape = cardShape,
                     expressiveShape = expressiveShape,
                     primaryColor = primaryColor,
@@ -382,6 +602,8 @@ fun HomeScreen(
                     surfaceColor = surfaceColor,
                     onMinDurationChange = onMinDurationChange,
                     onToggleFolderExclusion = onToggleFolderExclusion,
+                    onStreamingProviderSelected = onStreamingProviderSelected,
+                    onRestartAppClick = onRestartAppClick,
                     onThemeChange = onThemeChange,
                     onRequestBatteryIgnore = onRequestBatteryIgnore,
                     onExport = onExportTheme,
@@ -397,6 +619,143 @@ fun formatDuration(ms: Long): String {
     val minutes = totalSec / 60
     val seconds = totalSec % 60
     return String.format("%d:%02d", minutes, seconds)
+}
+
+@Composable
+fun YouTubeMusicScreen(
+    cardShape: Shape,
+    expressiveShape: Shape,
+    primaryColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    likedTracks: List<Track>,
+    searchResults: List<YtMusicTrack>,
+    searchQuery: String,
+    onQueryChange: (String) -> Unit,
+    onSearchCommit: (String) -> Unit,
+    onPlayYtTrack: (YtMusicTrack, List<YtMusicTrack>) -> Unit,
+    onPlaySavedTrack: (Track) -> Unit,
+    onDownloadYtTrack: (YtMusicTrack) -> Unit,
+    onToggleLikeYtTrack: (YtMusicTrack) -> Unit,
+    onAddYtToPlaylist: (YtMusicTrack) -> Unit
+) {
+    var activeTab by remember { mutableIntStateOf(0) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            YouTubeMusicLogoBadge(34)
+            Text("YouTube Music", fontSize = 26.sp, fontWeight = FontWeight.Black, color = textColor)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            ExpressiveFilterPill("Поиск музыки", activeTab == 0, primaryColor, textColor) { activeTab = 0 }
+            ExpressiveFilterPill("Понравившееся (${likedTracks.size})", activeTab == 1, primaryColor, textColor) { activeTab = 1 }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (activeTab == 0) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onQueryChange,
+                    placeholder = { Text("Поиск песен в YouTube Music...", color = textColor.copy(0.5f), fontSize = 13.sp) },
+                    singleLine = true,
+                    shape = cardShape,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = { if (searchQuery.isNotBlank()) onSearchCommit(searchQuery.trim()) },
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                    modifier = Modifier.height(52.dp)
+                ) {
+                    Icon(Icons.Filled.Search, null, tint = Color.Black)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (searchResults.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Введи название трека или артиста (без ограничений подписки)", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                    items(searchResults, key = { it.videoId }) { ytTrack ->
+                        val trackId = ytTrack.videoId.hashCode().toLong()
+                        val isLiked = likedTracks.any { it.id == trackId }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(cardShape)
+                                .background(surfaceColor)
+                                .clickable { onPlayYtTrack(ytTrack, searchResults) }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val dummyTrack = remember(ytTrack) {
+                                Track(id = trackId, uri = Uri.EMPTY, title = ytTrack.title, artist = ytTrack.artist, album = "YouTube Music", durationMs = ytTrack.durationMs, mimeType = "audio/mp4", sizeBytes = 0L, customCoverUri = ytTrack.artworkUrl)
+                            }
+                            TrackCoverThumb(dummyTrack, expressiveShape, primaryColor, 50)
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(ytTrack.title, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                val durStr = if (ytTrack.durationMs > 0L) " • ${formatDuration(ytTrack.durationMs)}" else ""
+                                Text("${ytTrack.artist}$durStr", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1)
+                            }
+                            IconButton(onClick = { onToggleLikeYtTrack(ytTrack) }, modifier = Modifier.size(36.dp)) {
+                                Icon(if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null, tint = if (isLiked) primaryColor else textColor.copy(0.6f), modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(onClick = { onDownloadYtTrack(ytTrack) }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Filled.Download, null, tint = primaryColor, modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(onClick = { onAddYtToPlaylist(ytTrack) }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Filled.Add, null, tint = textColor.copy(0.75f), modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (likedTracks.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Нажми ❤️ рядом с треком в YouTube Music, чтобы сохранить его сюда", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                    items(likedTracks, key = { it.id }) { savedTrack ->
+                        TrackListItem(
+                            track = savedTrack,
+                            cardShape = cardShape,
+                            expressiveShape = expressiveShape,
+                            primaryColor = primaryColor,
+                            textColor = textColor,
+                            surfaceColor = surfaceColor,
+                            badgeText = "YT ❤️",
+                            showCoverThumb = true,
+                            isSelected = false,
+                            isSelectionMode = false,
+                            onAddToPlaylist = null,
+                            onLongClick = {},
+                            onClick = { onPlaySavedTrack(savedTrack) }
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -544,12 +903,10 @@ fun SoundCloudScreen(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Filled.CloudQueue, null, tint = primaryColor, modifier = Modifier.size(32.dp))
-                Text("SoundCloud", fontSize = 28.sp, fontWeight = FontWeight.Black, color = textColor)
-            }
+            SoundCloudLogoBadge(34)
+            Text("SoundCloud", fontSize = 26.sp, fontWeight = FontWeight.Black, color = textColor)
         }
 
         if (downloadingPlaylistTitle != null && downloadPlaylistTotal > 0) {
@@ -1563,7 +1920,7 @@ fun FullScreenPlayerOverlay(
                         Text(track.artist, color = textColor.copy(0.72f), fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    val isScStream = track.folderName == "SoundCloud" || track.uri.scheme == "http" || track.uri.scheme == "https"
+                    val isOnlineStream = track.folderName == "SoundCloud" || track.folderName == "YouTube Music" || track.uri.scheme == "http" || track.uri.scheme == "https"
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1638,7 +1995,7 @@ fun FullScreenPlayerOverlay(
                                         showFullLyricsOverlay = true
                                     }
                                 )
-                                if (isScStream) {
+                                if (isOnlineStream) {
                                     DropdownMenuItem(
                                         text = { Text("Скачать трек в память", color = textColor, fontWeight = FontWeight.SemiBold) },
                                         leadingIcon = { Icon(Icons.Filled.Download, null, tint = primaryColor) },
@@ -2233,6 +2590,7 @@ fun SettingsAndThemeEditor(
     isBatteryIgnored: Boolean,
     minDurationSec: Int,
     excludedFolders: Set<String>,
+    activeStreamingProvider: StreamingProvider,
     cardShape: Shape,
     expressiveShape: Shape,
     primaryColor: Color,
@@ -2240,12 +2598,17 @@ fun SettingsAndThemeEditor(
     surfaceColor: Color,
     onMinDurationChange: (Int) -> Unit,
     onToggleFolderExclusion: (String) -> Unit,
+    onStreamingProviderSelected: (StreamingProvider) -> Unit,
+    onRestartAppClick: () -> Unit,
     onThemeChange: (MMPThemeConfig) -> Unit,
     onRequestBatteryIgnore: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit
 ) {
     var activeSettingsMenu by remember { mutableStateOf("MAIN") }
+    var pendingRestartNeeded by remember { mutableStateOf(false) }
+    var selectedStreamState by remember(activeStreamingProvider) { mutableStateOf(activeStreamingProvider) }
+
     val presets = listOf("Neon Pink" to 0xFFFF66C4, "Acid Lime" to 0xFFA6FF00, "Electric Violet" to 0xFF9D4EDD, "Cyber Cyan" to 0xFF00F5D4, "Sunset Coral" to 0xFFFF5E5B, "Pure Gold" to 0xFFFFBE0B)
 
     var showCustomColorPicker by remember { mutableStateOf(false) }
@@ -2271,7 +2634,7 @@ fun SettingsAndThemeEditor(
                             border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
                         ) {
                             Text(
-                                "v1.1.4",
+                                "v1.2.0",
                                 color = primaryColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
@@ -2279,6 +2642,11 @@ fun SettingsAndThemeEditor(
                             )
                         }
                     } }
+                    item {
+                        SettingsCategoryItem(Icons.Filled.CloudQueue, "Стриминг из интернета", "Активно: ${selectedStreamState.title} (YouTube Music / SoundCloud)", textColor, primaryColor) {
+                            activeSettingsMenu = "STREAMING"
+                        }
+                    }
                     item {
                         SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и Темы", "Цвета, формы MD3 Expressive, светлая/тёмная/Adaptive тема", textColor, primaryColor) {
                             activeSettingsMenu = "UI"
@@ -2303,6 +2671,126 @@ fun SettingsAndThemeEditor(
                         item {
                             SettingsCategoryItem(Icons.Filled.BatteryChargingFull, "Работа в фоне", "Отключить оптимизацию для стабильной работы", textColor, primaryColor) {
                                 onRequestBatteryIgnore()
+                            }
+                        }
+                    }
+                }
+            }
+            "STREAMING" -> {
+                BackHandler { activeSettingsMenu = "MAIN" }
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                    item {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
+                            Text("Стриминг из интернета", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                        }
+                    }
+                    item {
+                        Text(
+                            "Выбери активную систему стриминга. Одновременно может работать только один сервис.",
+                            color = textColor.copy(0.65f),
+                            fontSize = 13.sp
+                        )
+                    }
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(cardShape)
+                                .background(surfaceColor)
+                                .border(if (selectedStreamState == StreamingProvider.YOUTUBE_MUSIC) 1.5.dp else 1.dp, if (selectedStreamState == StreamingProvider.YOUTUBE_MUSIC) primaryColor else textColor.copy(0.12f), cardShape)
+                                .clickable {
+                                    selectedStreamState = StreamingProvider.YOUTUBE_MUSIC
+                                    onStreamingProviderSelected(StreamingProvider.YOUTUBE_MUSIC)
+                                    pendingRestartNeeded = true
+                                }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                YouTubeMusicLogoBadge(46)
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column {
+                                    Text("YouTube Music", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("Без ограничений подписки Go+", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                }
+                            }
+                            Switch(
+                                checked = selectedStreamState == StreamingProvider.YOUTUBE_MUSIC,
+                                onCheckedChange = { checked ->
+                                    val next = if (checked) StreamingProvider.YOUTUBE_MUSIC else StreamingProvider.SOUNDCLOUD
+                                    selectedStreamState = next
+                                    onStreamingProviderSelected(next)
+                                    pendingRestartNeeded = true
+                                },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
+                            )
+                        }
+                    }
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(cardShape)
+                                .background(surfaceColor)
+                                .border(if (selectedStreamState == StreamingProvider.SOUNDCLOUD) 1.5.dp else 1.dp, if (selectedStreamState == StreamingProvider.SOUNDCLOUD) primaryColor else textColor.copy(0.12f), cardShape)
+                                .clickable {
+                                    selectedStreamState = StreamingProvider.SOUNDCLOUD
+                                    onStreamingProviderSelected(StreamingProvider.SOUNDCLOUD)
+                                    pendingRestartNeeded = true
+                                }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                SoundCloudLogoBadge(46)
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column {
+                                    Text("SoundCloud", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("Поиск треков и скачивание плейлистов", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                }
+                            }
+                            Switch(
+                                checked = selectedStreamState == StreamingProvider.SOUNDCLOUD,
+                                onCheckedChange = { checked ->
+                                    val next = if (checked) StreamingProvider.SOUNDCLOUD else StreamingProvider.YOUTUBE_MUSIC
+                                    selectedStreamState = next
+                                    onStreamingProviderSelected(next)
+                                    pendingRestartNeeded = true
+                                },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
+                            )
+                        }
+                    }
+                    if (pendingRestartNeeded) {
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(cardShape)
+                                    .background(primaryColor.copy(0.18f))
+                                    .border(1.dp, primaryColor, cardShape)
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    "Чтобы изменить систему стриминга, нужно перезапустить приложение.",
+                                    color = textColor,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Button(
+                                    onClick = onRestartAppClick,
+                                    shape = RoundedCornerShape(50),
+                                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Filled.Refresh, null, tint = Color.Black)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Перезапустить сейчас", color = Color.Black, fontWeight = FontWeight.Black)
+                                }
                             }
                         }
                     }
@@ -2785,11 +3273,23 @@ fun QueueManagementSheet(
 }
 
 @Composable
-fun FrostedDockBar(selectedTab: Int, cardShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color, onTabSelected: (Int) -> Unit, onCreateClick: () -> Unit) {
+fun FrostedDockBar(
+    selectedTab: Int,
+    activeStreamingProvider: StreamingProvider,
+    cardShape: Shape,
+    primaryColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    onTabSelected: (Int) -> Unit,
+    onCreateClick: () -> Unit
+) {
+    val streamLabel = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) "YT Music" else "SoundCloud"
+    val streamIcon = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) Icons.Filled.PlayCircleOutline else Icons.Filled.CloudQueue
+
     Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor.copy(0.95f)).border(1.dp, textColor.copy(0.12f), cardShape).padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
         DockVerticalItem(Icons.Filled.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
         DockVerticalItem(Icons.Filled.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
-        DockVerticalItem(Icons.Filled.CloudQueue, "SoundCloud", selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
+        DockVerticalItem(streamIcon, streamLabel, selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
         DockVerticalItem(Icons.Filled.AddCircleOutline, "Создать", false, primaryColor, textColor, Modifier.weight(1f), onCreateClick)
     }
 }

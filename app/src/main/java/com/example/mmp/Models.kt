@@ -42,6 +42,11 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
+enum class StreamingProvider(val title: String) {
+    YOUTUBE_MUSIC("YouTube Music"),
+    SOUNDCLOUD("SoundCloud")
+}
+
 enum class RepeatMode {
     OFF, ALL, ONE
 }
@@ -499,6 +504,23 @@ fun loadOfflineLyrics(context: Context, artist: String, title: String): String? 
 object StorageHelper {
     fun getTodayDateString(): String = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
 
+    fun isOnboardingCompleted(prefs: SharedPreferences): Boolean {
+        return prefs.getBoolean("onboarding_completed_v1", false)
+    }
+
+    fun setOnboardingCompleted(prefs: SharedPreferences, completed: Boolean) {
+        prefs.edit().putBoolean("onboarding_completed_v1", completed).apply()
+    }
+
+    fun loadStreamingProvider(prefs: SharedPreferences): StreamingProvider {
+        val raw = prefs.getString("active_streaming_provider", StreamingProvider.YOUTUBE_MUSIC.name)
+        return StreamingProvider.entries.find { it.name == raw } ?: StreamingProvider.YOUTUBE_MUSIC
+    }
+
+    fun saveStreamingProvider(prefs: SharedPreferences, provider: StreamingProvider) {
+        prefs.edit().putString("active_streaming_provider", provider.name).commit()
+    }
+
     fun checkAndResetYearlyStats(prefs: SharedPreferences) {
         val currentYear = Calendar.getInstance().get(Calendar.YEAR)
         val savedYear = prefs.getInt("stats_current_year", currentYear)
@@ -805,6 +827,7 @@ object StorageHelper {
             obj.put("album", t.album)
             obj.put("durationMs", t.durationMs)
             obj.put("customCoverUri", t.customCoverUri ?: "")
+            obj.put("filePath", t.filePath)
             arr.put(obj)
         }
         prefs.edit().putString("saved_sc_tracks_v1", arr.toString()).apply()
@@ -817,19 +840,20 @@ object StorageHelper {
             val arr = JSONArray(raw)
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+                val fp = o.optString("filePath", "").ifBlank { o.optString("uri") }
                 list.add(
                     Track(
                         id = o.optLong("id"),
                         uri = Uri.parse(o.optString("uri")),
-                        title = o.optString("title", "SoundCloud Track"),
-                        artist = o.optString("artist", "SoundCloud"),
-                        album = o.optString("album", "SoundCloud"),
+                        title = o.optString("title", "Online Track"),
+                        artist = o.optString("artist", "Streaming"),
+                        album = o.optString("album", "Streaming"),
                         durationMs = o.optLong("durationMs", 0L),
                         mimeType = "audio/mpeg",
                         sizeBytes = 0L,
-                        filePath = o.optString("uri"),
-                        folderPath = "SoundCloud",
-                        folderName = "SoundCloud",
+                        filePath = fp,
+                        folderPath = "Streaming",
+                        folderName = o.optString("album", "Streaming"),
                         customCoverUri = o.optString("customCoverUri").takeIf { it.isNotBlank() }
                     )
                 )
@@ -966,7 +990,7 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
             }
         }
 
-        val rawBitrate = if (!isHttpStream) retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L else 128000L
+        val rawBitrate = if (!isHttpStream) retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L else 160000L
         val sampleRateRaw = if (!isHttpStream && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toLongOrNull() else null
         val sampleRateStr = if (sampleRateRaw != null && sampleRateRaw > 0) String.format(Locale.US, "%.1f kHz", sampleRateRaw / 1000f) else "44.1 kHz"
 
@@ -979,6 +1003,7 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
         }
         if (kbps < 96L && calculatedFromSizeKbps >= 128L) kbps = calculatedFromSizeKbps
         val format = when {
+            track.filePath.startsWith("ytm://") -> "YT STREAM"
             isHttpStream -> "SC STREAM"
             track.mimeType.contains("flac", true) -> "FLAC"
             track.mimeType.contains("wav", true) -> "WAV"
@@ -986,6 +1011,7 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
             else -> "MP3"
         }
         val cleanKbps = when {
+            track.filePath.startsWith("ytm://") -> 160L
             isHttpStream -> 128L
             format == "MP3" && kbps in 290L..340L -> 320L
             format == "MP3" && kbps in 235L..275L -> 256L
