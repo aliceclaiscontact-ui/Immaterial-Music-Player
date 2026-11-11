@@ -1039,8 +1039,15 @@ fun MMPApp(onThemeLightChanged: (Boolean) -> Unit = {}) {
                                     }
                                     downloadingPlaylistTitle = null
                                     Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
-                                    delay(900)
-                                    rawDeviceTracks = scanDeviceMusic(context)
+                                    delay(1200)
+                                    val rescanned = scanDeviceMusic(context)
+                                    val mergedMap = LinkedHashMap<String, Track>()
+                                    for (t in rescanned) mergedMap[t.filePath.ifBlank { t.id.toString() }] = t
+                                    for (t in rawDeviceTracks) {
+                                        val key = t.filePath.ifBlank { t.id.toString() }
+                                        if (!mergedMap.containsKey(key)) mergedMap[key] = t
+                                    }
+                                    rawDeviceTracks = mergedMap.values.toList()
                                 }
                             },
                             downloadingPlaylistTitle = downloadingPlaylistTitle,
