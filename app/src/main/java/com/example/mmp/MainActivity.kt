@@ -491,6 +491,8 @@ fun MMPApp(
                 exoPlayer.prepare()
                 exoPlayer.playWhenReady = true
                 syncMediaService(track, currentMetadata, false)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Throwable) {
                 isPlaying = false
                 isMediaPlayerPrepared = false
