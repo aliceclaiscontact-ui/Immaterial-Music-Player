@@ -1084,6 +1084,9 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
             isHttpStream -> "SC STREAM"
             track.mimeType.contains("flac", true) -> "FLAC"
             track.mimeType.contains("wav", true) -> "WAV"
+            track.mimeType.contains("mp2t", true) -> "MPEG-TS"
+            track.mimeType.contains("aac", true) -> "AAC"
+            track.mimeType.contains("ogg", true) || track.mimeType.contains("opus", true) -> "OGG"
             track.mimeType.contains("mp4", true) || track.mimeType.contains("m4a", true) -> "M4A"
             else -> "MP3"
         }
