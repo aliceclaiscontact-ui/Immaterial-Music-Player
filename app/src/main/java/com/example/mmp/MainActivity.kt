@@ -102,10 +102,13 @@ fun MMPApp(
     var savedScTracks by remember { mutableStateOf<List<Track>>(StorageHelper.loadSoundCloudTracks(prefs)) }
     var likedScTracks by remember {
         val rawLiked = prefs.getString("liked_sc_tracks_v1", null)
-        val initialList: List<Track> = if (rawLiked != null) {
-            StorageHelper.loadSoundCloudTracks(prefs).filter { trk -> rawLiked.contains(trk.id.toString()) }
-        } else {
-            emptyList()
+        val likedIds = rawLiked
+            ?.split(",")
+            ?.mapNotNull { it.trim().toLongOrNull() }
+            ?.toSet()
+            ?: emptySet()
+        val initialList = StorageHelper.loadSoundCloudTracks(prefs).filter { track ->
+            track.id in likedIds
         }
         mutableStateOf<List<Track>>(initialList)
     }
