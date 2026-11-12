@@ -195,6 +195,12 @@ fun MMPApp(
     val exoPlayer = remember {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(YouTubeMusicClient.STREAM_USER_AGENT)
+            .setDefaultRequestProperties(
+                mapOf(
+                    "Accept" to "*/*",
+                    "Accept-Encoding" to "identity"
+                )
+            )
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
