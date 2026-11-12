@@ -658,9 +658,10 @@ fun MMPApp(
                 val isYtStream = rawUrl.startsWith("ytm://")
                 val isScStream = rawUrl.contains("api-v2.soundcloud.com") ||
                     (cur != null && cur.folderName == "SoundCloud" && cur.filePath.startsWith("http"))
+                val canRefreshStream = isYtStream || rawUrl.contains("api-v2.soundcloud.com")
                 val retryKey = cur?.id?.toString() + "|" + rawUrl
 
-                if (cur != null && (isYtStream || isScStream) &&
+                if (cur != null && canRefreshStream &&
                     (streamRetryKey != retryKey || streamRetryCount < 1)
                 ) {
                     if (streamRetryKey != retryKey) {
