@@ -648,7 +648,7 @@ fun MMPApp(
                 isMediaPlayerPrepared = false
                 isPlaying = false
                 val cur = currentTrack
-                val rawUrl = cur?.filePath?.ifBlank { cur.uri.toString() }.orEmpty()
+                val rawUrl = if (cur != null) cur.filePath.ifBlank { cur.uri.toString() } else ""
                 val isYtStream = rawUrl.startsWith("ytm://")
                 val isScStream = rawUrl.contains("api-v2.soundcloud.com") ||
                     (cur != null && cur.folderName == "SoundCloud" && cur.filePath.startsWith("http"))
