@@ -297,6 +297,7 @@ object SoundCloudClient {
         streamMetaOrDirectUrl: String,
         customSubDir: String? = null
     ): File? = withContext(Dispatchers.IO) {
+        var partialFile: File? = null
         try {
             var direct: String? = null
             if (streamMetaOrDirectUrl.contains("api-v2.soundcloud.com")) {
@@ -323,33 +324,95 @@ object SoundCloudClient {
             val cleanArtist = artist.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().take(30)
             val cleanTitle = title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().take(40)
             val fileName = "$cleanArtist - $cleanTitle".trim().ifBlank { "sc_track_${System.currentTimeMillis()}" }
-            val outFile = File(baseDir, "$fileName.mp3")
+            val isHls = finalUrl.substringBefore("?").contains(".m3u8", ignoreCase = true)
+            var outputExtension = URL(finalUrl).path.substringAfterLast('.', "mp3").lowercase()
+            var outputMime = when (outputExtension) {
+                "m4a", "mp4" -> "audio/mp4"
+                "aac" -> "audio/aac"
+                "ogg", "opus" -> "audio/ogg"
+                "flac" -> "audio/flac"
+                "wav" -> "audio/wav"
+                else -> "audio/mpeg"
+            }
 
+            var mediaPlaylistUrl = finalUrl
+            var mediaPlaylist = ""
+            var initSegmentUrl: String? = null
+            var segmentUrls = emptyList<String>()
+
+            if (isHls) {
+                mediaPlaylist = httpGet(finalUrl)
+                val childPlaylist = mediaPlaylist.lineSequence()
+                    .map { it.trim() }
+                    .firstOrNull { it.isNotEmpty() && !it.startsWith("#") && it.contains(".m3u8", true) }
+                if (childPlaylist != null) {
+                    mediaPlaylistUrl = URL(URL(finalUrl), childPlaylist).toString()
+                    mediaPlaylist = httpGet(mediaPlaylistUrl)
+                }
+
+                val encryptionLine = mediaPlaylist.lineSequence()
+                    .firstOrNull { it.startsWith("#EXT-X-KEY:") && !it.contains("METHOD=NONE", true) }
+                if (encryptionLine != null || mediaPlaylist.contains("#EXT-X-BYTERANGE")) {
+                    return@withContext null
+                }
+
+                val mapReference = Regex("""#EXT-X-MAP:[^\\n]*URI="([^"]+)"""")
+                    .find(mediaPlaylist)?.groupValues?.getOrNull(1)
+                initSegmentUrl = mapReference?.let { URL(URL(mediaPlaylistUrl), it).toString() }
+                val segmentReferences = mediaPlaylist.lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.startsWith("#") }
+                    .toList()
+                if (segmentReferences.isEmpty()) return@withContext null
+                segmentUrls = segmentReferences.map { URL(URL(mediaPlaylistUrl), it).toString() }
+
+                val firstSegmentExtension = URL(segmentUrls.first()).path.substringAfterLast('.', "ts").lowercase()
+                outputExtension = when {
+                    initSegmentUrl != null -> "m4a"
+                    firstSegmentExtension in setOf("aac", "mp3", "m4a", "ts", "ogg") -> firstSegmentExtension
+                    firstSegmentExtension == "m4s" -> "m4a"
+                    else -> "ts"
+                }
+                outputMime = when (outputExtension) {
+                    "m4a", "mp4", "m4s" -> "audio/mp4"
+                    "aac" -> "audio/aac"
+                    "mp3" -> "audio/mpeg"
+                    "ogg" -> "audio/ogg"
+                    "ts" -> "video/mp2t"
+                    else -> "application/octet-stream"
+                }
+            } else if (outputExtension !in setOf("mp3", "m4a", "mp4", "aac", "ogg", "opus", "flac", "wav")) {
+                outputExtension = "mp3"
+            }
+
+            val outFile = File(baseDir, "$fileName.$outputExtension")
+            partialFile = outFile
             FileOutputStream(outFile).use { out ->
-                if (!finalUrl.contains(".m3u8")) {
+                if (!isHls) {
                     val conn = (URL(finalUrl).openConnection() as HttpURLConnection).apply {
                         connectTimeout = 15000
-                        readTimeout = 15000
+                        readTimeout = 20000
                         setRequestProperty("User-Agent", USER_AGENT)
                     }
+                    if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP_${conn.responseCode}")
                     conn.inputStream.use { inp -> inp.copyTo(out) }
                 } else {
-                    var playlist = httpGet(finalUrl)
-                    val baseUri = finalUrl.substringBeforeLast("/")
-                    val subUrl = playlist.lines().map { it.trim() }.firstOrNull { !it.startsWith("#") && it.contains(".m3u8") }
-                    if (!subUrl.isNullOrBlank()) {
-                        val resolvedSub = if (subUrl.startsWith("http")) subUrl else "$baseUri/$subUrl"
-                        playlist = httpGet(resolvedSub)
-                    }
-                    val segments = playlist.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
-                    if (segments.isEmpty()) return@withContext null
-                    for (seg in segments) {
-                        val segUrl = if (seg.startsWith("http")) seg else "$baseUri/$seg"
-                        val conn = (URL(segUrl).openConnection() as HttpURLConnection).apply {
+                    initSegmentUrl?.let { initUrl ->
+                        val conn = (URL(initUrl).openConnection() as HttpURLConnection).apply {
                             connectTimeout = 12000
-                            readTimeout = 12000
+                            readTimeout = 20000
                             setRequestProperty("User-Agent", USER_AGENT)
                         }
+                        if (conn.responseCode !in 200..299) throw IllegalStateException("HLS_INIT_HTTP_${conn.responseCode}")
+                        conn.inputStream.use { inp -> inp.copyTo(out) }
+                    }
+                    for (segmentUrl in segmentUrls) {
+                        val conn = (URL(segmentUrl).openConnection() as HttpURLConnection).apply {
+                            connectTimeout = 12000
+                            readTimeout = 20000
+                            setRequestProperty("User-Agent", USER_AGENT)
+                        }
+                        if (conn.responseCode !in 200..299) throw IllegalStateException("HLS_SEGMENT_HTTP_${conn.responseCode}")
                         conn.inputStream.use { inp -> inp.copyTo(out) }
                     }
                 }
@@ -363,11 +426,12 @@ object SoundCloudClient {
             MediaScannerConnection.scanFile(
                 context,
                 arrayOf(outFile.absolutePath),
-                arrayOf("audio/mpeg"),
+                arrayOf(outputMime),
                 null
             )
             return@withContext outFile
         } catch (e: Throwable) {
+            partialFile?.delete()
             return@withContext null
         }
     }
