@@ -375,7 +375,7 @@ object SoundCloudClient {
     suspend fun downloadEntirePlaylist(
         context: Context,
         playlist: SoundCloudPlaylist,
-        onTrackSaved: (track: Track, current: Int, total: Int) -> Unit
+        onTrackSaved: suspend (track: Track, current: Int, total: Int) -> Unit
     ): Int = withContext(Dispatchers.IO) {
         val tracksToDownload = if (playlist.tracks.size < playlist.trackCount) {
             fetchFullPlaylist(playlist.id).ifEmpty { playlist.tracks }
@@ -393,19 +393,10 @@ object SoundCloudClient {
                 val file = downloadTrackToDevice(context, scTrk.title, scTrk.artist, streamUrl, targetSubDir)
                 if (file != null) {
                     downloadedCount++
-                    val localTrack = Track(
-                        id = System.currentTimeMillis() + index,
-                        uri = Uri.fromFile(file),
-                        title = scTrk.title,
-                        artist = scTrk.artist,
-                        album = cleanPlName,
-                        durationMs = scTrk.durationMs,
-                        mimeType = "audio/mpeg",
-                        sizeBytes = file.length(),
-                        filePath = file.absolutePath,
-                        folderPath = file.parentFile?.absolutePath ?: "",
-                        folderName = cleanPlName,
-                        customCoverUri = scTrk.artworkUrl ?: playlist.artworkUrl
+                    val localTrack = buildTrackFromLocalFile(
+                        file,
+                        fallbackAlbum = cleanPlName,
+                        fallbackCover = scTrk.artworkUrl ?: playlist.artworkUrl
                     )
                     onTrackSaved(localTrack, index + 1, tracksToDownload.size)
                 }
