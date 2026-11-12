@@ -243,6 +243,8 @@ object YouTubeMusicClient {
         val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: return null
         var bestUrl: String? = null
         var bestBitrate = 0
+        var bestMp4Url: String? = null
+        var bestMp4Bitrate = 0
         for (i in 0 until adaptive.length()) {
             val fmt = adaptive.optJSONObject(i) ?: continue
             val mime = fmt.optString("mimeType", "")
@@ -253,9 +255,13 @@ object YouTubeMusicClient {
                     bestBitrate = bitrate
                     bestUrl = url
                 }
+                if (url.isNotBlank() && mime.startsWith("audio/mp4") && bitrate >= bestMp4Bitrate) {
+                    bestMp4Bitrate = bitrate
+                    bestMp4Url = url
+                }
             }
         }
-        return bestUrl
+        return bestMp4Url ?: bestUrl
     }
 
     suspend fun resolveAudioStreamUrl(videoId: String, forceRefresh: Boolean = false): String? = withContext(Dispatchers.IO) {
@@ -341,18 +347,26 @@ object YouTubeMusicClient {
                 val audioStreams = root.optJSONArray("audioStreams") ?: continue
                 var bestUrl: String? = null
                 var bestBitrate = 0
+                var bestMp4Url: String? = null
+                var bestMp4Bitrate = 0
                 for (i in 0 until audioStreams.length()) {
                     val st = audioStreams.optJSONObject(i) ?: continue
                     val url = st.optString("url", "")
+                    val mime = st.optString("mimeType", "")
                     val bitrate = st.optInt("bitrate", 0)
                     if (url.isNotBlank() && bitrate >= bestBitrate) {
                         bestBitrate = bitrate
                         bestUrl = url
                     }
+                    if (url.isNotBlank() && mime.startsWith("audio/mp4") && bitrate >= bestMp4Bitrate) {
+                        bestMp4Bitrate = bitrate
+                        bestMp4Url = url
+                    }
                 }
-                if (!bestUrl.isNullOrBlank()) {
-                    streamCache[videoId] = bestUrl
-                    return@withContext bestUrl
+                val selectedUrl = bestMp4Url ?: bestUrl
+                if (!selectedUrl.isNullOrBlank()) {
+                    streamCache[videoId] = selectedUrl
+                    return@withContext selectedUrl
                 }
             } catch (_: Throwable) {}
         }
