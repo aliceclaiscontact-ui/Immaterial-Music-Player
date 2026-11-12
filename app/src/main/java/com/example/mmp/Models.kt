@@ -313,7 +313,15 @@ fun buildTrackFromLocalFile(file: File, fallbackAlbum: String = "Playlists", fal
         artist = artist.ifBlank { "SoundCloud" },
         album = parent?.name ?: fallbackAlbum,
         durationMs = durationMs.coerceAtLeast(5000L),
-        mimeType = if (file.extension.equals("m4a", true)) "audio/mp4" else "audio/mpeg",
+        mimeType = when (file.extension.lowercase()) {
+            "m4a", "mp4" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "ogg", "opus" -> "audio/ogg"
+            "flac" -> "audio/flac"
+            "wav" -> "audio/wav"
+            "ts" -> "video/mp2t"
+            else -> "audio/mpeg"
+        },
         sizeBytes = file.length(),
         filePath = file.absolutePath,
         folderPath = parent?.absolutePath ?: "/Music",
