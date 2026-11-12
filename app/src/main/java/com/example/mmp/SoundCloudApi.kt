@@ -367,6 +367,7 @@ object SoundCloudClient {
                 segmentUrls = segmentReferences.map { URL(URL(mediaPlaylistUrl), it).toString() }
 
                 val firstSegmentExtension = URL(segmentUrls.first()).path.substringAfterLast('.', "ts").lowercase()
+                if (firstSegmentExtension == "m4s" && initSegmentUrl == null) return@withContext null
                 outputExtension = when {
                     initSegmentUrl != null -> "m4a"
                     firstSegmentExtension in setOf("aac", "mp3", "m4a", "ts", "ogg") -> firstSegmentExtension
