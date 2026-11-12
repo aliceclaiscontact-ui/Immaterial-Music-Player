@@ -356,7 +356,7 @@ object SoundCloudClient {
                     return@withContext null
                 }
 
-                val mapReference = Regex("#EXT-X-MAP:[^\\r\\n]*URI=\\"([^\\"]+)\\"")
+                val mapReference = Regex("#EXT-X-MAP:[^\\r\\n]*URI=\"([^\"]+)\"")
                     .find(mediaPlaylist)?.groupValues?.getOrNull(1)
                 initSegmentUrl = mapReference?.let { URL(URL(mediaPlaylistUrl), it).toString() }
                 val segmentReferences = mediaPlaylist.lineSequence()
