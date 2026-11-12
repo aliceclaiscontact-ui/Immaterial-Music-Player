@@ -43,9 +43,11 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -102,10 +104,13 @@ fun MMPApp(
     var savedScTracks by remember { mutableStateOf<List<Track>>(StorageHelper.loadSoundCloudTracks(prefs)) }
     var likedScTracks by remember {
         val rawLiked = prefs.getString("liked_sc_tracks_v1", null)
-        val initialList: List<Track> = if (rawLiked != null) {
-            StorageHelper.loadSoundCloudTracks(prefs).filter { trk -> rawLiked.contains(trk.id.toString()) }
-        } else {
-            emptyList()
+        val likedIds = rawLiked
+            ?.split(",")
+            ?.mapNotNull { it.trim().toLongOrNull() }
+            ?.toSet()
+            ?: emptySet()
+        val initialList = StorageHelper.loadSoundCloudTracks(prefs).filter { track ->
+            track.id in likedIds
         }
         mutableStateOf<List<Track>>(initialList)
     }
@@ -190,6 +195,12 @@ fun MMPApp(
     val exoPlayer = remember {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(YouTubeMusicClient.STREAM_USER_AGENT)
+            .setDefaultRequestProperties(
+                mapOf(
+                    "Accept" to "*/*",
+                    "Accept-Encoding" to "identity"
+                )
+            )
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
@@ -237,6 +248,8 @@ fun MMPApp(
 
     var activePlayJob by remember { mutableStateOf<Job?>(null) }
     var activeMetaJob by remember { mutableStateOf<Job?>(null) }
+    var streamRetryCount by remember { mutableIntStateOf(0) }
+    var streamRetryKey by remember { mutableStateOf<String?>(null) }
     var crossfadeTriggeredForTrackId by remember { mutableStateOf<Long?>(null) }
 
     // Таймер неактивности: 2 часа (7200 секунд) на паузе -> полное закрытие приложения (killapp)
@@ -408,7 +421,11 @@ fun MMPApp(
         }
     }
 
-    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L) {
+    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L, isRecovery: Boolean = false) {
+        if (!isRecovery) {
+            streamRetryCount = 0
+            streamRetryKey = null
+        }
         if (currentTrack?.id != track.id) {
             loopPointAMs = null
             loopPointBMs = null
@@ -443,15 +460,28 @@ fun MMPApp(
                     rawUrl.startsWith("ytm://") -> {
                         val vid = rawUrl.removePrefix("ytm://")
                         val resolved = YouTubeMusicClient.resolveAudioStreamUrl(vid)
-                        if (resolved != null) Uri.parse(resolved) else track.uri
+                        val playableUrl = resolved ?: track.uri.toString().takeIf {
+                            it.startsWith("https://") || it.startsWith("http://")
+                        } ?: throw IllegalStateException("YT_STREAM_UNAVAILABLE")
+                        Uri.parse(playableUrl)
                     }
                     rawUrl.contains("api-v2.soundcloud.com") -> {
                         val resolved = SoundCloudClient.resolveStreamUrl(rawUrl)
-                        if (resolved != null) Uri.parse(resolved) else track.uri
+                        val playableUrl = resolved ?: track.uri.toString().takeIf {
+                            (it.startsWith("https://") || it.startsWith("http://")) &&
+                                !it.contains("api-v2.soundcloud.com")
+                        } ?: throw IllegalStateException("SC_STREAM_UNAVAILABLE")
+                        Uri.parse(playableUrl)
                     }
                     else -> track.uri
                 }
 
+                if (finalUri.scheme == "ytm" || finalUri.toString().contains("api-v2.soundcloud.com")) {
+                    throw IllegalStateException("UNRESOLVED_STREAM_URI")
+                }
+
+                isMediaPlayerPrepared = false
+                isPlaying = false
                 val mediaItem = MediaItem.fromUri(finalUri)
                 exoPlayer.setMediaItem(mediaItem, startOffsetMs.coerceAtLeast(0L))
                 exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
@@ -459,15 +489,20 @@ fun MMPApp(
                 val cfSec = prefs.getInt("crossfade_sec", 0)
                 exoPlayer.volume = if (cfSec > 0 && startOffsetMs == 0L) 0.15f else 1f
                 exoPlayer.prepare()
-                exoPlayer.play()
-
-                isMediaPlayerPrepared = true
-                isPlaying = true
-                syncMediaService(track, currentMetadata, true)
+                exoPlayer.playWhenReady = true
+                syncMediaService(track, currentMetadata, false)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Throwable) {
                 isPlaying = false
                 isMediaPlayerPrepared = false
-                Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
+                syncMediaService(track, currentMetadata, false)
+                val reason = when {
+                    e.message == "YT_STREAM_UNAVAILABLE" -> "Не удалось получить аудиопоток YouTube"
+                    e.message == "SC_STREAM_UNAVAILABLE" -> "Не удалось обновить аудиопоток SoundCloud"
+                    else -> "Ошибка воспроизведения: ${e.message ?: "неизвестная ошибка"}"
+                }
+                Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
             }
         }
 
@@ -619,36 +654,56 @@ fun MMPApp(
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 isMediaPlayerPrepared = false
-                SoundCloudClient.clearCache()
-                YouTubeMusicClient.clearCache()
+                isPlaying = false
                 val cur = currentTrack
-                if (cur != null) {
-                    val rawUrl = cur.filePath.ifBlank { cur.uri.toString() }
-                    if (rawUrl.startsWith("ytm://")) {
+                val rawUrl = if (cur != null) cur.filePath.ifBlank { cur.uri.toString() } else ""
+                val isYtStream = rawUrl.startsWith("ytm://")
+                val isScStream = rawUrl.contains("api-v2.soundcloud.com") ||
+                    (cur != null && cur.folderName == "SoundCloud" && cur.filePath.startsWith("http"))
+                val canRefreshStream = isYtStream || rawUrl.contains("api-v2.soundcloud.com")
+                val retryKey = cur?.id?.toString() + "|" + rawUrl
+
+                if (cur != null && canRefreshStream &&
+                    (streamRetryKey != retryKey || streamRetryCount < 1)
+                ) {
+                    if (streamRetryKey != retryKey) {
+                        streamRetryKey = retryKey
+                        streamRetryCount = 0
+                    }
+                    if (streamRetryCount < 1) {
+                        streamRetryCount += 1
                         scope.launch {
-                            val vid = rawUrl.removePrefix("ytm://")
-                            val fresh = YouTubeMusicClient.resolveAudioStreamUrl(vid, forceRefresh = true)
-                            if (fresh != null) {
-                                val refreshed = cur.copy(uri = Uri.parse(fresh))
-                                currentTrack = refreshed
-                                playTrack(refreshed, null, currentPositionMs)
+                            val fresh = if (isYtStream) {
+                                YouTubeMusicClient.clearCache()
+                                YouTubeMusicClient.resolveAudioStreamUrl(rawUrl.removePrefix("ytm://"), forceRefresh = true)
+                            } else {
+                                SoundCloudClient.clearCache()
+                                SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = true)
                             }
-                        }
-                        return
-                    } else if (cur.folderName == "SoundCloud" || cur.uri.toString().contains("sndcdn")) {
-                        scope.launch {
-                            val fresh = SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = true)
-                            if (fresh != null) {
+                            if (!fresh.isNullOrBlank()) {
                                 val refreshed = cur.copy(uri = Uri.parse(fresh))
                                 currentTrack = refreshed
-                                playTrack(refreshed, null, currentPositionMs)
+                                playTrack(refreshed, null, currentPositionMs, isRecovery = true)
+                            } else {
+                                syncMediaService(cur, currentMetadata, false)
+                                Toast.makeText(
+                                    context,
+                                    "Не удалось восстановить поток (${error.errorCodeName})",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
                         }
                         return
                     }
                 }
-                isPlaying = false
-                Toast.makeText(context, "Восстанавливаем поток...", Toast.LENGTH_SHORT).show()
+
+                syncMediaService(cur, currentMetadata, false)
+                val message = if (isYtStream || isScStream) {
+                    "Поток не удалось воспроизвести (${error.errorCodeName})"
+                } else {
+                    "Не удалось открыть локальный аудиофайл (${error.errorCodeName})"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
         exoPlayer.addListener(listener)
@@ -776,7 +831,7 @@ fun MMPApp(
     LaunchedEffect(isPlaying, currentTrack, loopPointAMs, loopPointBMs) {
         var tickCounter = 0
         while (isPlaying && currentTrack != null) {
-            delay(40L)
+            delay(200L)
             if (isMediaPlayerPrepared && (try { exoPlayer.isPlaying } catch (_: Throwable) { false })) {
                 val trk = currentTrack ?: break
                 currentPositionMs = try { exoPlayer.currentPosition.coerceAtLeast(0L) } catch (_: Throwable) { currentPositionMs }
@@ -831,7 +886,7 @@ fun MMPApp(
                 } catch (_: Throwable) {}
 
                 tickCounter += 1
-                if (tickCounter >= 25) {
+                if (tickCounter >= 5) {
                     tickCounter = 0
                     listenedSecondsTotal += 1
                     currentTrackPlayedSeconds += 1
@@ -1171,34 +1226,47 @@ fun MMPApp(
                                     downloadPlaylistTotal = scPl.trackCount
 
                                     val cleanPlName = scPl.title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().ifBlank { "Playlist_${scPl.id}" }
-                                    var createdPl = playlists.find { it.name == cleanPlName }
-                                    if (createdPl == null) {
-                                        createdPl = PlaylistItem(name = cleanPlName, coverUri = scPl.artworkUrl, trackIds = emptyList(), description = "SoundCloud: ${scPl.author}", trackFilePaths = emptyList())
-                                        playlists = playlists + createdPl
-                                        StorageHelper.savePlaylists(prefs, playlists)
-                                    }
-
                                     scope.launch {
                                         Toast.makeText(context, "Скачивание плейлиста началось...", Toast.LENGTH_SHORT).show()
-                                        val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { newTrk, cur, tot ->
-                                            downloadPlaylistCurrent = cur
-                                            downloadPlaylistTotal = tot
-                                            val currentList = StorageHelper.loadPlaylists(prefs)
-                                            val updated = currentList.map { pl ->
-                                                if (pl.name == cleanPlName) {
-                                                    val mergedIds = (pl.trackIds + newTrk.id).distinct()
-                                                    val mergedPaths = if (newTrk.filePath.isNotBlank()) (pl.trackFilePaths + newTrk.filePath).distinct() else pl.trackFilePaths
-                                                    pl.copy(trackIds = mergedIds, trackFilePaths = mergedPaths, coverUri = pl.coverUri ?: newTrk.customCoverUri)
-                                                } else pl
+                                        val downloadedTracks = mutableListOf<Track>()
+                                        try {
+                                            val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { newTrk, cur, tot ->
+                                                withContext(Dispatchers.Main.immediate) {
+                                                    downloadedTracks.add(newTrk)
+                                                    downloadPlaylistCurrent = cur
+                                                    downloadPlaylistTotal = tot
+                                                }
                                             }
-                                            playlists = updated
-                                            StorageHelper.savePlaylists(prefs, updated)
-                                            rawDeviceTracks = (rawDeviceTracks + newTrk).distinctBy { it.filePath.ifBlank { it.id.toString() } }
+
+                                            val existing = playlists.firstOrNull { it.name == cleanPlName }
+                                            val target = existing ?: PlaylistItem(
+                                                name = cleanPlName,
+                                                coverUri = scPl.artworkUrl,
+                                                trackIds = emptyList(),
+                                                description = "SoundCloud: ${scPl.author}",
+                                                trackFilePaths = emptyList()
+                                            )
+                                            val mergedIds = (target.trackIds + downloadedTracks.map { it.id }).distinct()
+                                            val mergedPaths = (target.trackFilePaths + downloadedTracks.map { it.filePath })
+                                                .filter { it.isNotBlank() }.distinct()
+                                            val updatedPlaylist = target.copy(
+                                                trackIds = mergedIds,
+                                                trackFilePaths = mergedPaths,
+                                                coverUri = target.coverUri ?: downloadedTracks.firstOrNull()?.customCoverUri
+                                            )
+                                            val updatedPlaylists = (playlists.filterNot { it.name == cleanPlName } + updatedPlaylist)
+                                            playlists = updatedPlaylists
+                                            rawDeviceTracks = (rawDeviceTracks + downloadedTracks)
+                                                .distinctBy { it.filePath.ifBlank { it.id.toString() } }
+                                            withContext(Dispatchers.IO) {
+                                                StorageHelper.savePlaylists(prefs, updatedPlaylists)
+                                            }
+                                            Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
+                                        } catch (e: Throwable) {
+                                            Toast.makeText(context, "Ошибка скачивания плейлиста: ${e.message ?: "неизвестная ошибка"}", Toast.LENGTH_LONG).show()
+                                        } finally {
+                                            downloadingPlaylistTitle = null
                                         }
-                                        downloadingPlaylistTitle = null
-                                        Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
-                                        delay(1000)
-                                        rawDeviceTracks = scanDeviceMusic(context)
                                     }
                                 },
                                 downloadingPlaylistTitle = downloadingPlaylistTitle,

@@ -3285,12 +3285,51 @@ fun FrostedDockBar(
 ) {
     val streamLabel = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) "YT Music" else "SoundCloud"
     val streamIcon = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) Icons.Filled.PlayCircleOutline else Icons.Filled.CloudQueue
+    val itemColors = NavigationBarItemDefaults.colors(
+        selectedIconColor = primaryColor,
+        selectedTextColor = primaryColor,
+        indicatorColor = primaryColor.copy(alpha = 0.18f),
+        unselectedIconColor = textColor.copy(alpha = 0.68f),
+        unselectedTextColor = textColor.copy(alpha = 0.68f)
+    )
 
-    Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor.copy(0.95f)).border(1.dp, textColor.copy(0.12f), cardShape).padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-        DockVerticalItem(Icons.Filled.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
-        DockVerticalItem(Icons.Filled.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
-        DockVerticalItem(streamIcon, streamLabel, selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
-        DockVerticalItem(Icons.Filled.AddCircleOutline, "Создать", false, primaryColor, textColor, Modifier.weight(1f), onCreateClick)
+    NavigationBar(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .border(1.dp, textColor.copy(alpha = 0.12f), cardShape),
+        containerColor = surfaceColor.copy(alpha = 0.96f),
+        contentColor = textColor,
+        tonalElevation = 0.dp
+    ) {
+        NavigationBarItem(
+            selected = selectedTab == 0,
+            onClick = { onTabSelected(0) },
+            icon = { Icon(Icons.Filled.Home, contentDescription = "Главная") },
+            label = { Text("Главная", maxLines = 1) },
+            colors = itemColors
+        )
+        NavigationBarItem(
+            selected = selectedTab == 1,
+            onClick = { onTabSelected(1) },
+            icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Медиатека") },
+            label = { Text("Медиатека", maxLines = 1) },
+            colors = itemColors
+        )
+        NavigationBarItem(
+            selected = selectedTab == 2,
+            onClick = { onTabSelected(2) },
+            icon = { Icon(streamIcon, contentDescription = streamLabel) },
+            label = { Text(streamLabel, maxLines = 1) },
+            colors = itemColors
+        )
+        NavigationBarItem(
+            selected = false,
+            onClick = onCreateClick,
+            icon = { Icon(Icons.Filled.AddCircleOutline, contentDescription = "Создать") },
+            label = { Text("Создать", maxLines = 1) },
+            colors = itemColors
+        )
     }
 }
 
