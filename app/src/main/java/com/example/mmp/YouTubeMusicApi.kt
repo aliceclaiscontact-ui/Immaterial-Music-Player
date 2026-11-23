@@ -333,6 +333,10 @@ object YouTubeMusicClient {
                         streamCache[videoId] = resolvedSc
                         return@withContext resolvedSc
                     }
+                    if (url.isNotBlank() && mime.startsWith("audio/mp4") && bitrate >= bestMp4Bitrate) {
+                        bestMp4Bitrate = bitrate
+                        bestMp4Url = url
+                    }
                 }
             } catch (_: Throwable) {}
         }

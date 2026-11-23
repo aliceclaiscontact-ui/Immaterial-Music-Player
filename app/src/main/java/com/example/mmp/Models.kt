@@ -313,7 +313,15 @@ fun buildTrackFromLocalFile(file: File, fallbackAlbum: String = "Playlists", fal
         artist = artist.ifBlank { "SoundCloud" },
         album = parent?.name ?: fallbackAlbum,
         durationMs = durationMs.coerceAtLeast(5000L),
-        mimeType = if (file.extension.equals("m4a", true)) "audio/mp4" else "audio/mpeg",
+        mimeType = when (file.extension.lowercase()) {
+            "m4a", "mp4" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "ogg", "opus" -> "audio/ogg"
+            "flac" -> "audio/flac"
+            "wav" -> "audio/wav"
+            "ts" -> "video/mp2t"
+            else -> "audio/mpeg"
+        },
         sizeBytes = file.length(),
         filePath = file.absolutePath,
         folderPath = parent?.absolutePath ?: "/Music",
@@ -1076,6 +1084,9 @@ suspend fun extractTrackMetadata(context: Context, track: Track): DetailedMetada
             isHttpStream -> "SC STREAM"
             track.mimeType.contains("flac", true) -> "FLAC"
             track.mimeType.contains("wav", true) -> "WAV"
+            track.mimeType.contains("mp2t", true) -> "MPEG-TS"
+            track.mimeType.contains("aac", true) -> "AAC"
+            track.mimeType.contains("ogg", true) || track.mimeType.contains("opus", true) -> "OGG"
             track.mimeType.contains("mp4", true) || track.mimeType.contains("m4a", true) -> "M4A"
             else -> "MP3"
         }
