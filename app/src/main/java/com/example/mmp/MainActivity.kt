@@ -164,8 +164,8 @@ fun MMPApp(
     }
 
     var showAudioFxDialog by remember { mutableStateOf(false) }
-    var playbackSpeed by remember { mutableFloatStateOf(prefs.getFloat("saved_speed", 1.0f)) }
-    var playbackPitch by remember { mutableFloatStateOf(prefs.getFloat("saved_pitch", 1.0f)) }
+    var playbackSpeed by remember { mutableFloatStateOf(prefs.getFloat("saved_speed", 1.0f).coerceIn(0.5f, 3.0f)) }
+    var playbackPitch by remember { mutableFloatStateOf(prefs.getFloat("saved_pitch", 1.0f).coerceIn(0.1f, 5.0f)) }
     var bassBoostStrength by remember { mutableIntStateOf(prefs.getInt("saved_fx_bass", 0)) }
     var reverbPreset by remember { mutableIntStateOf(prefs.getInt("saved_fx_reverb", 0)) }
 
@@ -215,6 +215,7 @@ fun MMPApp(
     var currentTrackPlayedSeconds by remember { mutableStateOf(0) }
     var currentTrackRecorded20Sec by remember { mutableStateOf(false) }
     var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds_total", 0)) }
+    var streamRetryCount by remember { mutableIntStateOf(0) }
 
     var currentQueue by remember { mutableStateOf(StorageHelper.loadLastQueue(prefs)) }
     var isShuffleEnabled by remember { mutableStateOf(prefs.getBoolean("saved_shuffle_enabled", false)) }
@@ -239,7 +240,6 @@ fun MMPApp(
     var activeMetaJob by remember { mutableStateOf<Job?>(null) }
     var crossfadeTriggeredForTrackId by remember { mutableStateOf<Long?>(null) }
 
-    // Таймер неактивности: 2 часа (7200 секунд) на паузе -> полное закрытие приложения (killapp)
     LaunchedEffect(isPlaying, downloadingPlaylistTitle) {
         if (!isPlaying && downloadingPlaylistTitle == null) {
             delay(7200_000L)
@@ -408,7 +408,8 @@ fun MMPApp(
         }
     }
 
-    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L) {
+    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L, isRetry: Boolean = false) {
+        if (!isRetry) streamRetryCount = 0
         if (currentTrack?.id != track.id) {
             loopPointAMs = null
             loopPointBMs = null
@@ -442,11 +443,16 @@ fun MMPApp(
                 val finalUri = when {
                     rawUrl.startsWith("ytm://") -> {
                         val vid = rawUrl.removePrefix("ytm://")
-                        val resolved = YouTubeMusicClient.resolveAudioStreamUrl(vid)
+                        val resolved = YouTubeMusicClient.resolveAudioStreamUrl(
+                            vid,
+                            forceRefresh = isRetry,
+                            fallbackArtist = track.artist,
+                            fallbackTitle = track.title
+                        )
                         if (resolved != null) Uri.parse(resolved) else track.uri
                     }
                     rawUrl.contains("api-v2.soundcloud.com") -> {
-                        val resolved = SoundCloudClient.resolveStreamUrl(rawUrl)
+                        val resolved = SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = isRetry)
                         if (resolved != null) Uri.parse(resolved) else track.uri
                     }
                     else -> track.uri
@@ -533,19 +539,7 @@ fun MMPApp(
                 } else if (st == Player.STATE_IDLE || st == Player.STATE_ENDED) {
                     playTrack(cur, null, clamped)
                 }
-            } catch (_: Throwable) {
-                scope.launch {
-                    val rawUrl = cur.filePath.ifBlank { cur.uri.toString() }
-                    if (rawUrl.startsWith("ytm://")) {
-                        val vid = rawUrl.removePrefix("ytm://")
-                        val fresh = YouTubeMusicClient.resolveAudioStreamUrl(vid, forceRefresh = true)
-                        if (fresh != null) playTrack(cur.copy(uri = Uri.parse(fresh)), null, clamped)
-                    } else if (rawUrl.contains("api-v2.soundcloud.com")) {
-                        val fresh = SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = true)
-                        if (fresh != null) playTrack(cur.copy(uri = Uri.parse(fresh)), null, clamped)
-                    }
-                }
-            }
+            } catch (_: Throwable) {}
         } else {
             playTrack(cur, null, clamped)
         }
@@ -568,6 +562,7 @@ fun MMPApp(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY) {
                     isMediaPlayerPrepared = true
+                    streamRetryCount = 0
                     applySystemEqualizer(exoPlayer.audioSessionId)
                     currentTrack?.let { trk ->
                         val realDur = exoPlayer.duration
@@ -619,36 +614,24 @@ fun MMPApp(
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 isMediaPlayerPrepared = false
-                SoundCloudClient.clearCache()
-                YouTubeMusicClient.clearCache()
                 val cur = currentTrack
-                if (cur != null) {
-                    val rawUrl = cur.filePath.ifBlank { cur.uri.toString() }
-                    if (rawUrl.startsWith("ytm://")) {
-                        scope.launch {
-                            val vid = rawUrl.removePrefix("ytm://")
-                            val fresh = YouTubeMusicClient.resolveAudioStreamUrl(vid, forceRefresh = true)
-                            if (fresh != null) {
-                                val refreshed = cur.copy(uri = Uri.parse(fresh))
-                                currentTrack = refreshed
-                                playTrack(refreshed, null, currentPositionMs)
-                            }
-                        }
-                        return
-                    } else if (cur.folderName == "SoundCloud" || cur.uri.toString().contains("sndcdn")) {
-                        scope.launch {
-                            val fresh = SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = true)
-                            if (fresh != null) {
-                                val refreshed = cur.copy(uri = Uri.parse(fresh))
-                                currentTrack = refreshed
-                                playTrack(refreshed, null, currentPositionMs)
-                            }
-                        }
-                        return
-                    }
+                val isLocalOfflineFile = cur == null || cur.uri.scheme == "file" || cur.uri.scheme == "content"
+                if (isLocalOfflineFile) {
+                    isPlaying = false
+                    Toast.makeText(context, "Не удалось открыть локальный файл", Toast.LENGTH_SHORT).show()
+                    return
                 }
-                isPlaying = false
-                Toast.makeText(context, "Восстанавливаем поток...", Toast.LENGTH_SHORT).show()
+
+                // Для онлайн-потоков разрешаем максимум 1 попытку переподключения, чтобы не было бесконечного цикла лагов
+                if (streamRetryCount < 1 && cur != null) {
+                    streamRetryCount += 1
+                    SoundCloudClient.clearCache()
+                    YouTubeMusicClient.clearCache()
+                    playTrack(cur, null, currentPositionMs, isRetry = true)
+                } else {
+                    isPlaying = false
+                    Toast.makeText(context, "Поток недоступен", Toast.LENGTH_SHORT).show()
+                }
             }
         }
         exoPlayer.addListener(listener)
@@ -1035,9 +1018,13 @@ fun MMPApp(
                                     }
                                 },
                                 onPlayYtTrack = { ytTrack, allResults ->
-                                    Toast.makeText(context, "Загружаем поток YT Music...", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Подключаем трек...", Toast.LENGTH_SHORT).show()
                                     scope.launch {
-                                        val direct = YouTubeMusicClient.resolveAudioStreamUrl(ytTrack.videoId)
+                                        val direct = YouTubeMusicClient.resolveAudioStreamUrl(
+                                            ytTrack.videoId,
+                                            fallbackArtist = ytTrack.artist,
+                                            fallbackTitle = ytTrack.title
+                                        )
                                         if (direct != null) {
                                             val playable = YouTubeMusicClient.toTrack(ytTrack, direct)
                                             val queueTracks = allResults.map { item ->
@@ -1050,7 +1037,7 @@ fun MMPApp(
                                             }
                                             playTrack(playable, queueTracks.ifEmpty { listOf(playable) })
                                         } else {
-                                            Toast.makeText(context, "Не удалось получить аудиопоток YT Music", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Не удалось получить аудиопоток", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 },
@@ -1261,11 +1248,22 @@ fun MMPApp(
                 exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(260)) + fadeOut(tween(200))
             ) {
                 currentTrack?.let { activeTrack ->
+                    val qIdx = currentQueue.indexOfFirst { it.id == activeTrack.id }
                     FullScreenPlayerOverlay(
                         track = activeTrack,
                         metadata = currentMetadata,
                         isPlaying = isPlaying,
                         currentPosMs = currentPositionMs,
+                        queueIndex = qIdx,
+                        queueSize = currentQueue.size,
+                        playbackSpeed = playbackSpeed,
+                        playbackPitch = playbackPitch,
+                        onSpeedPitchChange = { spd, ptc ->
+                            playbackSpeed = spd
+                            playbackPitch = ptc
+                            prefs.edit().putFloat("saved_speed", spd).putFloat("saved_pitch", ptc).apply()
+                            try { exoPlayer.playbackParameters = PlaybackParameters(spd, ptc) } catch (_: Throwable) {}
+                        },
                         isShuffleEnabled = isShuffleEnabled,
                         repeatMode = repeatMode,
                         sleepTimerRemainingSec = sleepTimerRemainingSec,
