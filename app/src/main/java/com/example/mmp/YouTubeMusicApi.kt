@@ -12,7 +12,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 
 data class YtMusicTrack(
     val videoId: String,
@@ -246,7 +245,7 @@ object YouTubeMusicClient {
         }
         val vd = getVisitorData()
 
-        // 1. IOS клиент (отдаёт HLS или чистый m4a без poToken)
+        // 1. IOS клиент
         try {
             val payload = JSONObject().apply {
                 put("context", JSONObject().apply {
@@ -286,7 +285,7 @@ object YouTubeMusicClient {
             }
         } catch (_: Throwable) {}
 
-        // 2. ANDROID_VR клиент (чистый m4a itag 140)
+        // 2. ANDROID_VR клиент
         try {
             val vrUa = "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) Cronet/132.0.6808.3"
             val payload = JSONObject().apply {
@@ -321,7 +320,7 @@ object YouTubeMusicClient {
             }
         } catch (_: Throwable) {}
 
-        // 3. Умный Audio Bridge: если YouTube заблокировал IP, подтягиваем чистый поток через SoundCloud
+        // 3. Audio Bridge через SoundCloud fallback
         if (fallbackTitle.isNotBlank()) {
             try {
                 val query = "$fallbackArtist $fallbackTitle".trim()
@@ -332,10 +331,6 @@ object YouTubeMusicClient {
                     if (!resolvedSc.isNullOrBlank()) {
                         streamCache[videoId] = resolvedSc
                         return@withContext resolvedSc
-                    }
-                    if (url.isNotBlank() && mime.startsWith("audio/mp4") && bitrate >= bestMp4Bitrate) {
-                        bestMp4Bitrate = bitrate
-                        bestMp4Url = url
                     }
                 }
             } catch (_: Throwable) {}

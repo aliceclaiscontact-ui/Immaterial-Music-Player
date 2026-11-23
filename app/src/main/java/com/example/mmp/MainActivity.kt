@@ -249,7 +249,6 @@ fun MMPApp(
 
     var activePlayJob by remember { mutableStateOf<Job?>(null) }
     var activeMetaJob by remember { mutableStateOf<Job?>(null) }
-    var streamRetryCount by remember { mutableIntStateOf(0) }
     var streamRetryKey by remember { mutableStateOf<String?>(null) }
     var crossfadeTriggeredForTrackId by remember { mutableStateOf<Long?>(null) }
 
