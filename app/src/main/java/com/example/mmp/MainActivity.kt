@@ -43,11 +43,9 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -104,13 +102,10 @@ fun MMPApp(
     var savedScTracks by remember { mutableStateOf<List<Track>>(StorageHelper.loadSoundCloudTracks(prefs)) }
     var likedScTracks by remember {
         val rawLiked = prefs.getString("liked_sc_tracks_v1", null)
-        val likedIds = rawLiked
-            ?.split(",")
-            ?.mapNotNull { it.trim().toLongOrNull() }
-            ?.toSet()
-            ?: emptySet()
-        val initialList = StorageHelper.loadSoundCloudTracks(prefs).filter { track ->
-            track.id in likedIds
+        val initialList: List<Track> = if (rawLiked != null) {
+            StorageHelper.loadSoundCloudTracks(prefs).filter { trk -> rawLiked.contains(trk.id.toString()) }
+        } else {
+            emptyList()
         }
         mutableStateOf<List<Track>>(initialList)
     }
@@ -168,11 +163,8 @@ fun MMPApp(
         } catch (_: Throwable) {}
     }
 
-    var showAudioFxDialog by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(prefs.getFloat("saved_speed", 1.0f).coerceIn(0.5f, 3.0f)) }
     var playbackPitch by remember { mutableFloatStateOf(prefs.getFloat("saved_pitch", 1.0f).coerceIn(0.1f, 5.0f)) }
-    var bassBoostStrength by remember { mutableIntStateOf(prefs.getInt("saved_fx_bass", 0)) }
-    var reverbPreset by remember { mutableIntStateOf(prefs.getInt("saved_fx_reverb", 0)) }
 
     var minDurationSec by remember { mutableStateOf(StorageHelper.loadMinDurationSec(prefs)) }
     var excludedFolders by remember { mutableStateOf(StorageHelper.loadExcludedFolders(prefs)) }
@@ -189,21 +181,15 @@ fun MMPApp(
     var hasAudioPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasAudioPermission = granted
-        if (granted) scope.launch { delay(700); rawDeviceTracks = scanDeviceMusic(context) }
+        if (granted) scope.launch { delay(500); rawDeviceTracks = scanDeviceMusic(context) }
     }
 
     val exoPlayer = remember {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(YouTubeMusicClient.STREAM_USER_AGENT)
-            .setDefaultRequestProperties(
-                mapOf(
-                    "Accept" to "*/*",
-                    "Accept-Encoding" to "identity"
-                )
-            )
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(15000)
+            .setConnectTimeoutMs(12000)
+            .setReadTimeoutMs(12000)
         val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
@@ -249,7 +235,6 @@ fun MMPApp(
 
     var activePlayJob by remember { mutableStateOf<Job?>(null) }
     var activeMetaJob by remember { mutableStateOf<Job?>(null) }
-    var streamRetryKey by remember { mutableStateOf<String?>(null) }
     var crossfadeTriggeredForTrackId by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(isPlaying, downloadingPlaylistTitle) {
@@ -278,7 +263,7 @@ fun MMPApp(
             val eq = globalEqRef.value
             val bass = globalBassRef.value
             eq?.enabled = enabled
-            bass?.enabled = (enabled || bassBoostStrength > 0)
+            bass?.enabled = enabled
 
             if (enabled && eq != null) {
                 val range = eq.bandLevelRange
@@ -300,8 +285,7 @@ fun MMPApp(
             }
             if (bass != null && bass.strengthSupported) {
                 val prefBass = if (enabled) prefs.getInt("bass_boost_level", 0) * 10 else 0
-                val effectiveBass = maxOf(bassBoostStrength, prefBass)
-                bass.setStrength(effectiveBass.coerceIn(0, 1000).toShort())
+                bass.setStrength(prefBass.coerceIn(0, 1000).toShort())
             }
         } catch (_: Throwable) {}
     }
@@ -415,7 +399,7 @@ fun MMPApp(
                     Toast.makeText(context, "Текст сохранён для офлайн-доступа!", Toast.LENGTH_SHORT).show()
                 }
             } else if (showFeedback) {
-                Toast.makeText(context, "Текст в базе LRCLIB не найден", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Текст в базе не найден", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -470,12 +454,6 @@ fun MMPApp(
                     else -> track.uri
                 }
 
-                if (finalUri.scheme == "ytm" || finalUri.toString().contains("api-v2.soundcloud.com")) {
-                    throw IllegalStateException("UNRESOLVED_STREAM_URI")
-                }
-
-                isMediaPlayerPrepared = false
-                isPlaying = false
                 val mediaItem = MediaItem.fromUri(finalUri)
                 exoPlayer.setMediaItem(mediaItem, startOffsetMs.coerceAtLeast(0L))
                 exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
@@ -483,20 +461,15 @@ fun MMPApp(
                 val cfSec = prefs.getInt("crossfade_sec", 0)
                 exoPlayer.volume = if (cfSec > 0 && startOffsetMs == 0L) 0.15f else 1f
                 exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
-                syncMediaService(track, currentMetadata, false)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
+                exoPlayer.play()
+
+                isMediaPlayerPrepared = true
+                isPlaying = true
+                syncMediaService(track, currentMetadata, true)
             } catch (e: Throwable) {
                 isPlaying = false
                 isMediaPlayerPrepared = false
-                syncMediaService(track, currentMetadata, false)
-                val reason = when {
-                    e.message == "YT_STREAM_UNAVAILABLE" -> "Не удалось получить аудиопоток YouTube"
-                    e.message == "SC_STREAM_UNAVAILABLE" -> "Не удалось обновить аудиопоток SoundCloud"
-                    else -> "Ошибка воспроизведения: ${e.message ?: "неизвестная ошибка"}"
-                }
-                Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -645,7 +618,6 @@ fun MMPApp(
                     return
                 }
 
-                // Для онлайн-потоков разрешаем максимум 1 попытку переподключения, чтобы не было бесконечного цикла лагов
                 if (streamRetryCount < 1 && cur != null) {
                     streamRetryCount += 1
                     SoundCloudClient.clearCache()
@@ -723,7 +695,7 @@ fun MMPApp(
     }
 
     fun startMyWave5050() {
-        Toast.makeText(context, "Настраиваем «Мою волну 50/50»...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Настраиваем «Мою волну»...", Toast.LENGTH_SHORT).show()
         scope.launch {
             val localPool = if (deviceTracks.isNotEmpty()) deviceTracks.shuffled().take(10) else emptyList()
             val favoriteArtist = artistSecondsAllTime.maxByOrNull { it.value }?.key
@@ -782,7 +754,7 @@ fun MMPApp(
     LaunchedEffect(isPlaying, currentTrack, loopPointAMs, loopPointBMs) {
         var tickCounter = 0
         while (isPlaying && currentTrack != null) {
-            delay(200L)
+            delay(40L)
             if (isMediaPlayerPrepared && (try { exoPlayer.isPlaying } catch (_: Throwable) { false })) {
                 val trk = currentTrack ?: break
                 currentPositionMs = try { exoPlayer.currentPosition.coerceAtLeast(0L) } catch (_: Throwable) { currentPositionMs }
@@ -837,7 +809,7 @@ fun MMPApp(
                 } catch (_: Throwable) {}
 
                 tickCounter += 1
-                if (tickCounter >= 5) {
+                if (tickCounter >= 25) {
                     tickCounter = 0
                     listenedSecondsTotal += 1
                     currentTrackPlayedSeconds += 1
@@ -909,7 +881,7 @@ fun MMPApp(
     val surfaceColor = if (isLightMode) Color(0xFFE9E7F2) else Color(0xFF1A1A26)
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        uri?.let { context.contentResolver.openOutputStream(it)?.use { out -> out.write(themeConfig.toJson().toByteArray()) }; Toast.makeText(context, "Тема .mmpui сохранена!", Toast.LENGTH_SHORT).show() }
+        uri?.let { context.contentResolver.openOutputStream(it)?.use { out -> out.write(themeConfig.toJson().toByteArray()) }; Toast.makeText(context, "Тема сохранена!", Toast.LENGTH_SHORT).show() }
     }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
@@ -1073,7 +1045,7 @@ fun MMPApp(
                                         val file = YouTubeMusicClient.downloadTrackToDevice(context, ytTrack)
                                         if (file != null) {
                                             Toast.makeText(context, "Сохранено: ${file.name}", Toast.LENGTH_LONG).show()
-                                            delay(900)
+                                            delay(700)
                                             rawDeviceTracks = scanDeviceMusic(context)
                                         } else {
                                             Toast.makeText(context, "Ошибка скачивания", Toast.LENGTH_SHORT).show()
@@ -1125,7 +1097,6 @@ fun MMPApp(
                                 },
                                 onPlaySoundCloudTrack = { scTrack, allResults ->
                                     val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
-                                    Toast.makeText(context, "Подключаемся к SoundCloud...", Toast.LENGTH_SHORT).show()
                                     scope.launch {
                                         val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
                                         if (directUrl != null) {
@@ -1181,47 +1152,34 @@ fun MMPApp(
                                     downloadPlaylistTotal = scPl.trackCount
 
                                     val cleanPlName = scPl.title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().ifBlank { "Playlist_${scPl.id}" }
+                                    var createdPl = playlists.find { it.name == cleanPlName }
+                                    if (createdPl == null) {
+                                        createdPl = PlaylistItem(name = cleanPlName, coverUri = scPl.artworkUrl, trackIds = emptyList(), description = "SoundCloud: ${scPl.author}", trackFilePaths = emptyList())
+                                        playlists = playlists + createdPl
+                                        StorageHelper.savePlaylists(prefs, playlists)
+                                    }
+
                                     scope.launch {
                                         Toast.makeText(context, "Скачивание плейлиста началось...", Toast.LENGTH_SHORT).show()
-                                        val downloadedTracks = mutableListOf<Track>()
-                                        try {
-                                            val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { newTrk, cur, tot ->
-                                                withContext(Dispatchers.Main.immediate) {
-                                                    downloadedTracks.add(newTrk)
-                                                    downloadPlaylistCurrent = cur
-                                                    downloadPlaylistTotal = tot
-                                                }
+                                        val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { newTrk, cur, tot ->
+                                            downloadPlaylistCurrent = cur
+                                            downloadPlaylistTotal = tot
+                                            val currentList = StorageHelper.loadPlaylists(prefs)
+                                            val updated = currentList.map { pl ->
+                                                if (pl.name == cleanPlName) {
+                                                    val mergedIds = (pl.trackIds + newTrk.id).distinct()
+                                                    val mergedPaths = if (newTrk.filePath.isNotBlank()) (pl.trackFilePaths + newTrk.filePath).distinct() else pl.trackFilePaths
+                                                    pl.copy(trackIds = mergedIds, trackFilePaths = mergedPaths, coverUri = pl.coverUri ?: newTrk.customCoverUri)
+                                                } else pl
                                             }
-
-                                            val existing = playlists.firstOrNull { it.name == cleanPlName }
-                                            val target = existing ?: PlaylistItem(
-                                                name = cleanPlName,
-                                                coverUri = scPl.artworkUrl,
-                                                trackIds = emptyList(),
-                                                description = "SoundCloud: ${scPl.author}",
-                                                trackFilePaths = emptyList()
-                                            )
-                                            val mergedIds = (target.trackIds + downloadedTracks.map { it.id }).distinct()
-                                            val mergedPaths = (target.trackFilePaths + downloadedTracks.map { it.filePath })
-                                                .filter { it.isNotBlank() }.distinct()
-                                            val updatedPlaylist = target.copy(
-                                                trackIds = mergedIds,
-                                                trackFilePaths = mergedPaths,
-                                                coverUri = target.coverUri ?: downloadedTracks.firstOrNull()?.customCoverUri
-                                            )
-                                            val updatedPlaylists = (playlists.filterNot { it.name == cleanPlName } + updatedPlaylist)
-                                            playlists = updatedPlaylists
-                                            rawDeviceTracks = (rawDeviceTracks + downloadedTracks)
-                                                .distinctBy { it.filePath.ifBlank { it.id.toString() } }
-                                            withContext(Dispatchers.IO) {
-                                                StorageHelper.savePlaylists(prefs, updatedPlaylists)
-                                            }
-                                            Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
-                                        } catch (e: Throwable) {
-                                            Toast.makeText(context, "Ошибка скачивания плейлиста: ${e.message ?: "неизвестная ошибка"}", Toast.LENGTH_LONG).show()
-                                        } finally {
-                                            downloadingPlaylistTitle = null
+                                            playlists = updated
+                                            StorageHelper.savePlaylists(prefs, updated)
+                                            rawDeviceTracks = (rawDeviceTracks + newTrk).distinctBy { it.filePath.ifBlank { it.id.toString() } }
                                         }
+                                        downloadingPlaylistTitle = null
+                                        Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
+                                        delay(800)
+                                        rawDeviceTracks = scanDeviceMusic(context)
                                     }
                                 },
                                 downloadingPlaylistTitle = downloadingPlaylistTitle,
@@ -1330,7 +1288,6 @@ fun MMPApp(
                             trackToEditTags = activeTrack
                         },
                         onOpenSleepTimerClick = { showSleepTimerDialog = true },
-                        onOpenAudioFxClick = { showAudioFxDialog = true },
                         onDownloadCurrentScTrack = {
                             val rawFp = activeTrack.filePath
                             Toast.makeText(context, "Скачиваем трек...", Toast.LENGTH_SHORT).show()
@@ -1373,36 +1330,6 @@ fun MMPApp(
                         onPrev = { playPrevTrack() }
                     )
                 }
-            }
-
-            if (showAudioFxDialog) {
-                AudioFxDialog(
-                    playbackSpeed = playbackSpeed,
-                    playbackPitch = playbackPitch,
-                    bassBoostStrength = bassBoostStrength,
-                    reverbPreset = reverbPreset,
-                    cardShape = cardShape,
-                    primaryColor = primaryColor,
-                    textColor = textColor,
-                    surfaceColor = surfaceColor,
-                    onDismiss = { showAudioFxDialog = false },
-                    onApplyFx = { spd, ptc, bass, rev ->
-                        playbackSpeed = spd
-                        playbackPitch = ptc
-                        bassBoostStrength = bass
-                        reverbPreset = rev
-                        prefs.edit()
-                            .putFloat("saved_speed", spd)
-                            .putFloat("saved_pitch", ptc)
-                            .putInt("saved_fx_bass", bass)
-                            .putInt("saved_fx_reverb", rev)
-                            .apply()
-                        try {
-                            exoPlayer.playbackParameters = PlaybackParameters(spd, ptc)
-                            applySystemEqualizer(exoPlayer.audioSessionId)
-                        } catch (_: Throwable) {}
-                    }
-                )
             }
 
             if (showSleepTimerDialog) {

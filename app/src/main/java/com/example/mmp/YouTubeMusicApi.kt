@@ -22,9 +22,21 @@ data class YtMusicTrack(
 )
 
 object YouTubeMusicClient {
-    const val STREAM_USER_AGENT = "com.google.ios.youtube/20.11.6 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
+    const val STREAM_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/133.0.0.0 Safari/537.36"
     private val streamCache = mutableMapOf<String, String>()
     private var cachedVisitorData: String? = null
+
+    private val cobaltInstances = listOf(
+        "https://api.cobalt.tools/",
+        "https://cobalt-api.kwiatekmiki.com/",
+        "https://cobalt.canine.tools/"
+    )
+
+    private val pipedInstances = listOf(
+        "https://pipedapi.kavin.rocks",
+        "https://pipedapi.adminforge.de",
+        "https://api.piped.private.coffee"
+    )
 
     fun clearCache() {
         streamCache.clear()
@@ -36,9 +48,9 @@ object YouTubeMusicClient {
         try {
             val conn = (URL("https://music.youtube.com").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 8000
-                readTimeout = 8000
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36")
+                connectTimeout = 6000
+                readTimeout = 6000
+                setRequestProperty("User-Agent", STREAM_USER_AGENT)
             }
             val html = conn.inputStream.bufferedReader().use { it.readText() }
             val match = Regex(""""VISITOR_DATA":"([^"]+)"""").find(html)
@@ -53,28 +65,35 @@ object YouTubeMusicClient {
     private fun httpPostJson(
         urlStr: String,
         bodyJson: String,
-        clientId: String,
-        clientVersion: String,
-        userAgent: String,
-        visitorData: String? = null
+        extraHeaders: Map<String, String> = emptyMap()
     ): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 10000
-            readTimeout = 10000
+            connectTimeout = 9000
+            readTimeout = 9000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            setRequestProperty("User-Agent", userAgent)
-            setRequestProperty("X-YouTube-Client-Name", clientId)
-            setRequestProperty("X-YouTube-Client-Version", clientVersion)
-            if (!visitorData.isNullOrBlank()) {
-                setRequestProperty("X-Goog-Visitor-Id", visitorData)
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", STREAM_USER_AGENT)
+            for ((k, v) in extraHeaders) {
+                setRequestProperty(k, v)
             }
         }
         conn.outputStream.use { it.write(bodyJson.toByteArray(Charsets.UTF_8)) }
         if (conn.responseCode !in 200..299) {
-            throw IllegalStateException("YT_HTTP_${conn.responseCode}")
+            throw IllegalStateException("HTTP_${conn.responseCode}")
         }
+        return conn.inputStream.bufferedReader().use { it.readText() }
+    }
+
+    private fun httpGet(urlStr: String): String {
+        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 8000
+            readTimeout = 8000
+            setRequestProperty("User-Agent", STREAM_USER_AGENT)
+        }
+        if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP_${conn.responseCode}")
         return conn.inputStream.bufferedReader().use { it.readText() }
     }
 
@@ -97,10 +116,11 @@ object YouTubeMusicClient {
             val resp = httpPostJson(
                 "https://music.youtube.com/youtubei/v1/search?prettyPrint=false",
                 payload.toString(),
-                clientId = "67",
-                clientVersion = "1.20260101.01.00",
-                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
-                visitorData = vd
+                mapOf(
+                    "X-YouTube-Client-Name" to "67",
+                    "X-YouTube-Client-Version" to "1.20260101.01.00",
+                    "X-Goog-Visitor-Id" to vd
+                )
             )
             val parsed = parseInnerTubeSearch(resp)
             if (parsed.isNotEmpty()) return@withContext parsed.take(limit)
@@ -195,45 +215,6 @@ object YouTubeMusicClient {
         return YtMusicTrack(videoId, title, artist, bestThumb, durationMs)
     }
 
-    private fun checkUrlReachable(urlStr: String, userAgent: String): Boolean {
-        return try {
-            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                requestMethod = "HEAD"
-                connectTimeout = 4500
-                readTimeout = 4500
-                setRequestProperty("User-Agent", userAgent)
-            }
-            val code = conn.responseCode
-            conn.disconnect()
-            code in 200..299 || code == 206
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    private fun extractM4aFromPlayerJson(resp: String, preferHls: Boolean = false): String? {
-        val root = JSONObject(resp)
-        val streamingData = root.optJSONObject("streamingData") ?: return null
-        if (preferHls) {
-            val hls = streamingData.optString("hlsManifestUrl", "")
-            if (hls.isNotBlank()) return hls
-        }
-        val adaptive = streamingData.optJSONArray("adaptiveFormats") ?: return null
-        var bestM4aUrl: String? = null
-        var bestM4aBitrate = 0
-        for (i in 0 until adaptive.length()) {
-            val fmt = adaptive.optJSONObject(i) ?: continue
-            val mime = fmt.optString("mimeType", "")
-            val url = fmt.optString("url", "")
-            val bitrate = fmt.optInt("bitrate", 0)
-            if (url.isNotBlank() && mime.startsWith("audio/mp4") && bitrate >= bestM4aBitrate) {
-                bestM4aBitrate = bitrate
-                bestM4aUrl = url
-            }
-        }
-        return bestM4aUrl
-    }
-
     suspend fun resolveAudioStreamUrl(
         videoId: String,
         forceRefresh: Boolean = false,
@@ -243,84 +224,53 @@ object YouTubeMusicClient {
         if (!forceRefresh) {
             streamCache[videoId]?.let { return@withContext it }
         }
-        val vd = getVisitorData()
 
-        // 1. IOS клиент
-        try {
-            val payload = JSONObject().apply {
-                put("context", JSONObject().apply {
-                    put("client", JSONObject().apply {
-                        put("clientName", "IOS")
-                        put("clientVersion", "20.11.6")
-                        put("deviceMake", "Apple")
-                        put("deviceModel", "iPhone16,2")
-                        put("osName", "iOS")
-                        put("osVersion", "18.3.2.22D82")
-                        put("visitorData", vd)
-                        put("hl", "ru")
-                        put("gl", "US")
-                    })
-                })
-                put("videoId", videoId)
-                put("contentCheckOk", true)
-                put("racyCheckOk", true)
-            }
-            val resp = httpPostJson(
-                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-                payload.toString(),
-                clientId = "5",
-                clientVersion = "20.11.6",
-                userAgent = STREAM_USER_AGENT,
-                visitorData = vd
-            )
-            val m4a = extractM4aFromPlayerJson(resp, preferHls = false)
-            if (!m4a.isNullOrBlank() && checkUrlReachable(m4a, STREAM_USER_AGENT)) {
-                streamCache[videoId] = m4a
-                return@withContext m4a
-            }
-            val hls = extractM4aFromPlayerJson(resp, preferHls = true)
-            if (!hls.isNullOrBlank()) {
-                streamCache[videoId] = hls
-                return@withContext hls
-            }
-        } catch (_: Throwable) {}
+        // 1. Cobalt API (обходит poToken и отдает прямой туннель audio/mp3 или m4a)
+        for (cobaltUrl in cobaltInstances) {
+            try {
+                val body = JSONObject().apply {
+                    put("url", "https://music.youtube.com/watch?v=$videoId")
+                    put("downloadMode", "audio")
+                    put("audioFormat", "mp3")
+                }
+                val resp = httpPostJson(cobaltUrl, body.toString())
+                val root = JSONObject(resp)
+                val status = root.optString("status", "")
+                if (status == "tunnel" || status == "redirect") {
+                    val direct = root.optString("url", "")
+                    if (direct.isNotBlank()) {
+                        streamCache[videoId] = direct
+                        return@withContext direct
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
 
-        // 2. ANDROID_VR клиент
-        try {
-            val vrUa = "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) Cronet/132.0.6808.3"
-            val payload = JSONObject().apply {
-                put("context", JSONObject().apply {
-                    put("client", JSONObject().apply {
-                        put("clientName", "ANDROID_VR")
-                        put("clientVersion", "1.61.48")
-                        put("deviceMake", "Oculus")
-                        put("deviceModel", "Quest 3")
-                        put("androidSdkVersion", 32)
-                        put("visitorData", vd)
-                        put("hl", "ru")
-                        put("gl", "US")
-                    })
-                })
-                put("videoId", videoId)
-                put("contentCheckOk", true)
-                put("racyCheckOk", true)
-            }
-            val resp = httpPostJson(
-                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-                payload.toString(),
-                clientId = "28",
-                clientVersion = "1.61.48",
-                userAgent = vrUa,
-                visitorData = vd
-            )
-            val url = extractM4aFromPlayerJson(resp, preferHls = false)
-            if (!url.isNullOrBlank() && checkUrlReachable(url, STREAM_USER_AGENT)) {
-                streamCache[videoId] = url
-                return@withContext url
-            }
-        } catch (_: Throwable) {}
+        // 2. Piped API прокси-потоки
+        for (instance in pipedInstances) {
+            try {
+                val resp = httpGet("$instance/streams/$videoId")
+                val root = JSONObject(resp)
+                val audioStreams = root.optJSONArray("audioStreams") ?: continue
+                var bestUrl: String? = null
+                var bestBitrate = 0
+                for (i in 0 until audioStreams.length()) {
+                    val st = audioStreams.optJSONObject(i) ?: continue
+                    val url = st.optString("url", "")
+                    val bitrate = st.optInt("bitrate", 0)
+                    if (url.isNotBlank() && bitrate >= bestBitrate) {
+                        bestBitrate = bitrate
+                        bestUrl = url
+                    }
+                }
+                if (!bestUrl.isNullOrBlank()) {
+                    streamCache[videoId] = bestUrl
+                    return@withContext bestUrl
+                }
+            } catch (_: Throwable) {}
+        }
 
-        // 3. Audio Bridge через SoundCloud fallback
+        // 3. SoundCloud Audio Bridge (гарантированное воспроизведение трека по названию и артисту)
         if (fallbackTitle.isNotBlank()) {
             try {
                 val query = "$fallbackArtist $fallbackTitle".trim()
@@ -367,7 +317,7 @@ object YouTubeMusicClient {
             val cleanArtist = ytTrack.artist.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().take(30)
             val cleanTitle = ytTrack.title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().take(40)
             val fileName = "$cleanArtist - $cleanTitle".trim().ifBlank { "yt_${ytTrack.videoId}" }
-            val ext = if (streamUrl.contains(".mp3")) "mp3" else "m4a"
+            val ext = if (streamUrl.contains(".m4a")) "m4a" else "mp3"
             val outFile = File(baseDir, "$fileName.$ext")
 
             val conn = (URL(streamUrl).openConnection() as HttpURLConnection).apply {
@@ -387,7 +337,7 @@ object YouTubeMusicClient {
             MediaScannerConnection.scanFile(
                 context,
                 arrayOf(outFile.absolutePath),
-                arrayOf(if (ext == "mp3") "audio/mpeg" else "audio/mp4"),
+                arrayOf(if (ext == "m4a") "audio/mp4" else "audio/mpeg"),
                 null
             )
             outFile
@@ -404,7 +354,7 @@ object YouTubeMusicClient {
             artist = ytTrack.artist,
             album = "YouTube Music",
             durationMs = ytTrack.durationMs,
-            mimeType = "audio/mp4",
+            mimeType = "audio/mpeg",
             sizeBytes = 0L,
             filePath = "ytm://${ytTrack.videoId}",
             folderPath = "YouTube Music",

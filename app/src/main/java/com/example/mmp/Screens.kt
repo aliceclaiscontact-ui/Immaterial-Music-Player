@@ -182,7 +182,7 @@ fun AimpStyleOnboardingOverlay(
                     Text("Добро пожаловать в Imma3", color = textColor, fontSize = 24.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        "Модульный аудиоплеер с живой физикой Material Design 3 Expressive, эквалайзером, офлайн-текстами и стримингом без ограничений.",
+                        "Аудиоплеер с живой анимацией, эквалайзером, офлайн-текстами и стримингом без ограничений.",
                         color = textColor.copy(0.72f),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
@@ -203,13 +203,13 @@ fun AimpStyleOnboardingOverlay(
                         Text("• Двойной тап слева/справа обложки: перемотка ±10 сек", color = textColor.copy(0.85f), fontSize = 13.sp)
                         Text("• Двойной тап по центру обложки: Пауза / Плей", color = textColor.copy(0.85f), fontSize = 13.sp)
                         Text("• Тап по обложке: полноэкранный синхронный текст", color = textColor.copy(0.85f), fontSize = 13.sp)
-                        Text("• Кнопка 1x: быстрая настройка скорости и питча", color = textColor.copy(0.85f), fontSize = 13.sp)
+                        Text("• Кнопка 1x: быстрая настройка скорости, питча и пресетов", color = textColor.copy(0.85f), fontSize = 13.sp)
                     }
                 }
                 else -> {
                     Text("Выбери источник стриминга", color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Ты всегда сможешь переключить платформу в Настройках", color = textColor.copy(0.65f), fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Text("Платформу всегда можно сменить в Настройках", color = textColor.copy(0.65f), fontSize = 12.sp, textAlign = TextAlign.Center)
                     Spacer(modifier = Modifier.height(18.dp))
 
                     Row(
@@ -226,7 +226,7 @@ fun AimpStyleOnboardingOverlay(
                         Spacer(modifier = Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text("YouTube Music", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text("Полный каталог песен и ремиксов без подписки Go+", color = textColor.copy(0.65f), fontSize = 12.sp)
+                            Text("Полный каталог песен и ремиксов без подписки", color = textColor.copy(0.65f), fontSize = 12.sp)
                         }
                         RadioButton(
                             selected = selectedProvider == StreamingProvider.YOUTUBE_MUSIC,
@@ -466,8 +466,8 @@ fun HomeScreen(
                                     }
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column {
-                                        Text("Моя волна (50/50)", color = textColor, fontWeight = FontWeight.Black, fontSize = 16.sp)
-                                        Text("50% твоих треков + 50% ${activeStreamingProvider.title}", color = textColor.copy(0.65f), fontSize = 12.sp)
+                                        Text("Моя волна", color = textColor, fontWeight = FontWeight.Black, fontSize = 16.sp)
+                                        Text("Микс из твоих треков и ${activeStreamingProvider.title}", color = textColor.copy(0.65f), fontSize = 12.sp)
                                     }
                                 }
                                 Icon(Icons.Filled.PlayArrow, null, tint = primaryColor, modifier = Modifier.size(32.dp))
@@ -518,7 +518,7 @@ fun HomeScreen(
 
                     item {
                         Column {
-                            Text("Статистика артистов (> 25%)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = textColor)
+                            Text("Статистика артистов", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = textColor)
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 ExpressiveFilterPill("За этот год", selectedDateFilter == "ALL", primaryColor, textColor) { selectedDateFilter = "ALL" }
@@ -543,7 +543,7 @@ fun HomeScreen(
                         item {
                             Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
-                                    text = if (selectedDateFilter == "ALL") "Главные артисты (>25%)" else "Артисты за $selectedDateFilter (>25%)",
+                                    text = if (selectedDateFilter == "ALL") "Главные артисты" else "Артисты за $selectedDateFilter",
                                     fontSize = 13.sp, fontWeight = FontWeight.Bold, color = primaryColor
                                 )
                                 topArtistsOver25.forEach { (artist, pct) ->
@@ -554,10 +554,6 @@ fun HomeScreen(
                                     }
                                 }
                             }
-                        }
-                    } else if (totalArtistSec > 0) {
-                        item {
-                            Text("Ни один артист ещё не набрал более 25% от общего времени прослушивания.", color = textColor.copy(0.55f), fontSize = 13.sp)
                         }
                     }
 
@@ -669,7 +665,7 @@ fun YouTubeMusicScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onQueryChange,
-                    placeholder = { Text("Поиск песен в YouTube Music...", color = textColor.copy(0.5f), fontSize = 13.sp) },
+                    placeholder = { Text("Поиск песен...", color = textColor.copy(0.5f), fontSize = 13.sp) },
                     singleLine = true,
                     shape = cardShape,
                     modifier = Modifier.weight(1f)
@@ -688,7 +684,7 @@ fun YouTubeMusicScreen(
 
             if (searchResults.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Введи название трека или артиста (без ограничений подписки)", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
+                    Text("Введи название трека или артиста", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
@@ -730,7 +726,7 @@ fun YouTubeMusicScreen(
         } else {
             if (likedTracks.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Нажми ❤️ рядом с треком в YouTube Music, чтобы сохранить его сюда", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
+                    Text("Нажми ❤️ рядом с треком, чтобы сохранить его сюда", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
@@ -957,7 +953,7 @@ fun SoundCloudScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onQueryChange,
-                    placeholder = { Text(if (searchType == 0) "Поиск треков SoundCloud..." else "Поиск плейлистов...", color = textColor.copy(0.5f), fontSize = 13.sp) },
+                    placeholder = { Text(if (searchType == 0) "Поиск треков..." else "Поиск плейлистов...", color = textColor.copy(0.5f), fontSize = 13.sp) },
                     singleLine = true,
                     shape = cardShape,
                     modifier = Modifier.weight(1f)
@@ -1057,7 +1053,7 @@ fun SoundCloudScreen(
         } else {
             if (likedScTracks.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Нажми ❤️ рядом с треком в SoundCloud, чтобы сохранить его сюда", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
+                    Text("Нажми ❤️ рядом с треком, чтобы сохранить его сюда", color = textColor.copy(0.6f), textAlign = TextAlign.Center, fontSize = 14.sp)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
@@ -1782,7 +1778,6 @@ fun FullScreenPlayerOverlay(
     onAddToPlaylistClick: () -> Unit,
     onEditTagsClick: () -> Unit,
     onOpenSleepTimerClick: () -> Unit,
-    onOpenAudioFxClick: () -> Unit = {},
     onDownloadCurrentScTrack: () -> Unit = {},
     onSearchOnlineLyricsClick: (String?) -> Unit,
     onOpenQueueClick: () -> Unit,
@@ -1835,7 +1830,6 @@ fun FullScreenPlayerOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Верхняя панель (стрелка вниз, название контекста + Трек X из Y, меню ⋮)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1877,7 +1871,7 @@ fun FullScreenPlayerOverlay(
                         modifier = Modifier.background(surfaceColor)
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Повтор фрагмента (A-B Лупер)", color = textColor, fontWeight = FontWeight.SemiBold) },
+                            text = { Text("Повтор фрагмента", color = textColor, fontWeight = FontWeight.SemiBold) },
                             leadingIcon = { Icon(Icons.Filled.Loop, null, tint = primaryColor) },
                             onClick = { showMoreMenu = false; showAbLooperBar = !showAbLooperBar }
                         )
@@ -1890,12 +1884,7 @@ fun FullScreenPlayerOverlay(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Тюнинг звука (Bass / FX)", color = textColor, fontWeight = FontWeight.SemiBold) },
-                            leadingIcon = { Icon(Icons.Filled.GraphicEq, null, tint = primaryColor) },
-                            onClick = { showMoreMenu = false; onOpenAudioFxClick() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Таймер сна (до 120 мин)", color = textColor, fontWeight = FontWeight.SemiBold) },
+                            text = { Text("Таймер сна", color = textColor, fontWeight = FontWeight.SemiBold) },
                             leadingIcon = { Icon(Icons.Filled.Bedtime, null, tint = primaryColor) },
                             onClick = { showMoreMenu = false; onOpenSleepTimerClick() }
                         )
@@ -1925,7 +1914,6 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            // Обложка трека с жестами двойного тапа и свайпа вниз
             val targetScale = if (isPlaying) 1f else 0.94f
             val coverScale by animateFloatAsState(targetValue = targetScale, animationSpec = tween(250), label = "coverScale")
             var coverWidthPx by remember { mutableFloatStateOf(1f) }
@@ -1994,7 +1982,6 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            // Название, артист и кнопка "+" (вместо сердечка)
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2029,7 +2016,7 @@ fun FullScreenPlayerOverlay(
                     }
                 }
 
-                AnimatedVisibility(visible = showAbLooperBar) {
+                AnimatedVisibility(visible = showAbLooperBar || loopPointAMs != null || loopPointBMs != null) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2087,7 +2074,6 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            // Основные кнопки управления (как на скриншоте: морфинг Play/Pause + мягкие круги Prev/Next)
             val playCornerDp by animateDpAsState(targetValue = if (isPlaying) 24.dp else 44.dp, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "playMorph")
 
             Row(
@@ -2145,13 +2131,12 @@ fun FullScreenPlayerOverlay(
                 }
             }
 
-            // Нижний ряд: слева 1x (скорость/питч), справа спаренные Текст и Очередь
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val speedText = if (abs(playbackSpeed - 1.0f) < 0.05f) "1x" else String.format(Locale.US, "%.1fx", playbackSpeed)
+                val speedText = if (abs(playbackSpeed - 1.0f) < 0.05f && abs(playbackPitch - 1.0f) < 0.05f) "1x" else String.format(Locale.US, "%.1fx", playbackSpeed)
                 Box(
                     modifier = Modifier
                         .height(44.dp)
@@ -2202,7 +2187,6 @@ fun FullScreenPlayerOverlay(
             }
         }
 
-        // Всплывающее окно Скорость (0.5x - 3.0x) и Питч (0.1st - 5.0st) с шагом 0.1
         AnimatedVisibility(
             visible = showSpeedPitchPopup,
             enter = fadeIn(tween(180)) + slideInVertically(initialOffsetY = { it / 2 }),
@@ -2220,7 +2204,6 @@ fun FullScreenPlayerOverlay(
             )
         }
 
-        // Полноэкранный синхронный текст
         AnimatedVisibility(
             visible = showFullLyricsOverlay,
             enter = fadeIn(tween(260)) + slideInVertically(
@@ -2235,9 +2218,16 @@ fun FullScreenPlayerOverlay(
                 isPlaying = isPlaying,
                 currentPosMs = currentPosMs,
                 isSearchingOnlineLyrics = isSearchingOnlineLyrics,
+                loopPointAMs = loopPointAMs,
+                loopPointBMs = loopPointBMs,
+                onSetLoopRange = { a, b ->
+                    onSetLoopPointA(a)
+                    onSetLoopPointB(b)
+                },
                 primaryColor = primaryColor,
                 secondaryColor = secondaryColor,
                 bgColor = bgColor,
+                surfaceColor = surfaceColor,
                 onClose = { showFullLyricsOverlay = false },
                 onPlayPause = onPlayPause,
                 onNext = onNext,
@@ -2292,7 +2282,19 @@ fun SpeedPitchSheet(
                 }
             }
 
-            // Полоска скорости (0.5x - 3.0x) с - и + по бокам (шаг 0.1)
+            // Пресеты (перенесены сюда из троеточия)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                ExpressiveFilterPill("Обычный", abs(speed - 1.0f) < 0.05f && abs(pitch - 1.0f) < 0.05f, primaryColor, textColor) {
+                    onSpeedPitchChange(1.0f, 1.0f)
+                }
+                ExpressiveFilterPill("Slowed", abs(speed - 0.8f) < 0.05f && abs(pitch - 0.8f) < 0.05f, primaryColor, textColor) {
+                    onSpeedPitchChange(0.8f, 0.8f)
+                }
+                ExpressiveFilterPill("Nightcore", abs(speed - 1.2f) < 0.05f && abs(pitch - 1.2f) < 0.05f, primaryColor, textColor) {
+                    onSpeedPitchChange(1.2f, 1.2f)
+                }
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Скорость", color = textColor.copy(0.8f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -2321,7 +2323,6 @@ fun SpeedPitchSheet(
                 }
             }
 
-            // Полоска питча (0.1st - 5.0st) с - и + по бокам (шаг 0.1)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Питч", color = textColor.copy(0.8f), fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -2360,9 +2361,13 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
     isPlaying: Boolean,
     currentPosMs: Long,
     isSearchingOnlineLyrics: Boolean,
+    loopPointAMs: Long?,
+    loopPointBMs: Long?,
+    onSetLoopRange: (Long?, Long?) -> Unit,
     primaryColor: Color,
     secondaryColor: Color,
     bgColor: Color,
+    surfaceColor: Color,
     onClose: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -2377,11 +2382,13 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
         else lyricsList.indexOfLast { it.timeMs <= syncedPosMs }.coerceAtLeast(0)
     }
     val lyricListState = rememberLazyListState()
-    var showManualSearchField by remember { mutableStateOf(false) }
-    var manualQuery by remember(track.id) { mutableStateOf("${track.artist} ${track.title}") }
+    var showLyricsMenu by remember { mutableStateOf(false) }
+    var isLyricLoopSelectionMode by remember { mutableStateOf(false) }
+    var loopStartLineIdx by remember { mutableStateOf<Int?>(null) }
+    var loopEndLineIdx by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(activeLyricIndex) {
-        if (activeLyricIndex >= 0 && lyricsList.isNotEmpty()) {
+        if (activeLyricIndex >= 0 && lyricsList.isNotEmpty() && !isLyricLoopSelectionMode) {
             try {
                 val targetIdx = (activeLyricIndex - 1).coerceAtLeast(0)
                 lyricListState.animateScrollToItem(index = targetIdx, scrollOffset = 0)
@@ -2418,37 +2425,78 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Синхронный текст", color = Color.White.copy(0.9f), fontWeight = FontWeight.Black, fontSize = 16.sp)
-                }
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(0.14f))
                 ) {
                     Icon(Icons.Filled.KeyboardArrowDown, "Закрыть", tint = Color.White, modifier = Modifier.size(24.dp))
                 }
+
+                Text("Текст песни", color = Color.White.copy(0.92f), fontWeight = FontWeight.Black, fontSize = 16.sp)
+
+                Box {
+                    IconButton(
+                        onClick = { showLyricsMenu = true },
+                        modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(0.14f))
+                    ) {
+                        Icon(Icons.Filled.MoreVert, "Меню текста", tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    DropdownMenu(
+                        expanded = showLyricsMenu,
+                        onDismissRequest = { showLyricsMenu = false },
+                        modifier = Modifier.background(surfaceColor)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Лупер по тексту", color = Color.White, fontWeight = FontWeight.SemiBold) },
+                            leadingIcon = { Icon(Icons.Filled.Loop, null, tint = primaryColor) },
+                            onClick = {
+                                showLyricsMenu = false
+                                isLyricLoopSelectionMode = true
+                                loopStartLineIdx = null
+                                loopEndLineIdx = null
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Обновить текст", color = Color.White, fontWeight = FontWeight.SemiBold) },
+                            leadingIcon = { Icon(Icons.Filled.CloudDownload, null, tint = primaryColor) },
+                            onClick = {
+                                showLyricsMenu = false
+                                onSearchLyricsByQuery(null)
+                            }
+                        )
+                    }
+                }
             }
 
-            AnimatedVisibility(visible = showManualSearchField) {
+            // Баннер выбора строк для A-B лупера по тексту
+            AnimatedVisibility(visible = isLyricLoopSelectionMode || (loopPointAMs != null && loopPointBMs != null)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(primaryColor.copy(0.24f))
+                        .border(1.dp, primaryColor, RoundedCornerShape(16.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
-                        value = manualQuery,
-                        onValueChange = { manualQuery = it },
-                        placeholder = { Text("Артист и название трека...") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Button(
-                        onClick = { onSearchLyricsByQuery(manualQuery) },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                    val hintText = when {
+                        loopPointAMs != null && loopPointBMs != null -> "Цикл: ${formatMillis(loopPointAMs)} – ${formatMillis(loopPointBMs)}"
+                        loopStartLineIdx == null -> "Нажми на начальную строку фрагмента"
+                        else -> "Теперь нажми на конечную строку"
+                    }
+                    Text(hintText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            isLyricLoopSelectionMode = false
+                            loopStartLineIdx = null
+                            loopEndLineIdx = null
+                            onSetLoopRange(null, null)
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                     ) {
-                        Text("Найти", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Сбросить", color = primaryColor, fontWeight = FontWeight.Black, fontSize = 12.sp)
                     }
                 }
             }
@@ -2458,7 +2506,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = primaryColor)
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("Загружаем синхронный текст...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Загружаем текст...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                 } else if (lyricsList.isEmpty()) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
@@ -2473,7 +2521,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                         ) {
                             Icon(Icons.Filled.CloudDownload, null, tint = Color.Black, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Загрузить синхронный текст", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Найти текст", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
                     }
                 } else {
@@ -2490,27 +2538,57 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                             val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
                             val blurLyricsEnabled = remember { prefs.getBoolean("anim_lyrics_blur", false) }
 
+                            val isInSelectedLoop = (loopStartLineIdx != null && loopEndLineIdx != null && idx in loopStartLineIdx!!..loopEndLineIdx!!) ||
+                                (loopStartLineIdx == idx)
+
                             val rawAlpha = when {
+                                isInSelectedLoop -> 1f
                                 isCurrent -> 1f
                                 idx == activeLyricIndex - 1 -> 0.6f
                                 else -> (0.45f - distance * 0.08f).coerceIn(0.2f, 0.45f)
                             }
 
-                            val blurRadius = if (blurLyricsEnabled && !isCurrent) {
+                            val blurRadius = if (blurLyricsEnabled && !isCurrent && !isLyricLoopSelectionMode) {
                                 (distance * 1.0f).coerceAtMost(3.0f)
                             } else 0f
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onSeek(line.timeMs) }
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isInSelectedLoop) primaryColor.copy(0.28f) else Color.Transparent)
+                                    .clickable {
+                                        if (isLyricLoopSelectionMode) {
+                                            val startIdx = loopStartLineIdx
+                                            if (startIdx == null) {
+                                                loopStartLineIdx = idx
+                                                loopEndLineIdx = null
+                                            } else {
+                                                val fromIdx = minOf(startIdx, idx)
+                                                val toIdx = maxOf(startIdx, idx)
+                                                loopStartLineIdx = fromIdx
+                                                loopEndLineIdx = toIdx
+                                                val startTime = lyricsList[fromIdx].timeMs
+                                                val endTime = if (toIdx + 1 < lyricsList.size) {
+                                                    lyricsList[toIdx + 1].timeMs
+                                                } else {
+                                                    track.durationMs.coerceAtLeast(startTime + 2000L)
+                                                }
+                                                onSetLoopRange(startTime, endTime)
+                                                onSeek(startTime)
+                                                isLyricLoopSelectionMode = false
+                                            }
+                                        } else {
+                                            onSeek(line.timeMs)
+                                        }
+                                    }
                                     .let { mod ->
                                         if (blurRadius > 0.2f) mod.blur(blurRadius.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
                                         else mod
                                     }
-                                    .padding(vertical = 6.dp, horizontal = 8.dp)
+                                    .padding(vertical = 6.dp, horizontal = 10.dp)
                             ) {
-                                if (isCurrent && line.words.isNotEmpty()) {
+                                if (isCurrent && line.words.isNotEmpty() && !isLyricLoopSelectionMode) {
                                     val wordAnnotated = buildAnnotatedString {
                                         for (w in line.words) {
                                             val isWordActive = syncedPosMs >= w.timeMs
@@ -2533,9 +2611,9 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                                 } else {
                                     Text(
                                         text = line.text,
-                                        color = Color.White.copy(alpha = rawAlpha),
+                                        color = if (isInSelectedLoop) primaryColor else Color.White.copy(alpha = rawAlpha),
                                         fontSize = 22.sp,
-                                        fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                                        fontWeight = if (isCurrent || isInSelectedLoop) FontWeight.Black else FontWeight.Bold,
                                         lineHeight = 30.sp,
                                         modifier = Modifier.fillMaxWidth()
                                     )
@@ -2627,7 +2705,7 @@ fun CurvedSleepTimerDialog(
         title = { Text("Таймер сна", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("Проведи по дуге, чтобы выбрать время (максимум 120 минут)", color = textColor.copy(0.65f), fontSize = 12.sp, textAlign = TextAlign.Center)
+                Text("Проведи по дуге, чтобы выбрать время", color = textColor.copy(0.65f), fontSize = 12.sp, textAlign = TextAlign.Center)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Box(modifier = Modifier.size(220.dp), contentAlignment = Alignment.Center) {
@@ -2780,7 +2858,7 @@ fun SettingsAndThemeEditor(
                             border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
                         ) {
                             Text(
-                                "v1.3.0",
+                                "v1.4.0",
                                 color = primaryColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
@@ -2789,22 +2867,22 @@ fun SettingsAndThemeEditor(
                         }
                     } }
                     item {
-                        SettingsCategoryItem(Icons.Filled.CloudQueue, "Стриминг из интернета", "Активно: ${selectedStreamState.title} (YouTube Music / SoundCloud)", textColor, primaryColor) {
+                        SettingsCategoryItem(Icons.Filled.CloudQueue, "Стриминг из интернета", "Активно: ${selectedStreamState.title}", textColor, primaryColor) {
                             activeSettingsMenu = "STREAMING"
                         }
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и Темы", "Цвета, формы MD3 Expressive, светлая/тёмная/Adaptive тема", textColor, primaryColor) {
+                        SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и Темы", "Цвета, формы обложек, светлая и тёмная тема", textColor, primaryColor) {
                             activeSettingsMenu = "UI"
                         }
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.GraphicEq, "Звук", "5-полосный эквалайзер, пресеты, усиление баса и Crossfade", textColor, primaryColor) {
+                        SettingsCategoryItem(Icons.Filled.GraphicEq, "Звук", "5-полосный эквалайзер, усиление баса и плавный переход", textColor, primaryColor) {
                             activeSettingsMenu = "SOUND"
                         }
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.Animation, "Анимации", "Плавность интерфейса, волна плеера и оптимизация текста", textColor, primaryColor) {
+                        SettingsCategoryItem(Icons.Filled.Animation, "Анимации", "Волна прогресса и размытие неактивных строк текста", textColor, primaryColor) {
                             activeSettingsMenu = "ANIMATIONS"
                         }
                     }
@@ -2859,7 +2937,7 @@ fun SettingsAndThemeEditor(
                                 Spacer(modifier = Modifier.width(14.dp))
                                 Column {
                                     Text("YouTube Music", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Без ограничений подписки Go+", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                    Text("Каталог песен и ремиксов без подписки", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                             }
                             Switch(
@@ -2958,7 +3036,7 @@ fun SettingsAndThemeEditor(
                                 Text("Короче $minDurationSec сек", color = primaryColor, fontWeight = FontWeight.Black, fontSize = 14.sp)
                             }
                             Spacer(modifier = Modifier.height(6.dp))
-                            Text("Исключает голосовые сообщения, рингтоны и короткие сэмплы (от 5 до 60 сек)", color = textColor.copy(0.6f), fontSize = 12.sp)
+                            Text("Исключает голосовые сообщения, рингтоны и короткие сэмплы", color = textColor.copy(0.6f), fontSize = 12.sp)
                             Slider(
                                 value = minDurationSec.toFloat(),
                                 onValueChange = { onMinDurationChange(it.toInt()) },
@@ -3057,7 +3135,7 @@ fun SettingsAndThemeEditor(
                             Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(cardShape).background(surfaceColor).padding(16.dp)) {
                                 val previewColor = Color(customRed.toInt(), customGreen.toInt(), customBlue.toInt())
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Палитра RGB", color = textColor, fontWeight = FontWeight.Bold)
+                                    Text("Палитра", color = textColor, fontWeight = FontWeight.Bold)
                                     Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(previewColor))
                                 }
                                 Slider(value = customRed, onValueChange = { customRed = it }, valueRange = 40f..255f)
@@ -3077,7 +3155,7 @@ fun SettingsAndThemeEditor(
                         }
                     }
                     item {
-                        Text("Форма обложек и кнопок (MD3 Expressive)", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("Форма обложек и кнопок", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
                             items(ShapeStyle.entries) { style ->
                                 val isSelected = themeConfig.shapeStyle == style
@@ -3100,8 +3178,8 @@ fun SettingsAndThemeEditor(
                     }
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
-                            Button(onClick = onExport, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Экспорт .mmpui", color = Color.Black, fontWeight = FontWeight.Bold) }
-                            OutlinedButton(onClick = onImport, shape = RoundedCornerShape(50)) { Text("Импорт", color = textColor) }
+                            Button(onClick = onExport, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Экспорт темы", color = Color.Black, fontWeight = FontWeight.Bold) }
+                            OutlinedButton(onClick = onImport, shape = RoundedCornerShape(50)) { Text("Импорт темы", color = textColor) }
                         }
                     }
                 }
@@ -3139,7 +3217,7 @@ fun SettingsAndThemeEditor(
                         Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Плавное затухание (Crossfade)", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Плавное затухание", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                     Text("Плавный переход громкости при смене треков", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                                 Text(if (crossfadeSec.toInt() == 0) "Выкл" else "${crossfadeSec.toInt()} сек", color = primaryColor, fontWeight = FontWeight.Black, fontSize = 14.sp)
@@ -3160,7 +3238,7 @@ fun SettingsAndThemeEditor(
                         Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column {
-                                    Text("Системный 5-полосный эквалайзер", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("5-полосный эквалайзер", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                     Text("Обработка аудиопотока в реальном времени", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                                 Switch(
@@ -3176,16 +3254,16 @@ fun SettingsAndThemeEditor(
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 item { ExpressiveFilterPill("Flat", false, primaryColor, textColor) { saveEqBands(0f, 0f, 0f, 0f, 0f) } }
                                 item { ExpressiveFilterPill("Bass Boost", false, primaryColor, textColor) { saveEqBands(8f, 5f, 0f, 1f, 2f) } }
-                                item { ExpressiveFilterPill("Hyperpop / Club", false, primaryColor, textColor) { saveEqBands(7f, 3f, -2f, 5f, 8f) } }
+                                item { ExpressiveFilterPill("Hyperpop", false, primaryColor, textColor) { saveEqBands(7f, 3f, -2f, 5f, 8f) } }
                                 item { ExpressiveFilterPill("Vocal", false, primaryColor, textColor) { saveEqBands(-2f, 1f, 6f, 5f, 1f) } }
                             }
                             Spacer(modifier = Modifier.height(14.dp))
                             val bands = listOf(
-                                Triple("60 Гц (Суб-бас)", band60) { v: Float -> saveEqBands(v, band230, band910, band3600, band14000) },
-                                Triple("230 Гц (Низкие)", band230) { v: Float -> saveEqBands(band60, v, band910, band3600, band14000) },
-                                Triple("910 Гц (Средние)", band910) { v: Float -> saveEqBands(band60, band230, v, band3600, band14000) },
-                                Triple("3.6 кГц (Верхние СЧ)", band3600) { v: Float -> saveEqBands(band60, band230, band910, v, band14000) },
-                                Triple("14 кГц (Воздух / ВЧ)", band14000) { v: Float -> saveEqBands(band60, band230, band910, band3600, v) }
+                                Triple("60 Гц", band60) { v: Float -> saveEqBands(v, band230, band910, band3600, band14000) },
+                                Triple("230 Гц", band230) { v: Float -> saveEqBands(band60, v, band910, band3600, band14000) },
+                                Triple("910 Гц", band910) { v: Float -> saveEqBands(band60, band230, v, band3600, band14000) },
+                                Triple("3.6 кГц", band3600) { v: Float -> saveEqBands(band60, band230, band910, v, band14000) },
+                                Triple("14 кГц", band14000) { v: Float -> saveEqBands(band60, band230, band910, band3600, v) }
                             )
                             bands.forEach { (label, value, onChange) ->
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -3202,7 +3280,7 @@ fun SettingsAndThemeEditor(
                             }
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Усиление баса (Bass Boost)", color = textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Усиление баса", color = textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 Text("${bassBoostLevel.toInt()}%", color = primaryColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                             Slider(
@@ -3237,7 +3315,7 @@ fun SettingsAndThemeEditor(
                         Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Волна прогресс-бара (WavySlider)", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Волна прогресс-бара", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                     Text("Живая волна при воспроизведении и прямая линия на паузе", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                                 Switch(
@@ -3251,8 +3329,8 @@ fun SettingsAndThemeEditor(
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Эффект размытия (Blur) неактивных строк", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Шейдер размытия для GPU", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                    Text("Размытие неактивных строк текста", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Мягкий фокус на текущей строке песни", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                                 Switch(
                                     checked = blurLyricsEnabled,
@@ -3362,7 +3440,7 @@ fun EditTrackTagsDialog(
                 item { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Название трека") }, singleLine = true, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
                 item { OutlinedTextField(value = artist, onValueChange = { artist = it }, label = { Text("Исполнитель") }, singleLine = true, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
                 item { OutlinedTextField(value = album, onValueChange = { album = it }, label = { Text("Альбом") }, singleLine = true, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
-                item { OutlinedTextField(value = lyrics, onValueChange = { lyrics = it }, label = { Text("Текст песни или .lrc ([00:12.00]Строка)") }, minLines = 3, maxLines = 6, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(value = lyrics, onValueChange = { lyrics = it }, label = { Text("Текст песни") }, minLines = 3, maxLines = 6, shape = cardShape, modifier = Modifier.fillMaxWidth()) }
             }
         },
         confirmButton = {
@@ -3431,51 +3509,12 @@ fun FrostedDockBar(
 ) {
     val streamLabel = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) "YT Music" else "SoundCloud"
     val streamIcon = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) Icons.Filled.PlayCircleOutline else Icons.Filled.CloudQueue
-    val itemColors = NavigationBarItemDefaults.colors(
-        selectedIconColor = primaryColor,
-        selectedTextColor = primaryColor,
-        indicatorColor = primaryColor.copy(alpha = 0.18f),
-        unselectedIconColor = textColor.copy(alpha = 0.68f),
-        unselectedTextColor = textColor.copy(alpha = 0.68f)
-    )
 
-    NavigationBar(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .border(1.dp, textColor.copy(alpha = 0.12f), cardShape),
-        containerColor = surfaceColor.copy(alpha = 0.96f),
-        contentColor = textColor,
-        tonalElevation = 0.dp
-    ) {
-        NavigationBarItem(
-            selected = selectedTab == 0,
-            onClick = { onTabSelected(0) },
-            icon = { Icon(Icons.Filled.Home, contentDescription = "Главная") },
-            label = { Text("Главная", maxLines = 1) },
-            colors = itemColors
-        )
-        NavigationBarItem(
-            selected = selectedTab == 1,
-            onClick = { onTabSelected(1) },
-            icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Медиатека") },
-            label = { Text("Медиатека", maxLines = 1) },
-            colors = itemColors
-        )
-        NavigationBarItem(
-            selected = selectedTab == 2,
-            onClick = { onTabSelected(2) },
-            icon = { Icon(streamIcon, contentDescription = streamLabel) },
-            label = { Text(streamLabel, maxLines = 1) },
-            colors = itemColors
-        )
-        NavigationBarItem(
-            selected = false,
-            onClick = onCreateClick,
-            icon = { Icon(Icons.Filled.AddCircleOutline, contentDescription = "Создать") },
-            label = { Text("Создать", maxLines = 1) },
-            colors = itemColors
-        )
+    Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor.copy(0.95f)).border(1.dp, textColor.copy(0.12f), cardShape).padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+        DockVerticalItem(Icons.Filled.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
+        DockVerticalItem(Icons.Filled.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
+        DockVerticalItem(streamIcon, streamLabel, selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
+        DockVerticalItem(Icons.Filled.AddCircleOutline, "Создать", false, primaryColor, textColor, Modifier.weight(1f), onCreateClick)
     }
 }
 
@@ -3662,67 +3701,6 @@ fun CreatePlaylistDetailsDialog(cardShape: Shape, expressiveShape: Shape, primar
 }
 
 @Composable
-fun AudioFxDialog(
-    playbackSpeed: Float,
-    playbackPitch: Float,
-    bassBoostStrength: Int,
-    reverbPreset: Int,
-    cardShape: Shape,
-    primaryColor: Color,
-    textColor: Color,
-    surfaceColor: Color,
-    onDismiss: () -> Unit,
-    onApplyFx: (Float, Float, Int, Int) -> Unit
-) {
-    var speed by remember { mutableFloatStateOf(playbackSpeed) }
-    var pitch by remember { mutableFloatStateOf(playbackPitch) }
-    var bass by remember { mutableIntStateOf(bassBoostStrength) }
-    var reverb by remember { mutableIntStateOf(reverbPreset) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = cardShape,
-        containerColor = surfaceColor,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Filled.GraphicEq, null, tint = primaryColor)
-                Text("Тюнинг звука (ExoPlayer FX)", color = textColor, fontWeight = FontWeight.Black, fontSize = 18.sp)
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    ExpressiveFilterPill("Обычный", speed == 1f && pitch == 1f, primaryColor, textColor) {
-                        speed = 1.0f; pitch = 1.0f; onApplyFx(1.0f, 1.0f, bass, reverb)
-                    }
-                    ExpressiveFilterPill("Slowed", speed == 0.85f && pitch == 0.85f, primaryColor, textColor) {
-                        speed = 0.85f; pitch = 0.85f; onApplyFx(0.85f, 0.85f, bass, reverb)
-                    }
-                    ExpressiveFilterPill("Nightcore", speed == 1.2f && pitch == 1.2f, primaryColor, textColor) {
-                        speed = 1.2f; pitch = 1.2f; onApplyFx(1.2f, 1.2f, bass, reverb)
-                    }
-                }
-
-                Column {
-                    Text("Усиление баса (Bass Boost): ${(bass / 10)}%", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Slider(
-                        value = bass.toFloat(),
-                        onValueChange = { bass = it.toInt(); onApplyFx(speed, pitch, bass, reverb) },
-                        valueRange = 0f..1000f,
-                        colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) {
-                Text("Готово", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        }
-    )
-}
-
-@Composable
 fun WavySlider(
     value: Float,
     onSeekCommit: (Float) -> Unit,
@@ -3858,7 +3836,6 @@ fun WavySlider(
                 }
             }
 
-            // Вертикальный ползунок-палочка (как на скриншоте MD3)
             val thumbHalfH = if (isInteracting) 12.dp.toPx() else 9.dp.toPx()
             drawLine(
                 color = thumbColor,
