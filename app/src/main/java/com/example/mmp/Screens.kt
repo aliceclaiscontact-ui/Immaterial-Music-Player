@@ -2060,6 +2060,8 @@ fun FullScreenPlayerOverlay(
                 Spacer(modifier = Modifier.height(10.dp))
                 val safeDur = track.durationMs.coerceAtLeast(1L)
                 WavySlider(
+                    trackKey = track.id,
+                    durationMs = safeDur,
                     value = (currentPosMs.toFloat() / safeDur.toFloat()).coerceIn(0f, 1f),
                     onSeekCommit = { frac -> onSeek((frac * safeDur).toLong()) },
                     isPlaying = isPlaying,
@@ -2858,7 +2860,7 @@ fun SettingsAndThemeEditor(
                             border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
                         ) {
                             Text(
-                                "v1.4.0",
+                                "v1.5.0",
                                 color = primaryColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
@@ -3702,6 +3704,8 @@ fun CreatePlaylistDetailsDialog(cardShape: Shape, expressiveShape: Shape, primar
 
 @Composable
 fun WavySlider(
+    trackKey: Any = 0L,
+    durationMs: Long = 1L,
     value: Float,
     onSeekCommit: (Float) -> Unit,
     isPlaying: Boolean,
@@ -3733,13 +3737,13 @@ fun WavySlider(
         label = "waveAmp"
     )
 
-    var isInteracting by remember { mutableStateOf(false) }
-    var dragProgress by remember { mutableFloatStateOf(0f) }
-    var lastCommitTimeMs by remember { mutableLongStateOf(0L) }
+    var isInteracting by remember(trackKey) { mutableStateOf(false) }
+    var dragProgress by remember(trackKey) { mutableFloatStateOf(0f) }
+    var lastCommitTimeMs by remember(trackKey) { mutableLongStateOf(0L) }
     var sliderWidthPx by remember { mutableFloatStateOf(1f) }
 
     val now = SystemClock.elapsedRealtime()
-    val holdCommit = !isInteracting && (now - lastCommitTimeMs < 600L)
+    val holdCommit = !isInteracting && (now - lastCommitTimeMs < 2000L)
     val displayProgress = when {
         isInteracting || holdCommit -> dragProgress
         else -> value.coerceIn(0f, 1f)
@@ -3844,6 +3848,27 @@ fun WavySlider(
                 strokeWidth = if (isInteracting) 5.dp.toPx() else 4.dp.toPx(),
                 cap = StrokeCap.Round
             )
+        }
+
+        if (isInteracting && durationMs > 1000L) {
+            val previewMs = (displayProgress * durationMs).toLong()
+            val bubbleOffsetPx = (sliderWidthPx * displayProgress - 32.dp.toPx()).coerceIn(0f, (sliderWidthPx - 64.dp.toPx()).coerceAtLeast(0f))
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = with(androidx.compose.ui.platform.LocalDensity.current) { bubbleOffsetPx.toDp() }, y = (-34).dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(waveColor)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = formatMillis(previewMs),
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                    style = TextStyle(fontFeatureSettings = "tnum")
+                )
+            }
         }
     }
 }

@@ -29,13 +29,15 @@ object YouTubeMusicClient {
     private val cobaltInstances = listOf(
         "https://api.cobalt.tools/",
         "https://cobalt-api.kwiatekmiki.com/",
-        "https://cobalt.canine.tools/"
+        "https://cobalt.canine.tools/",
+        "https://capi.3kh0.net/"
     )
 
     private val pipedInstances = listOf(
         "https://pipedapi.kavin.rocks",
         "https://pipedapi.adminforge.de",
-        "https://api.piped.private.coffee"
+        "https://api.piped.private.coffee",
+        "https://pipedapi.smnz.de"
     )
 
     fun clearCache() {
@@ -48,8 +50,8 @@ object YouTubeMusicClient {
         try {
             val conn = (URL("https://music.youtube.com").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 6000
-                readTimeout = 6000
+                connectTimeout = 5000
+                readTimeout = 5000
                 setRequestProperty("User-Agent", STREAM_USER_AGENT)
             }
             val html = conn.inputStream.bufferedReader().use { it.readText() }
@@ -65,12 +67,13 @@ object YouTubeMusicClient {
     private fun httpPostJson(
         urlStr: String,
         bodyJson: String,
-        extraHeaders: Map<String, String> = emptyMap()
+        extraHeaders: Map<String, String> = emptyMap(),
+        timeoutMs: Int = 4500
     ): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 9000
-            readTimeout = 9000
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("Accept", "application/json")
@@ -86,11 +89,11 @@ object YouTubeMusicClient {
         return conn.inputStream.bufferedReader().use { it.readText() }
     }
 
-    private fun httpGet(urlStr: String): String {
+    private fun httpGet(urlStr: String, timeoutMs: Int = 4500): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 8000
-            readTimeout = 8000
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
             setRequestProperty("User-Agent", STREAM_USER_AGENT)
         }
         if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP_${conn.responseCode}")
@@ -120,7 +123,8 @@ object YouTubeMusicClient {
                     "X-YouTube-Client-Name" to "67",
                     "X-YouTube-Client-Version" to "1.20260101.01.00",
                     "X-Goog-Visitor-Id" to vd
-                )
+                ),
+                timeoutMs = 8000
             )
             val parsed = parseInnerTubeSearch(resp)
             if (parsed.isNotEmpty()) return@withContext parsed.take(limit)
@@ -225,7 +229,7 @@ object YouTubeMusicClient {
             streamCache[videoId]?.let { return@withContext it }
         }
 
-        // 1. Cobalt API (обходит poToken и отдает прямой туннель audio/mp3 или m4a)
+        // 1. Быстрый опрос Cobalt инстансов (4.5 сек таймаут)
         for (cobaltUrl in cobaltInstances) {
             try {
                 val body = JSONObject().apply {
@@ -233,7 +237,7 @@ object YouTubeMusicClient {
                     put("downloadMode", "audio")
                     put("audioFormat", "mp3")
                 }
-                val resp = httpPostJson(cobaltUrl, body.toString())
+                val resp = httpPostJson(cobaltUrl, body.toString(), timeoutMs = 4500)
                 val root = JSONObject(resp)
                 val status = root.optString("status", "")
                 if (status == "tunnel" || status == "redirect") {
@@ -246,10 +250,10 @@ object YouTubeMusicClient {
             } catch (_: Throwable) {}
         }
 
-        // 2. Piped API прокси-потоки
+        // 2. Быстрый опрос Piped инстансов
         for (instance in pipedInstances) {
             try {
-                val resp = httpGet("$instance/streams/$videoId")
+                val resp = httpGet("$instance/streams/$videoId", timeoutMs = 4500)
                 val root = JSONObject(resp)
                 val audioStreams = root.optJSONArray("audioStreams") ?: continue
                 var bestUrl: String? = null
@@ -270,17 +274,21 @@ object YouTubeMusicClient {
             } catch (_: Throwable) {}
         }
 
-        // 3. SoundCloud Audio Bridge (гарантированное воспроизведение трека по названию и артисту)
+        // 3. Надёжный SoundCloud Audio Bridge (если зеркала YouTube перегружены)
         if (fallbackTitle.isNotBlank()) {
             try {
-                val query = "$fallbackArtist $fallbackTitle".trim()
-                val scMatches = SoundCloudClient.searchTracks(query, limit = 6)
-                val best = scMatches.firstOrNull { it.streamProgressiveUrl != null }
-                if (best?.streamProgressiveUrl != null) {
-                    val resolvedSc = SoundCloudClient.resolveStreamUrl(best.streamProgressiveUrl)
-                    if (!resolvedSc.isNullOrBlank()) {
-                        streamCache[videoId] = resolvedSc
-                        return@withContext resolvedSc
+                val cleanTitle = fallbackTitle.replace(Regex("""\([^)]*\)"""), "").trim()
+                val queries = listOf("$fallbackArtist $cleanTitle".trim(), cleanTitle)
+                for (q in queries.distinct()) {
+                    if (q.isBlank()) continue
+                    val scMatches = SoundCloudClient.searchTracks(q, limit = 8)
+                    val best = scMatches.firstOrNull { it.streamProgressiveUrl != null }
+                    if (best?.streamProgressiveUrl != null) {
+                        val resolvedSc = SoundCloudClient.resolveStreamUrl(best.streamProgressiveUrl, forceRefresh = forceRefresh)
+                        if (!resolvedSc.isNullOrBlank()) {
+                            streamCache[videoId] = resolvedSc
+                            return@withContext resolvedSc
+                        }
                     }
                 }
             } catch (_: Throwable) {}
