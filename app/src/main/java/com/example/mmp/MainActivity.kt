@@ -622,7 +622,21 @@ fun MMPApp(
                     streamRetryCount += 1
                     SoundCloudClient.clearCache()
                     YouTubeMusicClient.clearCache()
-                    playTrack(cur, null, currentPositionMs, isRetry = true)
+                    if (cur.filePath.startsWith("ytm://")) {
+                        scope.launch {
+                            val cleanTitle = cur.title.replace(Regex("\([^)]*\)"), "").trim()
+                            val scMatches = SoundCloudClient.searchTracks("${cur.artist} $cleanTitle".trim(), limit = 5)
+                            val best = scMatches.firstOrNull { it.streamProgressiveUrl != null }
+                            val resolved = best?.streamProgressiveUrl?.let { SoundCloudClient.resolveStreamUrl(it, forceRefresh = true) }
+                            if (resolved != null) {
+                                playTrack(cur.copy(uri = Uri.parse(resolved), filePath = resolved), null, currentPositionMs, isRetry = true)
+                            } else {
+                                playTrack(cur, null, currentPositionMs, isRetry = true)
+                            }
+                        }
+                    } else {
+                        playTrack(cur, null, currentPositionMs, isRetry = true)
+                    }
                 } else {
                     isPlaying = false
                     Toast.makeText(context, "Поток недоступен", Toast.LENGTH_SHORT).show()
