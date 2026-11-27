@@ -26,6 +26,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1591,50 +1594,107 @@ fun LibraryScreen(
                             )
                         }
                     }
-                    1 -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(cardShape)
-                                    .background(primaryColor.copy(0.18f))
-                                    .border(1.5.dp, primaryColor, cardShape)
-                                    .clickable { onCreateNewPlaylistClick() }
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                    1 -> Column(modifier = Modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(cardShape)
+                                .background(primaryColor.copy(0.14f))
+                                .border(1.dp, primaryColor.copy(0.55f), cardShape)
+                                .clickable { onCreateNewPlaylistClick() }
+                                .padding(horizontal = 14.dp, vertical = 13.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier.size(42.dp).clip(CircleShape).background(primaryColor),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(modifier = Modifier.size(48.dp).clip(expressiveShape).background(primaryColor), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Filled.Add, "Создать", tint = Color.Black)
-                                }
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column {
-                                    Text("Создать плейлист", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Добавить свою обложку и описание", color = textColor.copy(0.65f), fontSize = 12.sp)
-                                }
+                                Icon(Icons.Filled.Add, "Создать", tint = Color.Black)
                             }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Новый плейлист", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("Своя музыка, свой порядок", color = textColor.copy(0.62f), fontSize = 11.sp)
+                            }
+                            Icon(Icons.Filled.ArrowForward, null, tint = primaryColor)
                         }
 
-                        if (filteredPlaylists.isEmpty() && searchQuery.isNotBlank()) {
-                            item {
-                                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                                    Text("Ничего не найдено", color = textColor.copy(0.6f))
-                                }
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("ТВОЯ КОЛЛЕКЦИЯ", color = primaryColor, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.4.sp)
+                                Text("${filteredPlaylists.size} плейлистов", color = textColor.copy(0.58f), fontSize = 12.sp)
                             }
+                            Icon(Icons.Filled.GridView, null, tint = textColor.copy(0.5f), modifier = Modifier.size(20.dp))
                         }
 
-                        items(filteredPlaylists) { pl ->
-                            val plCount = resolvePlaylistTracks(pl, tracks).size
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedPlaylist(pl) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                PlaylistThumb(pl, tracks, expressiveShape, primaryColor, 54)
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(pl.name, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Треков: $plCount", color = textColor.copy(0.6f), fontSize = 12.sp)
+                        if (filteredPlaylists.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    if (searchQuery.isNotBlank()) "Ничего не найдено" else "Пока нет плейлистов. Создай первый!",
+                                    color = textColor.copy(0.6f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(bottom = 140.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(18.dp)
+                            ) {
+                                items(filteredPlaylists, key = { it.name }) { pl ->
+                                    val plCount = remember(pl, tracks) { resolvePlaylistTracks(pl, tracks).size }
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .clickable { onSetOpenedPlaylist(pl) }
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(1f)
+                                                .clip(RoundedCornerShape(18.dp))
+                                                .background(surfaceColor)
+                                        ) {
+                                            PlaylistThumb(pl, tracks, expressiveShape, primaryColor, 148)
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(7.dp)
+                                                    .size(34.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.Black.copy(0.48f))
+                                                    .clickable { onEditPlaylist(pl) },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(Icons.Filled.MoreVert, "Изменить плейлист", tint = Color.White, modifier = Modifier.size(19.dp))
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(9.dp))
+                                        Text(
+                                            pl.name,
+                                            color = textColor,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            "$plCount треков",
+                                            color = textColor.copy(0.58f),
+                                            fontSize = 12.sp,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
-                                IconButton(onClick = { onEditPlaylist(pl) }) {
-                                    Icon(Icons.Filled.Edit, "Изменить", tint = primaryColor, modifier = Modifier.size(20.dp))
-                                }
-                                Icon(Icons.Filled.ChevronRight, null, tint = textColor.copy(0.5f))
                             }
                         }
                     }
@@ -2411,14 +2471,12 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
     }
     val lyricListState = rememberLazyListState()
     var showLyricsMenu by remember { mutableStateOf(false) }
-    var isLyricsExpanded by remember { mutableStateOf(false) }
+    var isLyricsExpanded by remember { mutableStateOf(true) }
     var isLyricLoopSelectionMode by remember { mutableStateOf(false) }
     var loopStartLineIdx by remember { mutableStateOf<Int?>(null) }
     var loopEndLineIdx by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(track.id) {
-        isLyricsExpanded = false
-        delay(5000L)
         isLyricsExpanded = true
     }
 
