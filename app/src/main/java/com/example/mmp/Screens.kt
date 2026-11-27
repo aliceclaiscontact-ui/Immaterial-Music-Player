@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.Collator
@@ -1116,7 +1118,9 @@ fun CleanHeaderLayout(
     onTogglePlay: () -> Unit,
     onToggleShuffle: () -> Unit,
     onAddTrackToPlaylistClick: (Track) -> Unit,
-    onAddMultipleTracksToPlaylist: (List<Track>) -> Unit
+    onAddMultipleTracksToPlaylist: (List<Track>) -> Unit,
+    onOpenPlaylistTrackPicker: (() -> Unit)? = null,
+    onToggleTrackInPlaylist: ((Track) -> Unit)? = null
 ) {
     BackHandler { onBack() }
     val context = LocalContext.current
@@ -1163,7 +1167,7 @@ fun CleanHeaderLayout(
                             Text(if (isContextPlaying) "Пауза" else "Играть", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
                     }
-                    Box(modifier = Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(surfaceColor).clickable { if (tracks.isNotEmpty()) onAddMultipleTracksToPlaylist(tracks) }, contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(surfaceColor).clickable { if (onOpenPlaylistTrackPicker != null) onOpenPlaylistTrackPicker() else if (tracks.isNotEmpty()) onAddMultipleTracksToPlaylist(tracks) }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Filled.Add, "Добавить треки в плейлист", tint = textColor, modifier = Modifier.size(25.dp))
                     }
                 }
@@ -1174,7 +1178,7 @@ fun CleanHeaderLayout(
         } else {
             items(tracks, key = { it.id }) { track ->
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    TrackListItem(track, RoundedCornerShape(16.dp), expressiveShape, primaryColor, textColor, surfaceColor, null, true, false, false, { onAddTrackToPlaylistClick(track) }, {}) { onPlayContext(tracks, track) }
+                    TrackListItem(track, RoundedCornerShape(16.dp), expressiveShape, primaryColor, textColor, surfaceColor, null, true, false, false, true, { (onToggleTrackInPlaylist ?: onAddTrackToPlaylistClick)(track) }, {}) { onPlayContext(tracks, track) }
                 }
             }
         }
@@ -1230,8 +1234,7 @@ fun AppleMusicArtistScreen(
                     Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
                         val validHero = heroBitmap?.takeIf { !it.isRecycled }
                         if (validHero != null) {
-                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(24.dp), alpha = 0.55f)
-                            Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp), alpha = 0.4f)
                         } else Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(90.dp))
                     }
                     Spacer(modifier = Modifier.height(20.dp))
@@ -1377,6 +1380,8 @@ fun LibraryScreen(
     onToggleShuffle: () -> Unit,
     onAddTrackToPlaylistClick: (Track) -> Unit,
     onAddMultipleTracksToPlaylist: (List<Track>) -> Unit,
+    onOpenPlaylistTrackPicker: (PlaylistItem) -> Unit,
+    onToggleTrackInPlaylist: (PlaylistItem, Track) -> Unit,
     onSetOpenedPlaylist: (PlaylistItem?) -> Unit,
     onSetOpenedArtist: (String?) -> Unit,
     onSetOpenedAlbum: (String?) -> Unit,
@@ -1404,7 +1409,7 @@ fun LibraryScreen(
     if (openedPlaylist != null) {
         val currentPl = playlists.find { it.name == openedPlaylist.name } ?: openedPlaylist
         val plTracks = remember(currentPl, tracks) { resolvePlaylistTracks(currentPl, tracks) }
-        CleanHeaderLayout(currentPl.name, if (currentPl.description.isNotBlank()) currentPl.description else "Плейлист • ${plTracks.size} треков", plTracks, currentPl.coverUri, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedPlaylist(null) }, { onEditPlaylist(currentPl) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick, onAddMultipleTracksToPlaylist)
+        CleanHeaderLayout(currentPl.name, if (currentPl.description.isNotBlank()) currentPl.description else "Плейлист • ${plTracks.size} треков", plTracks, currentPl.coverUri, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedPlaylist(null) }, { onEditPlaylist(currentPl) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick, onAddMultipleTracksToPlaylist, { onOpenPlaylistTrackPicker(currentPl) }, { onToggleTrackInPlaylist(currentPl, it) })
         return
     }
 
@@ -3597,43 +3602,68 @@ fun EditTrackTagsDialog(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QueueManagementSheet(
-    queue: List<Track>,
-    currentTrack: Track?,
-    cardShape: Shape,
-    primaryColor: Color,
-    textColor: Color,
-    surfaceColor: Color,
-    onDismiss: () -> Unit,
-    onSelectTrack: (Track) -> Unit,
-    onMoveTrack: (Int, Int) -> Unit,
-    onRemoveTrack: (Int) -> Unit
+    queue: List<Track>, currentTrack: Track?, cardShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color,
+    onDismiss: () -> Unit, onSelectTrack: (Track) -> Unit, onMoveTrack: (Int, Int) -> Unit, onRemoveTrack: (Int) -> Unit
 ) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.6f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(20.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Очередь воспроизведения (${queue.size})", color = textColor, fontWeight = FontWeight.Black, fontSize = 18.sp)
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var draggingId by remember { mutableStateOf<Long?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
+    BackHandler { onDismiss() }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
+        Column(Modifier.fillMaxWidth().padding(10.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(16.dp).heightIn(min = 320.dp, max = 690.dp)) {
+            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.28f)).align(Alignment.CenterHorizontally))
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("Очередь", color = textColor, fontWeight = FontWeight.Black, fontSize = 21.sp)
+                    Text("${queue.size} треков • удерживай и перетаскивай", color = textColor.copy(0.58f), fontSize = 12.sp)
+                }
                 IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, null, tint = textColor) }
             }
-            Spacer(modifier = Modifier.height(10.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 360.dp)) {
-                itemsIndexed(queue) { index, trk ->
-                    val isCurrent = currentTrack?.id == trk.id
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (isCurrent) primaryColor.copy(0.2f) else textColor.copy(0.05f)).clickable { onSelectTrack(trk) }.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(trk.title, color = if (isCurrent) primaryColor else textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(trk.artist, color = textColor.copy(0.6f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(10.dp))
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, verticalArrangement = Arrangement.spacedBy(7.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
+                itemsIndexed(queue, key = { _, t -> t.id }) { index, trk ->
+                    val current = currentTrack?.id == trk.id
+                    val dragging = draggingId == trk.id
+                    Row(Modifier.fillMaxWidth().zIndex(if (dragging) 1f else 0f).graphicsLayer {
+                        translationY = if (dragging) dragOffset else 0f
+                        scaleX = if (dragging) 1.02f else 1f
+                        scaleY = if (dragging) 1.02f else 1f
+                        shadowElevation = if (dragging) 12.dp.toPx() else 0f
+                    }.clip(RoundedCornerShape(16.dp)).background(if (current) primaryColor.copy(0.16f) else textColor.copy(0.045f)).clickable { onSelectTrack(trk) }.padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TrackCoverThumb(trk, RoundedCornerShape(10.dp), primaryColor, 44)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(trk.title, color = if (current) primaryColor else textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${trk.artist} • ${formatMillis(trk.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Row {
-                            if (index > 0) IconButton(onClick = { onMoveTrack(index, index - 1) }, modifier = Modifier.size(30.dp)) { Icon(Icons.Filled.KeyboardArrowUp, null, tint = textColor.copy(0.75f)) }
-                            if (index < queue.size - 1) IconButton(onClick = { onMoveTrack(index, index + 1) }, modifier = Modifier.size(30.dp)) { Icon(Icons.Filled.KeyboardArrowDown, null, tint = textColor.copy(0.75f)) }
-                            IconButton(onClick = { onRemoveTrack(index) }, modifier = Modifier.size(30.dp)) { Icon(Icons.Filled.DeleteOutline, null, tint = textColor.copy(0.6f), modifier = Modifier.size(18.dp)) }
-                        }
+                        IconButton(onClick = { onRemoveTrack(index) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, null, tint = textColor.copy(0.55f), modifier = Modifier.size(18.dp)) }
+                        Box(Modifier.size(36.dp).pointerInput(queue, trk.id) {
+                            detectDragGestures(
+                                onDragStart = { draggingId = trk.id; dragOffset = 0f },
+                                onDragEnd = { draggingId = null; dragOffset = 0f },
+                                onDragCancel = { draggingId = null; dragOffset = 0f },
+                                onDrag = { change, delta ->
+                                    change.consume()
+                                    dragOffset += delta.y
+                                    val info = listState.layoutInfo
+                                    val dragged = info.visibleItemsInfo.firstOrNull { it.key == trk.id } ?: return@detectDragGestures
+                                    val center = dragged.offset + dragged.size / 2 + dragOffset
+                                    val target = info.visibleItemsInfo.firstOrNull { center >= it.offset && center <= it.offset + it.size }
+                                    if (target != null && target.index != index) {
+                                        onMoveTrack(index, target.index)
+                                        dragOffset = 0f
+                                    }
+                                    if (center < info.viewportStartOffset + edge) scope.launch { listState.scrollBy(-22f) }
+                                    else if (center > info.viewportEndOffset - edge) scope.launch { listState.scrollBy(22f) }
+                                }
+                            )
+                        }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.DragIndicator, "Перетащить", tint = primaryColor, modifier = Modifier.size(21.dp)) }
                     }
                 }
             }
@@ -3692,6 +3722,7 @@ fun TrackListItem(
     showCoverThumb: Boolean = true,
     isSelected: Boolean = false,
     isSelectionMode: Boolean = false,
+    isInPlaylist: Boolean = false,
     onAddToPlaylist: (() -> Unit)? = null,
     onLongClick: () -> Unit = {},
     onClick: () -> Unit
@@ -3729,7 +3760,7 @@ fun TrackListItem(
         Spacer(modifier = Modifier.width(8.dp))
         if (!isSelectionMode && onAddToPlaylist != null) {
             IconButton(onClick = onAddToPlaylist, modifier = Modifier.size(36.dp).clip(CircleShape)) {
-                Icon(Icons.Filled.Add, null, tint = primaryColor, modifier = Modifier.size(22.dp))
+                Icon(if (isInPlaylist) Icons.Filled.Check else Icons.Filled.Add, null, tint = if (isInPlaylist) Color(0xFF42C878) else primaryColor, modifier = Modifier.size(22.dp))
             }
         }
     }
@@ -3797,6 +3828,50 @@ fun AddToPlaylistSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun PlaylistTrackPickerSheet(
+    playlist: PlaylistItem, allTracks: List<Track>, currentTracks: List<Track>,
+    cardShape: Shape, expressiveShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color,
+    onDismiss: () -> Unit, onToggleTrack: (Track) -> Unit
+) {
+    var query by remember(playlist.name) { mutableStateOf("") }
+    val selectedIds = remember(currentTracks) { currentTracks.map { it.id }.toSet() }
+    val filtered = remember(allTracks, query) { if (query.isBlank()) allTracks else allTracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.contains(query, true) } }
+    BackHandler { onDismiss() }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
+        Column(Modifier.fillMaxWidth().padding(12.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(18.dp).heightIn(min = 360.dp, max = 680.dp)) {
+            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.28f)).align(Alignment.CenterHorizontally))
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Добавить треки", color = textColor, fontSize = 21.sp, fontWeight = FontWeight.Black)
+                    Text("В плейлист «${playlist.name}»", color = textColor.copy(0.62f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, null, tint = textColor) }
+            }
+            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Поиск по медиатеке") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = primaryColor) }, shape = RoundedCornerShape(18.dp))
+            Spacer(Modifier.height(8.dp))
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(filtered, key = { it.id }) { track ->
+                    val added = selectedIds.contains(track.id)
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(if (added) primaryColor.copy(0.10f) else textColor.copy(0.04f)).clickable { onToggleTrack(track) }.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TrackCoverThumb(track, expressiveShape, primaryColor, 44)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(track.title, color = textColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${track.artist} • ${formatMillis(track.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onToggleTrack(track) }, modifier = Modifier.size(40.dp).clip(CircleShape).background(if (added) Color(0xFF42C878).copy(0.15f) else primaryColor.copy(0.12f))) {
+                            Icon(if (added) Icons.Filled.Check else Icons.Filled.Add, null, tint = if (added) Color(0xFF42C878) else primaryColor)
+                        }
+                    }
+                }
+            }
+            Text("${selectedIds.size} треков в плейлисте", color = textColor.copy(0.58f), fontSize = 11.sp)
         }
     }
 }

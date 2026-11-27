@@ -889,6 +889,7 @@ fun MMPApp(
     var showCreateStep2Dialog by remember { mutableStateOf(false) }
     var pendingPlaylistCoverUri by remember { mutableStateOf<String?>(null) }
     var tracksToAddToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var playlistTrackPickerTarget by remember { mutableStateOf<PlaylistItem?>(null) }
     var playlistToEdit by remember { mutableStateOf<PlaylistItem?>(null) }
 
     val coverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -1020,6 +1021,19 @@ fun MMPApp(
                             onToggleShuffle = { toggleShuffle() },
                             onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
                             onAddMultipleTracksToPlaylist = { tracksToAddToPlaylist = it },
+                            onOpenPlaylistTrackPicker = { playlistTrackPickerTarget = it },
+                            onToggleTrackInPlaylist = { target, track ->
+                                val updated = playlists.map { pl ->
+                                    if (pl.name != target.name) pl else {
+                                        val exists = pl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && pl.trackFilePaths.contains(track.filePath))
+                                        val ids = if (exists) pl.trackIds - track.id else (pl.trackIds + track.id).distinct()
+                                        val paths = if (exists) pl.trackFilePaths - track.filePath else if (track.filePath.isNotBlank()) (pl.trackFilePaths + track.filePath).distinct() else pl.trackFilePaths
+                                        pl.copy(trackIds = ids, trackFilePaths = paths)
+                                    }
+                                }
+                                playlists = updated
+                                StorageHelper.savePlaylists(prefs, updated)
+                            },
                             onSetOpenedPlaylist = { openedPlaylist = it },
                             onSetOpenedArtist = { openedArtist = it },
                             onSetOpenedAlbum = { openedAlbum = it },
@@ -1401,7 +1415,11 @@ fun MMPApp(
                 )
             }
 
-            if (showQueueSheet) {
+            AnimatedVisibility(
+                visible = showQueueSheet,
+                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 3 }, animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy)),
+                exit = fadeOut(tween(170)) + slideOutVertically(targetOffsetY = { it / 3 })
+            ) {
                 QueueManagementSheet(
                     queue = currentQueue,
                     currentTrack = currentTrack,
@@ -1483,6 +1501,35 @@ fun MMPApp(
                         Toast.makeText(context, "Плейлист обновлён!", Toast.LENGTH_SHORT).show()
                     }
                 )
+            }
+
+            AnimatedVisibility(
+                visible = playlistTrackPickerTarget != null,
+                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 3 }, animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy)),
+                exit = fadeOut(tween(170)) + slideOutVertically(targetOffsetY = { it / 3 })
+            ) {
+                playlistTrackPickerTarget?.let { target ->
+                    PlaylistTrackPickerSheet(
+                        playlist = playlists.find { it.name == target.name } ?: target,
+                        allTracks = allMergedTracks,
+                        currentTracks = resolvePlaylistTracks(playlists.find { it.name == target.name } ?: target, allMergedTracks),
+                        cardShape = cardShape, expressiveShape = expressiveShape, primaryColor = primaryColor,
+                        textColor = textColor, surfaceColor = surfaceColor,
+                        onDismiss = { playlistTrackPickerTarget = null },
+                        onToggleTrack = { track ->
+                            val updated = playlists.map { pl ->
+                                if (pl.name != target.name) pl else {
+                                    val exists = pl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && pl.trackFilePaths.contains(track.filePath))
+                                    val ids = if (exists) pl.trackIds - track.id else (pl.trackIds + track.id).distinct()
+                                    val paths = if (exists) pl.trackFilePaths - track.filePath else if (track.filePath.isNotBlank()) (pl.trackFilePaths + track.filePath).distinct() else pl.trackFilePaths
+                                    pl.copy(trackIds = ids, trackFilePaths = paths)
+                                }
+                            }
+                            playlists = updated
+                            StorageHelper.savePlaylists(prefs, updated)
+                        }
+                    )
+                }
             }
 
             AnimatedVisibility(
