@@ -340,7 +340,7 @@ fun PlaylistGridCover(tracks: List<Track>, primaryColor: Color, sizeDp: Int = 54
 }
 
 @Composable
-fun PlaylistThumb(playlist: PlaylistItem, allTracks: List<Track>, expressiveShape: Shape, primaryColor: Color, sizeDp: Int = 48) {
+fun PlaylistThumb(playlist: PlaylistItem, allTracks: List<Track>, expressiveShape: Shape, primaryColor: Color, sizeDp: Int = 48, fillBounds: Boolean = false) {
     val context = LocalContext.current
     var coverBmp by remember(playlist.coverUri) { mutableStateOf<Bitmap?>(null) }
     val resolvedTracks = remember(playlist, allTracks) { resolvePlaylistTracks(playlist, allTracks) }
@@ -351,7 +351,7 @@ fun PlaylistThumb(playlist: PlaylistItem, allTracks: List<Track>, expressiveShap
         }
     }
 
-    Box(modifier = Modifier.size(sizeDp.dp).clip(RoundedCornerShape(14.dp)).background(primaryColor.copy(0.2f)), contentAlignment = Alignment.Center) {
+    Box(modifier = (if (fillBounds) Modifier.fillMaxSize() else Modifier.size(sizeDp.dp)).clip(RoundedCornerShape(14.dp)).background(primaryColor.copy(0.2f)), contentAlignment = Alignment.Center) {
         val valid = coverBmp?.takeIf { !it.isRecycled }
         if (valid != null) {
             Image(valid.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -1151,7 +1151,7 @@ fun CleanHeaderLayout(
                 Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                     val validHero = heroBitmap?.takeIf { !it.isRecycled }
                     if (validHero != null) {
-                        Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(264.dp).blur(42.dp), alpha = 0.28f)
+                        Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.18f; scaleY = 1.18f }.blur(48.dp), alpha = 0.34f)
                         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
                     }
                     Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
@@ -1254,7 +1254,7 @@ fun AppleMusicArtistScreen(
                     Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                         val validHero = heroBitmap?.takeIf { !it.isRecycled }
                         if (validHero != null) {
-                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(264.dp).blur(42.dp), alpha = 0.28f)
+                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.18f; scaleY = 1.18f }.blur(48.dp), alpha = 0.34f)
                             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
                         }
                         Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
@@ -1567,30 +1567,27 @@ fun LibraryScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                IconButton(
-                    onClick = { category = 0 },
-                    modifier = Modifier.size(52.dp).clip(CircleShape).background(if (category == 0) primaryColor else surfaceColor)
-                ) {
-                    Icon(Icons.Filled.MusicNote, "Треки", tint = if (category == 0) Color.Black else textColor)
-                }
-                IconButton(
-                    onClick = { category = 1 },
-                    modifier = Modifier.size(52.dp).clip(CircleShape).background(if (category == 1) primaryColor else surfaceColor)
-                ) {
-                    Icon(Icons.Filled.QueueMusic, "Плейлисты", tint = if (category == 1) Color.Black else textColor)
-                }
-                IconButton(
-                    onClick = { category = 2 },
-                    modifier = Modifier.size(52.dp).clip(CircleShape).background(if (category == 2) primaryColor else surfaceColor)
-                ) {
-                    Icon(Icons.Filled.Person, "Авторы", tint = if (category == 2) Color.Black else textColor)
-                }
-                IconButton(
-                    onClick = { category = 3 },
-                    modifier = Modifier.size(52.dp).clip(CircleShape).background(if (category == 3) primaryColor else surfaceColor)
-                ) {
-                    Icon(Icons.Filled.Album, "Альбомы", tint = if (category == 3) Color.Black else textColor)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    Triple("Треки", Icons.Filled.MusicNote, 0),
+                    Triple("Плейлисты", Icons.Filled.QueueMusic, 1),
+                    Triple("Артисты", Icons.Filled.Person, 2),
+                    Triple("Альбомы", Icons.Filled.Album, 3)
+                ).forEach { (label, icon, index) ->
+                    val selected = category == index
+                    Row(
+                        modifier = Modifier.weight(1f).height(46.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (selected) primaryColor else surfaceColor)
+                            .clickable { category = index }
+                            .padding(horizontal = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(icon, label, tint = if (selected) Color.Black else textColor, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(label, color = if (selected) Color.Black else textColor, fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, softWrap = false)
+                    }
                 }
             }
 
@@ -1697,7 +1694,7 @@ fun LibraryScreen(
                                                 .clip(RoundedCornerShape(18.dp))
                                                 .background(surfaceColor)
                                         ) {
-                                            PlaylistThumb(pl, tracks, expressiveShape, primaryColor, 148)
+                                            PlaylistThumb(pl, tracks, expressiveShape, primaryColor, 148, fillBounds = true)
                                             Box(
                                                 modifier = Modifier
                                                     .align(Alignment.TopEnd)
@@ -3002,16 +2999,16 @@ fun SettingsCategoryItem(icon: ImageVector, title: String, subtitle: String, tex
             .background(textColor.copy(alpha = 0.045f))
             .border(1.dp, textColor.copy(alpha = 0.075f), itemShape)
             .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 19.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(48.dp).clip(RoundedCornerShape(17.dp)).background(primaryColor.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = primaryColor, modifier = Modifier.size(25.dp))
+        Box(Modifier.size(54.dp).clip(RoundedCornerShape(19.dp)).background(primaryColor.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = primaryColor, modifier = Modifier.size(27.dp))
         }
         Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = textColor.copy(0.62f), fontSize = 12.sp, lineHeight = 16.sp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(title, color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = textColor.copy(0.62f), fontSize = 13.sp, lineHeight = 18.sp)
         }
         Spacer(Modifier.width(8.dp))
         Icon(Icons.Filled.ChevronRight, null, tint = primaryColor.copy(alpha = 0.8f), modifier = Modifier.size(21.dp))
@@ -3056,13 +3053,13 @@ fun SettingsAndThemeEditor(
     AnimatedContent(targetState = activeSettingsMenu, label = "") { menu ->
         when (menu) {
             "MAIN" -> {
-                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     item { Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Настройки", color = textColor, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                        Text("Настройки", color = textColor, fontWeight = FontWeight.Black, fontSize = 28.sp)
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = primaryColor.copy(alpha = 0.15f),
@@ -3282,9 +3279,9 @@ fun SettingsAndThemeEditor(
             "UI" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 90.dp)
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                    contentPadding = PaddingValues(top = 14.dp, bottom = 100.dp)
                 ) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3302,10 +3299,10 @@ fun SettingsAndThemeEditor(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                                 .background(surfaceColor.copy(alpha = 0.78f))
                                 .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                                .padding(22.dp),
+                            verticalArrangement = Arrangement.spacedBy(18.dp)
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text("Цветовая схема", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                 Text("Режим оформления и акцентный цвет", color = textColor.copy(0.58f), fontSize = 12.sp)
                             }
@@ -3344,25 +3341,27 @@ fun SettingsAndThemeEditor(
                             }
                             Spacer(Modifier.height(2.dp))
                             Text("Акцентный цвет", color = textColor.copy(0.82f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
-                                presets.forEach { (name, hex) ->
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                items(presets) { (name, hex) ->
                                     val selected = themeConfig.primaryHex == hex
                                     Box(
-                                        modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(14.dp))
+                                        modifier = Modifier.size(46.dp).clip(RoundedCornerShape(15.dp))
                                             .background(Color(hex))
-                                            .border(if (selected) 3.dp else 1.dp, if (selected) textColor else textColor.copy(0.18f), RoundedCornerShape(14.dp))
+                                            .border(if (selected) 3.dp else 1.dp, if (selected) textColor else textColor.copy(0.18f), RoundedCornerShape(15.dp))
                                             .clickable { onThemeChange(themeConfig.copy(themeName = name, primaryHex = hex)) },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (selected) Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(19.dp))
                                     }
                                 }
-                                Box(
-                                    modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(14.dp))
-                                        .background(textColor.copy(0.06f)).border(1.dp, textColor.copy(0.12f), RoundedCornerShape(14.dp))
-                                        .clickable { showCustomColorPicker = !showCustomColorPicker },
-                                    contentAlignment = Alignment.Center
-                                ) { Icon(Icons.Filled.Colorize, null, tint = primaryColor, modifier = Modifier.size(20.dp)) }
+                                item {
+                                    Box(
+                                        modifier = Modifier.size(46.dp).clip(RoundedCornerShape(15.dp))
+                                            .background(textColor.copy(0.06f)).border(1.dp, textColor.copy(0.12f), RoundedCornerShape(15.dp))
+                                            .clickable { showCustomColorPicker = !showCustomColorPicker },
+                                        contentAlignment = Alignment.Center
+                                    ) { Icon(Icons.Filled.Colorize, null, tint = primaryColor, modifier = Modifier.size(20.dp)) }
+                                }
                             }
                             AnimatedVisibility(visible = showCustomColorPicker) {
                                 Column(
@@ -3411,7 +3410,7 @@ fun SettingsAndThemeEditor(
                                     val selected = themeConfig.shapeStyle == style
                                     val previewShape = style.toExpressiveShape()
                                     Column(
-                                        modifier = Modifier.width(78.dp).clip(RoundedCornerShape(18.dp))
+                                        modifier = Modifier.width(92.dp).clip(RoundedCornerShape(18.dp))
                                             .background(if (selected) primaryColor.copy(0.14f) else textColor.copy(0.035f))
                                             .border(if (selected) 1.5.dp else 1.dp, if (selected) primaryColor else textColor.copy(0.08f), RoundedCornerShape(18.dp))
                                             .clickable { onThemeChange(themeConfig.copy(shapeStyle = style)) }
@@ -3419,10 +3418,10 @@ fun SettingsAndThemeEditor(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Box(Modifier.size(40.dp).clip(previewShape).background(if (selected) primaryColor else primaryColor.copy(0.20f)), contentAlignment = Alignment.Center) {
+                                        Box(Modifier.size(46.dp).clip(previewShape).background(if (selected) primaryColor else primaryColor.copy(0.20f)), contentAlignment = Alignment.Center) {
                                             if (selected) Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(19.dp))
                                         }
-                                        Text(style.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }, color = if (selected) primaryColor else textColor.copy(0.72f), fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(style.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }, color = if (selected) primaryColor else textColor.copy(0.72f), fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }
