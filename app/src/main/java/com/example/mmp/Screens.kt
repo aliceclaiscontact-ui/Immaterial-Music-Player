@@ -3163,7 +3163,7 @@ fun SettingsAndThemeEditor(
                     }
                 }
             }
-            "STREAMING" -> {            "STREAMING" -> {
+            "STREAMING" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp)) {
                     item {
