@@ -407,9 +407,16 @@ fun MMPApp(
 
     fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L, isRetry: Boolean = false, sourceLabel: String? = null) {
         if (!isRetry) streamRetryCount = 0
-        if (!isRetry && !sourceLabel.isNullOrBlank()) {
-            currentPlaybackSource = sourceLabel
-            prefs.edit().putString("last_playback_source", sourceLabel).apply()
+        if (!isRetry) {
+            val resolvedSource = sourceLabel ?: when (track.folderName) {
+                "YouTube Music" -> "YouTube Music"
+                "SoundCloud" -> "SoundCloud"
+                else -> null
+            }
+            if (!resolvedSource.isNullOrBlank()) {
+                currentPlaybackSource = resolvedSource
+                prefs.edit().putString("last_playback_source", resolvedSource).apply()
+            }
         }
         if (currentTrack?.id != track.id) {
             loopPointAMs = null

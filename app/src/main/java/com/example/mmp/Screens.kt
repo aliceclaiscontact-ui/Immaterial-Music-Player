@@ -1440,7 +1440,7 @@ fun LibraryScreen(
             it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
         }
         val collator = Collator.getInstance(Locale.getDefault()).apply {
-            strength = Collator.PRIMARY
+            strength = Collator.SECONDARY
             decomposition = Collator.CANONICAL_DECOMPOSITION
         }
         when (sortMode) {
@@ -2132,7 +2132,7 @@ fun FullScreenPlayerOverlay(
                     Icon(
                         if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         "Play/Pause",
-                        tint = if (primaryColor.luminance() > 0.5f) Color.Black else Color.White,
+                        tint = if (primaryColor.luminance() > 0.179f) Color.Black else Color.White,
                         modifier = Modifier.size(38.dp)
                     )
                 }
