@@ -1550,18 +1550,32 @@ fun MMPApp(
                     surfaceColor = surfaceColor,
                     onDismiss = { tracksToAddToPlaylist = emptyList() },
                     onSelectPlaylist = { selectedPl ->
-                        val newIds = tracksToAddToPlaylist.map { it.id }
-                        val newPaths = tracksToAddToPlaylist.mapNotNull { it.filePath.takeIf { p -> p.isNotBlank() } }
+                        val selectedTracks = tracksToAddToPlaylist
+                        val alreadyContainsAll = selectedTracks.isNotEmpty() && selectedTracks.all { track ->
+                            selectedPl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && selectedPl.trackFilePaths.contains(track.filePath))
+                        }
+                        val newIds = selectedTracks.map { it.id }
+                        val newPaths = selectedTracks.mapNotNull { it.filePath.takeIf { p -> p.isNotBlank() } }
                         val updatedList = playlists.map { pl ->
-                            if (pl.name == selectedPl.name) {
-                                val mergedIds = (pl.trackIds + newIds).distinct()
-                                val mergedPaths = (pl.trackFilePaths + newPaths).distinct()
-                                pl.copy(trackIds = mergedIds, trackFilePaths = mergedPaths)
-                            } else pl
+                            if (pl.name != selectedPl.name) pl else if (alreadyContainsAll) {
+                                pl.copy(
+                                    trackIds = pl.trackIds.filterNot { it in newIds },
+                                    trackFilePaths = pl.trackFilePaths.filterNot { it in newPaths }
+                                )
+                            } else {
+                                pl.copy(
+                                    trackIds = (pl.trackIds + newIds).distinct(),
+                                    trackFilePaths = (pl.trackFilePaths + newPaths).distinct()
+                                )
+                            }
                         }
                         playlists = updatedList
                         StorageHelper.savePlaylists(prefs, updatedList)
-                        Toast.makeText(context, "Добавлено в «${selectedPl.name}»!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            if (alreadyContainsAll) "Удалено из «${selectedPl.name}»" else "Добавлено в «${selectedPl.name}»!",
+                            Toast.LENGTH_SHORT
+                        ).show()
                         tracksToAddToPlaylist = emptyList()
                     },
                     onCreateNewPlaylistClick = {

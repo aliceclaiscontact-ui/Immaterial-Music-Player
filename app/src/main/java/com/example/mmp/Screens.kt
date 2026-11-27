@@ -1565,33 +1565,39 @@ fun LibraryScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(11.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items(listOf(
                     Triple("Треки", Icons.Filled.MusicNote, 0),
                     Triple("Плейлисты", Icons.Filled.QueueMusic, 1),
                     Triple("Артисты", Icons.Filled.Person, 2),
                     Triple("Альбомы", Icons.Filled.Album, 3)
-                ).forEach { (label, icon, index) ->
+                )) { (label, icon, index) ->
                     val selected = category == index
                     Row(
-                        modifier = Modifier.weight(1f).height(46.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(17.dp))
                             .background(if (selected) primaryColor else surfaceColor)
+                            .border(1.dp, if (selected) primaryColor.copy(0.35f) else textColor.copy(0.07f), RoundedCornerShape(17.dp))
                             .clickable { category = index }
-                            .padding(horizontal = 5.dp),
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(icon, label, tint = if (selected) Color.Black else textColor, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(label, color = if (selected) Color.Black else textColor, fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, softWrap = false)
+                        Icon(icon, label, tint = if (selected) Color.Black else textColor, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(label, color = if (selected) Color.Black else textColor, fontSize = 10.5.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 val cat = category
@@ -1731,8 +1737,8 @@ fun LibraryScreen(
                     2 -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
                         items(filteredArtists.keys.toList()) { artist ->
                             val artistTrackList = filteredArtists[artist] ?: emptyList()
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedArtist(artist) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (artistTrackList.isNotEmpty()) { TrackCoverThumb(artistTrackList.firstOrNull { it.customCoverUri != null } ?: artistTrackList.first(), CircleShape, primaryColor, 48); Spacer(modifier = Modifier.width(14.dp)) }
+                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedArtist(artist) }.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (artistTrackList.isNotEmpty()) { TrackCoverThumb(artistTrackList.firstOrNull { it.customCoverUri != null } ?: artistTrackList.first(), CircleShape, primaryColor, 44); Spacer(modifier = Modifier.width(14.dp)) }
                                 Column(modifier = Modifier.weight(1f)) { Text(artist, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${artistTrackList.size} треков", color = textColor.copy(0.6f), fontSize = 12.sp) }
                                 Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
                             }
@@ -1741,8 +1747,8 @@ fun LibraryScreen(
                     else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
                         items(filteredAlbums.keys.toList()) { album ->
                             val albumTrackList = filteredAlbums[album] ?: emptyList()
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedAlbum(album) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (albumTrackList.isNotEmpty()) { TrackCoverThumb(albumTrackList.firstOrNull { it.customCoverUri != null } ?: albumTrackList.first(), expressiveShape, primaryColor, 50); Spacer(modifier = Modifier.width(14.dp)) }
+                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedAlbum(album) }.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (albumTrackList.isNotEmpty()) { TrackCoverThumb(albumTrackList.firstOrNull { it.customCoverUri != null } ?: albumTrackList.first(), expressiveShape, primaryColor, 46); Spacer(modifier = Modifier.width(14.dp)) }
                                 Column(modifier = Modifier.weight(1f)) { Text(album, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${albumTrackList.firstOrNull()?.artist ?: ""} • ${albumTrackList.size} тр.", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                                 Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
                             }
@@ -1838,7 +1844,7 @@ fun MiniPlayerBar(
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(46.dp).clip(expressiveShape).background(primaryColor.copy(0.22f)), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(primaryColor.copy(0.22f)), contentAlignment = Alignment.Center) {
             val validArt = metadata.coverArt?.takeIf { !it.isRecycled }
             if (validArt != null) Image(validArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             else Icon(Icons.Filled.MusicNote, null, tint = primaryColor)
@@ -2040,7 +2046,7 @@ fun FullScreenPlayerOverlay(
                     .fillMaxWidth()
                     .aspectRatio(1f)
                     .padding((1f - coverScale).dp * 70)
-                    .clip(expressiveShape)
+                    .clip(RoundedCornerShape(24.dp))
                     .background(surfaceColor)
                     .onGloballyPositioned { coverWidthPx = it.size.width.toFloat().coerceAtLeast(1f) }
                     .pointerInput(track.id) {
@@ -2992,30 +2998,88 @@ fun CurvedSleepTimerDialog(
 }
 
 @Composable
-fun SettingsCategoryItem(icon: ImageVector, title: String, subtitle: String, textColor: Color, primaryColor: Color, onClick: () -> Unit) {
-    val itemShape = RoundedCornerShape(22.dp)
-    Row(
-        modifier = Modifier.fillMaxWidth().clip(itemShape)
-            .background(textColor.copy(alpha = 0.045f))
-            .border(1.dp, textColor.copy(alpha = 0.075f), itemShape)
-            .clickable { onClick() }
-            .padding(horizontal = 20.dp, vertical = 19.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(54.dp).clip(RoundedCornerShape(19.dp)).background(primaryColor.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = primaryColor, modifier = Modifier.size(27.dp))
+fun SettingsCategoryItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    textColor: Color,
+    primaryColor: Color,
+    onClick: () -> Unit,
+    compact: Boolean = false
+) {
+    val itemShape = RoundedCornerShape(20.dp)
+    if (compact) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 128.dp)
+                .clip(itemShape)
+                .background(textColor.copy(alpha = 0.045f))
+                .border(1.dp, textColor.copy(alpha = 0.075f), itemShape)
+                .clickable { onClick() }
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(40.dp).clip(RoundedCornerShape(14.dp))
+                        .background(primaryColor.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, null, tint = primaryColor, modifier = Modifier.size(22.dp))
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = primaryColor.copy(alpha = 0.8f), modifier = Modifier.size(19.dp))
+            }
+            Text(
+                title,
+                color = textColor,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Start,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                subtitle,
+                color = textColor.copy(0.62f),
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                textAlign = TextAlign.Start,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(title, color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = textColor.copy(0.62f), fontSize = 13.sp, lineHeight = 18.sp)
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth().clip(itemShape)
+                .background(textColor.copy(alpha = 0.045f))
+                .border(1.dp, textColor.copy(alpha = 0.075f), itemShape)
+                .clickable { onClick() }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(15.dp)).background(primaryColor.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = primaryColor, modifier = Modifier.size(23.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp), horizontalAlignment = Alignment.Start) {
+                Text(title, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(subtitle, color = textColor.copy(0.62f), fontSize = 12.sp, lineHeight = 16.sp, textAlign = TextAlign.Start)
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Filled.ChevronRight, null, tint = primaryColor.copy(alpha = 0.8f), modifier = Modifier.size(20.dp))
         }
-        Spacer(Modifier.width(8.dp))
-        Icon(Icons.Filled.ChevronRight, null, tint = primaryColor.copy(alpha = 0.8f), modifier = Modifier.size(21.dp))
     }
 }
 
 @Composable
+fun SettingsAndThemeEditor(@Composable
 fun SettingsAndThemeEditor(
     allRawTracks: List<Track>,
     themeConfig: MMPThemeConfig,
@@ -3053,62 +3117,53 @@ fun SettingsAndThemeEditor(
     AnimatedContent(targetState = activeSettingsMenu, label = "") { menu ->
         when (menu) {
             "MAIN" -> {
-                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    item { Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Настройки", color = textColor, fontWeight = FontWeight.Black, fontSize = 28.sp)
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = primaryColor.copy(alpha = 0.15f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                "v1.5.0",
-                                color = primaryColor,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    } }
-                    item {
-                        SettingsCategoryItem(Icons.Filled.CloudQueue, "Стриминг из интернета", "Активно: ${selectedStreamState.title}", textColor, primaryColor) {
-                            activeSettingsMenu = "STREAMING"
+                            Text("Настройки", color = textColor, fontWeight = FontWeight.Black, fontSize = 26.sp, textAlign = TextAlign.Start)
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = primaryColor.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
+                            ) {
+                                Text("v1.5.0", color = primaryColor, fontWeight = FontWeight.Bold, fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
                         }
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и темы", "Цветовая схема, акцент и формы элементов", textColor, primaryColor) {
-                            activeSettingsMenu = "UI"
-                        }
+                        SettingsCategoryItem(Icons.Filled.CloudQueue, "Стриминг", "Активно: ${selectedStreamState.title}", textColor, primaryColor, { activeSettingsMenu = "STREAMING" }, compact = true)
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.GraphicEq, "Звук и эквалайзер", "Плавное затухание, эквалайзер и усиление баса", textColor, primaryColor) {
-                            activeSettingsMenu = "SOUND"
-                        }
+                        SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и темы", "Цвета, акцент и формы", textColor, primaryColor, { activeSettingsMenu = "UI" }, compact = true)
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.Animation, "Анимации", "Волна прогресса и размытие неактивных строк текста", textColor, primaryColor) {
-                            activeSettingsMenu = "ANIMATIONS"
-                        }
+                        SettingsCategoryItem(Icons.Filled.GraphicEq, "Звук и эквалайзер", "Затухание, эквалайзер и бас", textColor, primaryColor, { activeSettingsMenu = "SOUND" }, compact = true)
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.FolderSpecial, "Медиатека и папки", "Папки с музыкой и фильтр коротких аудио", textColor, primaryColor) {
-                            activeSettingsMenu = "LIBRARY"
-                        }
+                        SettingsCategoryItem(Icons.Filled.Animation, "Анимации", "Волна прогресса и фокус текста", textColor, primaryColor, { activeSettingsMenu = "ANIMATIONS" }, compact = true)
+                    }
+                    item {
+                        SettingsCategoryItem(Icons.Filled.FolderSpecial, "Медиатека и папки", "Музыкальные папки и фильтр аудио", textColor, primaryColor, { activeSettingsMenu = "LIBRARY" }, compact = true)
                     }
                     if (!isBatteryIgnored) {
                         item {
-                            SettingsCategoryItem(Icons.Filled.BatteryChargingFull, "Работа в фоне", "Отключить оптимизацию для стабильной работы", textColor, primaryColor) {
-                                onRequestBatteryIgnore()
-                            }
+                            SettingsCategoryItem(Icons.Filled.BatteryChargingFull, "Работа в фоне", "Стабильная работа без ограничений", textColor, primaryColor, { onRequestBatteryIgnore() }, compact = true)
                         }
                     }
                 }
             }
-            "STREAMING" -> {
+            "STREAMING" -> {            "STREAMING" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp)) {
                     item {
@@ -3279,9 +3334,9 @@ fun SettingsAndThemeEditor(
             "UI" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-                    contentPadding = PaddingValues(top = 14.dp, bottom = 100.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp)
                 ) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3299,8 +3354,8 @@ fun SettingsAndThemeEditor(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                                 .background(surfaceColor.copy(alpha = 0.78f))
                                 .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
-                                .padding(22.dp),
-                            verticalArrangement = Arrangement.spacedBy(18.dp)
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(11.dp)
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Text("Цветовая схема", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -3410,15 +3465,15 @@ fun SettingsAndThemeEditor(
                                     val selected = themeConfig.shapeStyle == style
                                     val previewShape = style.toExpressiveShape()
                                     Column(
-                                        modifier = Modifier.width(92.dp).clip(RoundedCornerShape(18.dp))
+                                        modifier = Modifier.width(84.dp).clip(RoundedCornerShape(18.dp))
                                             .background(if (selected) primaryColor.copy(0.14f) else textColor.copy(0.035f))
                                             .border(if (selected) 1.5.dp else 1.dp, if (selected) primaryColor else textColor.copy(0.08f), RoundedCornerShape(18.dp))
                                             .clickable { onThemeChange(themeConfig.copy(shapeStyle = style)) }
-                                            .padding(vertical = 12.dp, horizontal = 7.dp),
+                                            .padding(vertical = 9.dp, horizontal = 6.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Box(Modifier.size(46.dp).clip(previewShape).background(if (selected) primaryColor else primaryColor.copy(0.20f)), contentAlignment = Alignment.Center) {
+                                        Box(Modifier.size(40.dp).clip(previewShape).background(if (selected) primaryColor else primaryColor.copy(0.20f)), contentAlignment = Alignment.Center) {
                                             if (selected) Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(19.dp))
                                         }
                                         Text(style.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }, color = if (selected) primaryColor else textColor.copy(0.72f), fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -3465,21 +3520,37 @@ fun SettingsAndThemeEditor(
                         .apply()
                 }
 
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp)) {
+                val bands = listOf(
+                    Triple("60 Гц", band60) { v: Float -> saveEqBands(v, band230, band910, band3600, band14000) },
+                    Triple("230 Гц", band230) { v: Float -> saveEqBands(band60, v, band910, band3600, band14000) },
+                    Triple("910 Гц", band910) { v: Float -> saveEqBands(band60, band230, v, band3600, band14000) },
+                    Triple("3.6 кГц", band3600) { v: Float -> saveEqBands(band60, band230, band910, v, band14000) },
+                    Triple("14 кГц", band14000) { v: Float -> saveEqBands(band60, band230, band910, band3600, v) }
+                )
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)
+                ) {
                     item {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                            IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
-                            Text("Звук и Эквалайзер", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                            IconButton(onClick = { activeSettingsMenu = "MAIN" }, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp))
+                            }
+                            Text("Звук и Эквалайзер", color = textColor, fontWeight = FontWeight.Black, fontSize = 21.sp, textAlign = TextAlign.Start)
                         }
                     }
                     item {
-                        Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Плавное затухание", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Плавный переход громкости при смене треков", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("Плавное затухание", color = textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("Переход громкости между треками", color = textColor.copy(0.6f), fontSize = 11.sp)
                                 }
-                                Text(if (crossfadeSec.toInt() == 0) "Выкл" else "${crossfadeSec.toInt()} сек", color = primaryColor, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                Text(if (crossfadeSec.toInt() == 0) "Выкл" else "${crossfadeSec.toInt()} сек", color = primaryColor, fontWeight = FontWeight.Black, fontSize = 13.sp)
                             }
                             Slider(
                                 value = crossfadeSec,
@@ -3494,11 +3565,14 @@ fun SettingsAndThemeEditor(
                         }
                     }
                     item {
-                        Column(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(16.dp)) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Column {
-                                    Text("5-полосный эквалайзер", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Обработка аудиопотока в реальном времени", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("5-полосный эквалайзер", color = textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("Обработка аудиопотока в реальном времени", color = textColor.copy(0.6f), fontSize = 11.sp)
                                 }
                                 Switch(
                                     checked = eqEnabled,
@@ -3509,49 +3583,52 @@ fun SettingsAndThemeEditor(
                                     colors = SwitchDefaults.colors(checkedThumbColor = Color.Black, checkedTrackColor = primaryColor)
                                 )
                             }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
                                 item { ExpressiveFilterPill("Flat", false, primaryColor, textColor) { saveEqBands(0f, 0f, 0f, 0f, 0f) } }
                                 item { ExpressiveFilterPill("Bass Boost", false, primaryColor, textColor) { saveEqBands(8f, 5f, 0f, 1f, 2f) } }
                                 item { ExpressiveFilterPill("Hyperpop", false, primaryColor, textColor) { saveEqBands(7f, 3f, -2f, 5f, 8f) } }
                                 item { ExpressiveFilterPill("Vocal", false, primaryColor, textColor) { saveEqBands(-2f, 1f, 6f, 5f, 1f) } }
                             }
-                            Spacer(modifier = Modifier.height(14.dp))
-                            val bands = listOf(
-                                Triple("60 Гц", band60) { v: Float -> saveEqBands(v, band230, band910, band3600, band14000) },
-                                Triple("230 Гц", band230) { v: Float -> saveEqBands(band60, v, band910, band3600, band14000) },
-                                Triple("910 Гц", band910) { v: Float -> saveEqBands(band60, band230, v, band3600, band14000) },
-                                Triple("3.6 кГц", band3600) { v: Float -> saveEqBands(band60, band230, band910, v, band14000) },
-                                Triple("14 кГц", band14000) { v: Float -> saveEqBands(band60, band230, band910, band3600, v) }
-                            )
-                            bands.forEach { (label, value, onChange) ->
+                            bands.chunked(2).forEach { pair ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    pair.forEach { (label, value, onChange) ->
+                                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                                Text(label, color = textColor.copy(0.8f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                Text("${if (value >= 0) "+" else ""}${value.toInt()} дБ", color = primaryColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Slider(
+                                                value = value,
+                                                onValueChange = onChange,
+                                                valueRange = -12f..12f,
+                                                enabled = eqEnabled,
+                                                colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
+                                            )
+                                        }
+                                    }
+                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                }
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(label, color = textColor.copy(0.8f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    Text("${if (value >= 0) "+" else ""}${value.toInt()} дБ", color = primaryColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("Усиление баса", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("${bassBoostLevel.toInt()}%", color = primaryColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
                                 Slider(
-                                    value = value,
-                                    onValueChange = onChange,
-                                    valueRange = -12f..12f,
+                                    value = bassBoostLevel,
+                                    onValueChange = {
+                                        bassBoostLevel = it
+                                        prefs.edit().putInt("bass_boost_level", it.toInt()).putLong("eq_updated_ts", System.currentTimeMillis()).apply()
+                                    },
+                                    valueRange = 0f..100f,
                                     enabled = eqEnabled,
                                     colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
                                 )
                             }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Усиление баса", color = textColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("${bassBoostLevel.toInt()}%", color = primaryColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                            Slider(
-                                value = bassBoostLevel,
-                                onValueChange = {
-                                    bassBoostLevel = it
-                                    prefs.edit().putInt("bass_boost_level", it.toInt()).putLong("eq_updated_ts", System.currentTimeMillis()).apply()
-                                },
-                                valueRange = 0f..100f,
-                                enabled = eqEnabled,
-                                colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor)
-                            )
                         }
                     }
                 }
@@ -3563,7 +3640,7 @@ fun SettingsAndThemeEditor(
                 var waveAnimEnabled by remember { mutableStateOf(prefs.getBoolean("anim_wave_enabled", true)) }
                 var blurLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_blur", false)) }
 
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                             IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
@@ -3809,7 +3886,7 @@ fun FrostedDockBar(
         DockVerticalItem(Icons.Filled.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
         DockVerticalItem(Icons.Filled.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
         DockVerticalItem(streamIcon, streamLabel, selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
-        DockVerticalItem(Icons.Filled.AddCircleOutline, "Создать", false, primaryColor, textColor, Modifier.weight(1f), onCreateClick)
+        DockVerticalItem(Icons.Filled.AddCircle, "Создать", false, primaryColor, textColor, Modifier.weight(1f), onCreateClick)
     }
 }
 
@@ -3852,7 +3929,7 @@ fun TrackListItem(
             .fillMaxWidth()
             .clip(cardShape)
             .background(if (isSelected) primaryColor.copy(0.22f) else surfaceColor)
-            .border(if (isSelected) 1.5.dp else 0.dp, primaryColor, cardShape)
+            .border(if (isSelected) 1.5.dp else 1.dp, if (isSelected) primaryColor else primaryColor.copy(0.22f), cardShape)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
@@ -3934,6 +4011,9 @@ fun AddToPlaylistSheet(
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.heightIn(max = 260.dp)) {
                     items(playlists) { pl ->
                         val plCount = resolvePlaylistTracks(pl, allTracks).size
+                        val alreadyContainsAll = tracks.isNotEmpty() && tracks.all { track ->
+                            pl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && pl.trackFilePaths.contains(track.filePath))
+                        }
                         Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(textColor.copy(0.06f)).clickable { onSelectPlaylist(pl) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 PlaylistThumb(pl, allTracks, expressiveShape, primaryColor, 46)
@@ -3943,7 +4023,7 @@ fun AddToPlaylistSheet(
                                     Text("Треков: $plCount", color = textColor.copy(0.6f), fontSize = 11.sp)
                                 }
                             }
-                            Icon(Icons.Filled.Add, null, tint = primaryColor)
+                            Icon(if (alreadyContainsAll) Icons.Filled.CheckCircle else Icons.Filled.Add, null, tint = if (alreadyContainsAll) Color(0xFF42C878) else primaryColor)
                         }
                     }
                 }
