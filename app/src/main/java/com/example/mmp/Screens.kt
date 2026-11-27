@@ -2411,9 +2411,16 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
     }
     val lyricListState = rememberLazyListState()
     var showLyricsMenu by remember { mutableStateOf(false) }
+    var isLyricsExpanded by remember { mutableStateOf(false) }
     var isLyricLoopSelectionMode by remember { mutableStateOf(false) }
     var loopStartLineIdx by remember { mutableStateOf<Int?>(null) }
     var loopEndLineIdx by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(track.id) {
+        isLyricsExpanded = false
+        delay(5000L)
+        isLyricsExpanded = true
+    }
 
     LaunchedEffect(activeLyricIndex) {
         if (activeLyricIndex >= 0 && lyricsList.isNotEmpty() && !isLyricLoopSelectionMode) {
@@ -2426,8 +2433,79 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
 
     val validArt = metadata.coverArt?.takeIf { !it.isRecycled }
 
-    Box(modifier = Modifier.fillMaxSize().background(bgColor).clickable(enabled = true, onClick = {})) {
-        if (validArt != null) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.28f))
+            .clickable(enabled = true, onClick = {})
+    ) {
+        val panelWidth by animateDpAsState(
+            targetValue = if (isLyricsExpanded) maxWidth else (maxWidth - 32.dp).coerceAtLeast(280.dp),
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+            label = "lyricsPanelWidth"
+        )
+        val panelHeight by animateDpAsState(
+            targetValue = if (isLyricsExpanded) maxHeight else 250.dp.coerceAtMost(maxHeight - 48.dp),
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+            label = "lyricsPanelHeight"
+        )
+        val panelCorner by animateDpAsState(
+            targetValue = if (isLyricsExpanded) 0.dp else 28.dp,
+            animationSpec = tween(520),
+            label = "lyricsPanelCorner"
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .width(panelWidth)
+                .height(panelHeight)
+                .clip(RoundedCornerShape(panelCorner))
+                .background(bgColor)
+                .animateContentSize(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+        ) {
+            if (!isLyricsExpanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable { isLyricsExpanded = true }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.MusicNote, null, tint = primaryColor, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("ТЕКСТ ПЕСНИ", color = Color.White.copy(alpha = 0.62f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            Text(track.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
+                            Icon(Icons.Filled.Close, "Закрыть", tint = Color.White.copy(alpha = 0.8f))
+                        }
+                    }
+                    Text(
+                        text = when {
+                            isSearchingOnlineLyrics -> "Загружаем текст…"
+                            lyricsList.isEmpty() -> "Текст песни пока не загружен"
+                            activeLyricIndex >= 0 -> lyricsList[activeLyricIndex].text
+                            else -> lyricsList.first().text
+                        },
+                        color = Color.White,
+                        fontSize = 21.sp,
+                        lineHeight = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(track.artist, color = Color.White.copy(alpha = 0.62f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text("Открывается…", color = primaryColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            } else {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (validArt != null) {
             Image(
                 bitmap = validArt.asImageBitmap(),
                 contentDescription = null,
@@ -2707,6 +2785,8 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                     trackColor = Color.White.copy(0.18f),
                     modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50))
                 )
+                    }
+                }
             }
         }
     }
