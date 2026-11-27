@@ -1949,7 +1949,7 @@ fun FullScreenPlayerOverlay(
                     .fillMaxWidth()
                     .aspectRatio(1f)
                     .padding((1f - coverScale).dp * 70)
-                    .clip(RoundedCornerShape(28.dp))
+                    .clip(expressiveShape)
                     .background(surfaceColor)
                     .onGloballyPositioned { coverWidthPx = it.size.width.toFloat().coerceAtLeast(1f) }
                     .pointerInput(track.id) {
