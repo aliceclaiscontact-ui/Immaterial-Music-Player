@@ -1440,7 +1440,33 @@ fun LibraryScreen(
         return
     }
 
-album detail block
+    if (openedAlbum != null) {
+        val albumTracks = remember(tracks, openedAlbum) { tracks.filter { it.album == openedAlbum } }
+        val artistName = albumTracks.firstOrNull()?.artist ?: "Неизвестный исполнитель"
+        CleanHeaderLayout(
+            openedAlbum,
+            "Альбом • $artistName",
+            albumTracks,
+            null,
+            primaryColor,
+            textColor,
+            surfaceColor,
+            bgColor,
+            expressiveShape,
+            currentTrack,
+            isPlaying,
+            isShuffleEnabled,
+            { onSetOpenedAlbum(null) },
+            null,
+            onPlayContext,
+            onTogglePlay,
+            onToggleShuffle,
+            onAddTrackToPlaylistClick,
+            onAddMultipleTracksToPlaylist,
+            showAddButton = false,
+            albumRepeatEnabled = albumRepeatEnabled,
+            onToggleAlbumRepeat = onToggleAlbumRepeat
+        )
         return
     }
 
