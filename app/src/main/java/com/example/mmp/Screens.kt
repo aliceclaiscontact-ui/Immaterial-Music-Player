@@ -2791,6 +2791,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
         }
     }
 }
+}
 
 @Composable
 fun CurvedSleepTimerDialog(
