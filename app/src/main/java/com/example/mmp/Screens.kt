@@ -1144,11 +1144,14 @@ fun CleanHeaderLayout(
                     else Spacer(modifier = Modifier.size(42.dp))
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.size(250.dp).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
                     val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                    if (validHero != null) Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks, primaryColor, 210)
-                    else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(90.dp))
+                    if (validHero != null) Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(34.dp), alpha = 0.42f)
+                    Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor), contentAlignment = Alignment.Center) {
+                        if (validHero != null) Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks, primaryColor, 210)
+                        else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(90.dp))
+                    }
                 }
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(title, color = textColor, fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1178,7 +1181,7 @@ fun CleanHeaderLayout(
         } else {
             items(tracks, key = { it.id }) { track ->
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    TrackListItem(track, RoundedCornerShape(16.dp), expressiveShape, primaryColor, textColor, surfaceColor, null, true, false, false, true, { (onToggleTrackInPlaylist ?: onAddTrackToPlaylistClick)(track) }, {}) { onPlayContext(tracks, track) }
+                    TrackListItem(track, RoundedCornerShape(16.dp), expressiveShape, primaryColor, textColor, surfaceColor, null, true, false, false, onToggleTrackInPlaylist != null, { (onToggleTrackInPlaylist ?: onAddTrackToPlaylistClick)(track) }, {}) { onPlayContext(tracks, track) }
                 }
             }
         }
@@ -1231,11 +1234,13 @@ fun AppleMusicArtistScreen(
                         Spacer(modifier = Modifier.size(42.dp))
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.size(250.dp).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
                         val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                        if (validHero != null) {
-                            Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp), alpha = 0.4f)
-                        } else Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(90.dp))
+                        if (validHero != null) Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(34.dp), alpha = 0.42f)
+                        Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor), contentAlignment = Alignment.Center) {
+                            if (validHero != null) Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            else Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(90.dp))
+                        }
                     }
                     Spacer(modifier = Modifier.height(20.dp))
                     Text(artistName, color = textColor, fontSize = 28.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1685,7 +1690,7 @@ fun LibraryScreen(
                         items(filteredArtists.keys.toList()) { artist ->
                             val artistTrackList = filteredArtists[artist] ?: emptyList()
                             Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedArtist(artist) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (artistTrackList.isNotEmpty()) { TrackCoverThumb(artistTrackList.first(), CircleShape, primaryColor, 48); Spacer(modifier = Modifier.width(14.dp)) }
+                                if (artistTrackList.isNotEmpty()) { TrackCoverThumb(artistTrackList.firstOrNull { it.customCoverUri != null } ?: artistTrackList.first(), CircleShape, primaryColor, 48); Spacer(modifier = Modifier.width(14.dp)) }
                                 Column(modifier = Modifier.weight(1f)) { Text(artist, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${artistTrackList.size} треков", color = textColor.copy(0.6f), fontSize = 12.sp) }
                                 Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
                             }
@@ -1695,7 +1700,7 @@ fun LibraryScreen(
                         items(filteredAlbums.keys.toList()) { album ->
                             val albumTrackList = filteredAlbums[album] ?: emptyList()
                             Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedAlbum(album) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (albumTrackList.isNotEmpty()) { TrackCoverThumb(albumTrackList.first(), expressiveShape, primaryColor, 50); Spacer(modifier = Modifier.width(14.dp)) }
+                                if (albumTrackList.isNotEmpty()) { TrackCoverThumb(albumTrackList.firstOrNull { it.customCoverUri != null } ?: albumTrackList.first(), expressiveShape, primaryColor, 50); Spacer(modifier = Modifier.width(14.dp)) }
                                 Column(modifier = Modifier.weight(1f)) { Text(album, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${albumTrackList.firstOrNull()?.artist ?: ""} • ${albumTrackList.size} тр.", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                                 Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
                             }
@@ -3613,6 +3618,7 @@ fun QueueManagementSheet(
     var draggingId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
+    val latestQueue by rememberUpdatedState(queue)
     BackHandler { onDismiss() }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
         Column(Modifier.fillMaxWidth().padding(10.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(16.dp).heightIn(min = 320.dp, max = 690.dp)) {
@@ -3643,7 +3649,7 @@ fun QueueManagementSheet(
                             Text("${trk.artist} • ${formatMillis(trk.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(onClick = { onRemoveTrack(index) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, null, tint = textColor.copy(0.55f), modifier = Modifier.size(18.dp)) }
-                        Box(Modifier.size(36.dp).pointerInput(queue, trk.id) {
+                        Box(Modifier.size(36.dp).pointerInput(trk.id) {
                             detectDragGestures(
                                 onDragStart = { draggingId = trk.id; dragOffset = 0f },
                                 onDragEnd = { draggingId = null; dragOffset = 0f },
@@ -3653,10 +3659,11 @@ fun QueueManagementSheet(
                                     dragOffset += delta.y
                                     val info = listState.layoutInfo
                                     val dragged = info.visibleItemsInfo.firstOrNull { it.key == trk.id } ?: return@detectDragGestures
+                                    val currentIndex = latestQueue.indexOfFirst { it.id == trk.id }
                                     val center = dragged.offset + dragged.size / 2 + dragOffset
                                     val target = info.visibleItemsInfo.firstOrNull { center >= it.offset && center <= it.offset + it.size }
-                                    if (target != null && target.index != index) {
-                                        onMoveTrack(index, target.index)
+                                    if (target != null && currentIndex >= 0 && target.index != currentIndex) {
+                                        onMoveTrack(currentIndex, target.index)
                                         dragOffset = 0f
                                     }
                                     if (center < info.viewportStartOffset + edge) scope.launch { listState.scrollBy(-22f) }
