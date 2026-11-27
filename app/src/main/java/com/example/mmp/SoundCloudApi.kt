@@ -43,11 +43,11 @@ object SoundCloudClient {
         lastClientIdTimeMs = 0L
     }
 
-    private fun httpGet(urlStr: String): String {
+    private fun httpGet(urlStr: String, timeoutMs: Int = 4500): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 9000
-            readTimeout = 9000
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
             setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/133.0.0.0 Safari/537.36")
             setRequestProperty("Accept", "application/json, text/javascript, */*; q=0.01")
         }
@@ -61,16 +61,16 @@ object SoundCloudClient {
     suspend fun getClientId(): String = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         cachedClientId?.let {
-            if (now - lastClientIdTimeMs < 3600_000L) return@withContext it
+            if (now - lastClientIdTimeMs < 7200_000L) return@withContext it
         }
         try {
-            val mainHtml = httpGet("https://soundcloud.com")
+            val mainHtml = httpGet("https://soundcloud.com", timeoutMs = 4000)
             val scriptRegex = Regex("""src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"""")
             val scripts = scriptRegex.findAll(mainHtml).map { it.groupValues[1] }.toList().reversed()
             val idRegex = Regex("""client_id\s*:\s*"([a-zA-Z0-9]{32})"""")
-            for (scriptUrl in scripts.take(6)) {
+            for (scriptUrl in scripts.take(2)) {
                 try {
-                    val js = httpGet(scriptUrl)
+                    val js = httpGet(scriptUrl, timeoutMs = 3500)
                     val match = idRegex.find(js)
                     if (match != null) {
                         val found = match.groupValues[1]
@@ -122,57 +122,49 @@ object SoundCloudClient {
     suspend fun searchTracks(query: String, limit: Int = 30): List<SoundCloudTrack> = withContext(Dispatchers.IO) {
         val results = mutableListOf<SoundCloudTrack>()
         val encoded = URLEncoder.encode(query, "UTF-8")
-        repeat(2) { attempt ->
-            try {
-                if (attempt == 1) clearCache()
-                val cid = getClientId()
-                val apiUrl = "https://api-v2.soundcloud.com/search/tracks?q=$encoded&client_id=$cid&limit=$limit&offset=0"
-                val json = JSONObject(httpGet(apiUrl))
-                val collection = json.optJSONArray("collection") ?: return@withContext results
-                for (i in 0 until collection.length()) {
-                    val item = collection.optJSONObject(i) ?: continue
-                    parseTrackJson(item)?.let { results.add(it) }
-                }
-                if (results.isNotEmpty()) return@withContext results
-            } catch (_: Throwable) {}
-        }
+        try {
+            val cid = getClientId()
+            val apiUrl = "https://api-v2.soundcloud.com/search/tracks?q=$encoded&client_id=$cid&limit=$limit&offset=0"
+            val json = JSONObject(httpGet(apiUrl, timeoutMs = 5000))
+            val collection = json.optJSONArray("collection") ?: return@withContext results
+            for (i in 0 until collection.length()) {
+                val item = collection.optJSONObject(i) ?: continue
+                parseTrackJson(item)?.let { results.add(it) }
+            }
+        } catch (_: Throwable) {}
         results
     }
 
     suspend fun searchPlaylists(query: String, limit: Int = 20): List<SoundCloudPlaylist> = withContext(Dispatchers.IO) {
         val results = mutableListOf<SoundCloudPlaylist>()
         val encoded = URLEncoder.encode(query, "UTF-8")
-        repeat(2) { attempt ->
-            try {
-                if (attempt == 1) clearCache()
-                val cid = getClientId()
-                val apiUrl = "https://api-v2.soundcloud.com/search/playlists?q=$encoded&client_id=$cid&limit=$limit&offset=0"
-                val json = JSONObject(httpGet(apiUrl))
-                val collection = json.optJSONArray("collection") ?: return@withContext results
-                for (i in 0 until collection.length()) {
-                    val item = collection.optJSONObject(i) ?: continue
-                    val id = item.optLong("id", 0L)
-                    if (id == 0L) continue
-                    val title = item.optString("title", "Плейлист")
-                    val user = item.optJSONObject("user")
-                    val author = user?.optString("username", "SoundCloud") ?: "SoundCloud"
-                    val rawArt = item.optString("artwork_url", "").ifBlank { user?.optString("avatar_url", "") ?: "" }
-                    val art = rawArt.takeIf { it.isNotBlank() && it != "null" }?.replace("-large", "-t500x500")
-                    val trackCount = item.optInt("track_count", 0)
+        try {
+            val cid = getClientId()
+            val apiUrl = "https://api-v2.soundcloud.com/search/playlists?q=$encoded&client_id=$cid&limit=$limit&offset=0"
+            val json = JSONObject(httpGet(apiUrl, timeoutMs = 5000))
+            val collection = json.optJSONArray("collection") ?: return@withContext results
+            for (i in 0 until collection.length()) {
+                val item = collection.optJSONObject(i) ?: continue
+                val id = item.optLong("id", 0L)
+                if (id == 0L) continue
+                val title = item.optString("title", "Плейлист")
+                val user = item.optJSONObject("user")
+                val author = user?.optString("username", "SoundCloud") ?: "SoundCloud"
+                val rawArt = item.optString("artwork_url", "").ifBlank { user?.optString("avatar_url", "") ?: "" }
+                val art = rawArt.takeIf { it.isNotBlank() && it != "null" }?.replace("-large", "-t500x500")
+                val trackCount = item.optInt("track_count", 0)
 
-                    val tracksList = mutableListOf<SoundCloudTrack>()
-                    val tracksArr = item.optJSONArray("tracks")
-                    if (tracksArr != null) {
-                        for (t in 0 until tracksArr.length()) {
-                            val tObj = tracksArr.optJSONObject(t) ?: continue
-                            parseTrackJson(tObj)?.let { tracksList.add(it) }
-                        }
+                val tracksList = mutableListOf<SoundCloudTrack>()
+                val tracksArr = item.optJSONArray("tracks")
+                if (tracksArr != null) {
+                    for (t in 0 until tracksArr.length()) {
+                        val tObj = tracksArr.optJSONObject(t) ?: continue
+                        parseTrackJson(tObj)?.let { tracksList.add(it) }
                     }
-                    results.add(SoundCloudPlaylist(id, title, author, art, trackCount, tracksList))
                 }
-                if (results.isNotEmpty()) return@withContext results
-            } catch (_: Throwable) {}
-        }
+                results.add(SoundCloudPlaylist(id, title, author, art, trackCount, tracksList))
+            }
+        } catch (_: Throwable) {}
         results
     }
 
@@ -180,7 +172,7 @@ object SoundCloudClient {
         val fullTracks = mutableListOf<SoundCloudTrack>()
         try {
             val cid = getClientId()
-            val plJson = JSONObject(httpGet("https://api-v2.soundcloud.com/playlists/$playlistId?client_id=$cid"))
+            val plJson = JSONObject(httpGet("https://api-v2.soundcloud.com/playlists/$playlistId?client_id=$cid", timeoutMs = 6000))
             val tracksArr = plJson.optJSONArray("tracks") ?: return@withContext fullTracks
             val missingIds = mutableListOf<Long>()
 
@@ -199,7 +191,7 @@ object SoundCloudClient {
                 for (chunk in missingIds.chunked(25)) {
                     try {
                         val idsParam = chunk.joinToString(",")
-                        val batchResp = httpGet("https://api-v2.soundcloud.com/tracks?ids=$idsParam&client_id=$cid")
+                        val batchResp = httpGet("https://api-v2.soundcloud.com/tracks?ids=$idsParam&client_id=$cid", timeoutMs = 6000)
                         val arr = org.json.JSONArray(batchResp)
                         for (k in 0 until arr.length()) {
                             val item = arr.optJSONObject(k) ?: continue
@@ -216,27 +208,24 @@ object SoundCloudClient {
         if (!forceRefresh) {
             resolvedUrlCache[transcodingUrl]?.let { return@withContext it }
         }
-        repeat(2) { attempt ->
-            try {
-                if (attempt == 1) clearCache()
-                val cid = getClientId()
-                val sep = if (transcodingUrl.contains("?")) "&" else "?"
-                val full = "$transcodingUrl${sep}client_id=$cid"
-                val json = JSONObject(httpGet(full))
-                val direct = json.optString("url", "").takeIf { it.isNotBlank() }
-                if (direct != null) {
-                    resolvedUrlCache[transcodingUrl] = direct
-                    return@withContext direct
-                }
-            } catch (_: Throwable) {}
-        }
+        try {
+            val cid = getClientId()
+            val sep = if (transcodingUrl.contains("?")) "&" else "?"
+            val full = "$transcodingUrl${sep}client_id=$cid"
+            val json = JSONObject(httpGet(full, timeoutMs = 4000))
+            val direct = json.optString("url", "").takeIf { it.isNotBlank() }
+            if (direct != null) {
+                resolvedUrlCache[transcodingUrl] = direct
+                return@withContext direct
+            }
+        } catch (_: Throwable) {}
         null
     }
 
     private fun downloadBytes(urlStr: String): ByteArray {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 12000
-            readTimeout = 15000
+            connectTimeout = 10000
+            readTimeout = 12000
             setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/133.0.0.0")
         }
         if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP_${conn.responseCode}")
@@ -245,7 +234,7 @@ object SoundCloudClient {
 
     private fun downloadHlsToMp3(m3u8Url: String, outFile: File): Boolean {
         return try {
-            val playlistText = httpGet(m3u8Url)
+            val playlistText = httpGet(m3u8Url, timeoutMs = 8000)
             val baseUrl = m3u8Url.substringBeforeLast("/") + "/"
             val segmentUrls = playlistText.lines()
                 .map { it.trim() }

@@ -1027,7 +1027,6 @@ fun MMPApp(
                                     }
                                 },
                                 onPlayYtTrack = { ytTrack, allResults ->
-                                    Toast.makeText(context, "Подключаем трек...", Toast.LENGTH_SHORT).show()
                                     scope.launch {
                                         val direct = YouTubeMusicClient.resolveAudioStreamUrl(
                                             ytTrack.videoId,

@@ -1449,18 +1449,18 @@ fun LibraryScreen(
     }
 
     val filteredArtists = remember(tracks, searchQuery) {
-        val map = mutableMapOf<String, MutableList<Track>>()
+        val map = LinkedHashMap<String, MutableList<Track>>()
         for (trk in tracks) {
             for (art in splitArtists(trk.artist)) {
                 map.getOrPut(art) { mutableListOf() }.add(trk)
             }
         }
-        if (searchQuery.isBlank()) map else map.filter { it.key.contains(searchQuery, ignoreCase = true) }
+        if (searchQuery.isBlank()) map else map.filterKeys { it.contains(searchQuery, ignoreCase = true) }
     }
 
     val filteredAlbums = remember(tracks, searchQuery) {
         val allAlb = tracks.groupBy { it.album }
-        if (searchQuery.isBlank()) allAlb else allAlb.filter { it.key.contains(searchQuery, ignoreCase = true) }
+        if (searchQuery.isBlank()) allAlb else allAlb.filterKeys { it.contains(searchQuery, ignoreCase = true) }
     }
 
     Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -1536,7 +1536,8 @@ fun LibraryScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            AnimatedContent(targetState = category, label = "") { cat ->
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                val cat = category
                 when (cat) {
                     0 -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
                         items(sortedTracks, key = { it.id }) { track ->
@@ -3715,8 +3716,9 @@ fun WavySlider(
     thumbColor: Color = waveColor
 ) {
     val ctx = LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
-    val waveEnabled = prefs.getBoolean("anim_wave_enabled", true)
+    val waveEnabled = remember { prefs.getBoolean("anim_wave_enabled", true) }
 
     var phase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(isPlaying, waveEnabled) {
@@ -3733,57 +3735,59 @@ fun WavySlider(
 
     val amplitudeFraction by animateFloatAsState(
         targetValue = if (isPlaying && waveEnabled) 1f else 0f,
-        animationSpec = tween(durationMillis = 320),
+        animationSpec = tween(durationMillis = 260),
         label = "waveAmp"
     )
 
-    var isInteracting by remember(trackKey) { mutableStateOf(false) }
-    var dragProgress by remember(trackKey) { mutableFloatStateOf(0f) }
-    var lastCommitTimeMs by remember(trackKey) { mutableLongStateOf(0L) }
+    var isScrubbing by remember(trackKey) { mutableStateOf(false) }
+    var scrubFraction by remember(trackKey) { mutableFloatStateOf(0f) }
+    var holdUntilMs by remember(trackKey) { mutableLongStateOf(0L) }
     var sliderWidthPx by remember { mutableFloatStateOf(1f) }
 
-    val now = SystemClock.elapsedRealtime()
-    val holdCommit = !isInteracting && (now - lastCommitTimeMs < 2000L)
-    val displayProgress = when {
-        isInteracting || holdCommit -> dragProgress
+    val nowMs = SystemClock.elapsedRealtime()
+    val activeFraction = when {
+        isScrubbing -> scrubFraction
+        nowMs < holdUntilMs -> scrubFraction
         else -> value.coerceIn(0f, 1f)
     }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(36.dp)
-            .onGloballyPositioned { coordinates ->
-                sliderWidthPx = coordinates.size.width.toFloat().coerceAtLeast(1f)
+            .height(40.dp)
+            .onGloballyPositioned { coords ->
+                val w = coords.size.width.toFloat()
+                if (w > 1f) sliderWidthPx = w
             }
-            .pointerInput(sliderWidthPx) {
+            .pointerInput(trackKey) {
                 awaitEachGesture {
-                    val down = awaitFirstDown()
-                    isInteracting = true
-                    val initialFrac = (down.position.x / sliderWidthPx).coerceIn(0f, 1f)
-                    dragProgress = initialFrac
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val w = sliderWidthPx.coerceAtLeast(1f)
+                    val startFrac = (down.position.x / w).coerceIn(0f, 1f)
+                    scrubFraction = startFrac
+                    isScrubbing = true
                     down.consume()
 
-                    var currX = down.position.x
+                    var latestFrac = startFrac
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
-                        if (!change.pressed) {
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull() ?: break
+                        val x = change.position.x.coerceIn(0f, w)
+                        latestFrac = (x / w).coerceIn(0f, 1f)
+                        scrubFraction = latestFrac
+                        if (change.positionChange() != Offset.Zero) {
                             change.consume()
+                        }
+                        if (!change.pressed) {
+                            if (change.positionChange() != Offset.Zero) change.consume()
                             break
                         }
-                        if (change.positionChange() != Offset.Zero) {
-                            currX = change.position.x
-                            val frac = (currX / sliderWidthPx).coerceIn(0f, 1f)
-                            dragProgress = frac
-                            change.consume()
-                        }
                     }
-                    val finalFrac = (currX / sliderWidthPx).coerceIn(0f, 1f)
-                    dragProgress = finalFrac
-                    lastCommitTimeMs = SystemClock.elapsedRealtime()
-                    isInteracting = false
-                    onSeekCommit(finalFrac)
+
+                    scrubFraction = latestFrac
+                    holdUntilMs = SystemClock.elapsedRealtime() + 1200L
+                    isScrubbing = false
+                    onSeekCommit(latestFrac)
                 }
             },
         contentAlignment = Alignment.Center
@@ -3791,7 +3795,7 @@ fun WavySlider(
         Canvas(modifier = Modifier.fillMaxWidth().height(26.dp)) {
             val width = size.width
             val midY = size.height / 2f
-            val thumbX = (width * displayProgress).coerceIn(0f, width)
+            val thumbX = (width * activeFraction).coerceIn(0f, width)
             val gap = 6.dp.toPx()
 
             if (thumbX + gap < width) {
@@ -3816,14 +3820,14 @@ fun WavySlider(
                         cap = StrokeCap.Round
                     )
                 } else {
-                    val wavePath = androidx.compose.ui.graphics.Path()
+                    val wavePath = Path()
                     val waveLength = 42.dp.toPx().coerceAtLeast(1f)
                     var x = 0f
-                    val step = 3.5f
+                    val step = 4f
                     var first = true
                     while (x <= endX) {
-                        val relativeX = x / waveLength
-                        val y = midY + kotlin.math.sin((relativeX * 2.0 * Math.PI + phase.toDouble())).toFloat() * maxAmpPx
+                        val rel = x / waveLength
+                        val y = midY + sin((rel * 2.0 * Math.PI + phase.toDouble())).toFloat() * maxAmpPx
                         if (first) {
                             wavePath.moveTo(x, y)
                             first = false
@@ -3840,35 +3844,41 @@ fun WavySlider(
                 }
             }
 
-            val thumbHalfH = if (isInteracting) 12.dp.toPx() else 9.dp.toPx()
+            val thumbHalfH = if (isScrubbing) 12.dp.toPx() else 9.dp.toPx()
             drawLine(
                 color = thumbColor,
                 start = Offset(thumbX, midY - thumbHalfH),
                 end = Offset(thumbX, midY + thumbHalfH),
-                strokeWidth = if (isInteracting) 5.dp.toPx() else 4.dp.toPx(),
+                strokeWidth = if (isScrubbing) 5.dp.toPx() else 4.dp.toPx(),
                 cap = StrokeCap.Round
             )
         }
 
-        if (isInteracting && durationMs > 1000L) {
-            val density = androidx.compose.ui.platform.LocalDensity.current
-            val previewMs = (displayProgress * durationMs).toLong()
-            val pad32Px = with(density) { 32.dp.toPx() }
-            val pad64Px = with(density) { 64.dp.toPx() }
-            val bubbleOffsetPx = (sliderWidthPx * displayProgress - pad32Px).coerceIn(0f, (sliderWidthPx - pad64Px).coerceAtLeast(0f))
+        if (isScrubbing) {
+            val safeDurMs = durationMs.coerceAtLeast(0L)
+            val previewMs = (activeFraction * safeDurMs).toLong()
+            val bubbleW = 58.dp
+            val bubbleWPx = with(density) { bubbleW.toPx() }
+            val maxLeftPx = (sliderWidthPx - bubbleWPx).coerceAtLeast(0f)
+            val leftPx = (sliderWidthPx * activeFraction - bubbleWPx / 2f).coerceIn(0f, maxLeftPx)
+
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = with(density) { bubbleOffsetPx.toDp() }, y = (-34).dp)
+                    .offset(x = with(density) { leftPx.toDp() }, y = (-34).dp)
+                    .width(bubbleW)
                     .clip(RoundedCornerShape(50))
                     .background(waveColor)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .padding(vertical = 4.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = formatMillis(previewMs),
                     color = Color.White,
                     fontWeight = FontWeight.Black,
                     fontSize = 12.sp,
+                    maxLines = 1,
+                    softWrap = false,
                     style = TextStyle(fontFeatureSettings = "tnum")
                 )
             }
