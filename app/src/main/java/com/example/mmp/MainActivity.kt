@@ -624,7 +624,7 @@ fun MMPApp(
                     YouTubeMusicClient.clearCache()
                     if (cur.filePath.startsWith("ytm://")) {
                         scope.launch {
-                            val cleanTitle = cur.title.replace(Regex("\([^)]*\)"), "").trim()
+                            val cleanTitle = cur.title.replace(Regex("\\([^)]*\\)"), "").trim()
                             val scMatches = SoundCloudClient.searchTracks("${cur.artist} $cleanTitle".trim(), limit = 5)
                             val best = scMatches.firstOrNull { it.streamProgressiveUrl != null }
                             val resolved = best?.streamProgressiveUrl?.let { SoundCloudClient.resolveStreamUrl(it, forceRefresh = true) }

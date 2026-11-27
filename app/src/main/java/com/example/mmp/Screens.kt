@@ -3851,12 +3851,15 @@ fun WavySlider(
         }
 
         if (isInteracting && durationMs > 1000L) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
             val previewMs = (displayProgress * durationMs).toLong()
-            val bubbleOffsetPx = (sliderWidthPx * displayProgress - 32.dp.toPx()).coerceIn(0f, (sliderWidthPx - 64.dp.toPx()).coerceAtLeast(0f))
+            val pad32Px = with(density) { 32.dp.toPx() }
+            val pad64Px = with(density) { 64.dp.toPx() }
+            val bubbleOffsetPx = (sliderWidthPx * displayProgress - pad32Px).coerceIn(0f, (sliderWidthPx - pad64Px).coerceAtLeast(0f))
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = with(androidx.compose.ui.platform.LocalDensity.current) { bubbleOffsetPx.toDp() }, y = (-34).dp)
+                    .offset(x = with(density) { bubbleOffsetPx.toDp() }, y = (-34).dp)
                     .clip(RoundedCornerShape(50))
                     .background(waveColor)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
