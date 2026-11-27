@@ -680,12 +680,12 @@ fun MMPApp(
         setPlayingState(!isPlaying)
     }
 
-    fun toggleShuffle() {
-        val newShuffle = !isShuffleEnabled
-        isShuffleEnabled = newShuffle
-        prefs.edit().putBoolean("saved_shuffle_enabled", newShuffle).apply()
+    fun setShuffleEnabled(enabled: Boolean) {
+        if (isShuffleEnabled == enabled) return
+        isShuffleEnabled = enabled
+        prefs.edit().putBoolean("saved_shuffle_enabled", enabled).apply()
         val cur = currentTrack
-        if (newShuffle && currentQueue.size > 1) {
+        if (enabled && currentQueue.size > 1) {
             val shuffled = if (cur != null) {
                 listOf(cur) + currentQueue.filter { it.id != cur.id }.shuffled()
             } else {
@@ -697,15 +697,24 @@ fun MMPApp(
         syncMediaService(cur, currentMetadata, isPlaying)
     }
 
+    fun toggleShuffle() {
+        setShuffleEnabled(!isShuffleEnabled)
+    }
+
+    fun setRepeatMode(mode: RepeatMode) {
+        if (repeatMode == mode) return
+        repeatMode = mode
+        prefs.edit().putInt("saved_repeat_mode", mode.ordinal).apply()
+        syncMediaService(currentTrack, currentMetadata, isPlaying)
+    }
+
     fun cycleRepeatMode() {
         val nextMode = when (repeatMode) {
             RepeatMode.OFF -> RepeatMode.ALL
             RepeatMode.ALL -> RepeatMode.ONE
             RepeatMode.ONE -> RepeatMode.OFF
         }
-        repeatMode = nextMode
-        prefs.edit().putInt("saved_repeat_mode", nextMode.ordinal).apply()
-        syncMediaService(currentTrack, currentMetadata, isPlaying)
+        setRepeatMode(nextMode)
     }
 
     fun startMyWave5050() {
@@ -752,6 +761,11 @@ fun MMPApp(
         PlayerBridge.onSeekTo = { pos -> safeSeekTo(pos) }
         PlayerBridge.onToggleShuffle = { toggleShuffle() }
         PlayerBridge.onCycleRepeat = { cycleRepeatMode() }
+        PlayerBridge.onSetShuffleEnabled = { enabled -> setShuffleEnabled(enabled) }
+        PlayerBridge.onSetRepeatMode = { ordinal ->
+            val mode = RepeatMode.entries.getOrNull(ordinal)
+            if (mode != null) setRepeatMode(mode)
+        }
     }
 
     LaunchedEffect(sleepTimerRemainingSec) {
