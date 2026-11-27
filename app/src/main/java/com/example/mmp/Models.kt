@@ -229,7 +229,8 @@ data class Track(
     val folderPath: String = "",
     val folderName: String = "Память",
     val customCoverUri: String? = null,
-    val customLyrics: String? = null
+    val customLyrics: String? = null,
+    val dateAdded: Long = 0L
 )
 
 data class TrackTagOverride(
@@ -326,7 +327,8 @@ fun buildTrackFromLocalFile(file: File, fallbackAlbum: String = "Playlists", fal
         filePath = file.absolutePath,
         folderPath = parent?.absolutePath ?: "/Music",
         folderName = parent?.name ?: fallbackAlbum,
-        customCoverUri = fallbackCover
+        customCoverUri = fallbackCover,
+        dateAdded = (file.lastModified() / 1000L).coerceAtLeast(0L)
     )
 }
 
@@ -935,7 +937,8 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
         MediaStore.Audio.Media.DURATION,
         MediaStore.Audio.Media.MIME_TYPE,
         MediaStore.Audio.Media.SIZE,
-        MediaStore.Audio.Media.DATA
+        MediaStore.Audio.Media.DATA,
+        MediaStore.Audio.Media.DATE_ADDED
     )
     val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
     val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
@@ -949,6 +952,7 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
             val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+            val dateAddedCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATE_ADDED)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
@@ -958,6 +962,7 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
                 val duration = cursor.getLong(durCol)
                 val mime = cursor.getString(mimeCol) ?: "audio/mpeg"
                 val size = cursor.getLong(sizeCol)
+                val dateAdded = if (dateAddedCol != -1) cursor.getLong(dateAddedCol) else 0L
                 val path = if (dataCol != -1) (cursor.getString(dataCol) ?: "") else ""
                 val parentFile = if (path.isNotBlank()) File(path).parentFile else null
                 val folderPath = parentFile?.absolutePath ?: "/Music"
@@ -966,7 +971,10 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = withContext(Dispatc
                 if (duration >= 5000L) {
                     val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
                     val key = path.ifBlank { id.toString() }
-                    byPath[key] = Track(id, contentUri, title, artist, album, duration, mime, size, path, folderPath, folderName)
+                    byPath[key] = Track(
+                        id, contentUri, title, artist, album, duration, mime, size, path, folderPath, folderName,
+                        dateAdded = dateAdded
+                    )
                 }
             }
         }

@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.Collator
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -1434,19 +1435,39 @@ fun LibraryScreen(
     }
 
     val sortedTracks = remember(tracks, sortMode, searchQuery) {
-        val filtered = if (searchQuery.isBlank()) tracks else tracks.filter {
-            it.title.contains(searchQuery, ignoreCase = true) || it.artist.contains(searchQuery, ignoreCase = true)
+        val query = searchQuery.trim()
+        val filtered = if (query.isBlank()) tracks else tracks.filter {
+            it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
+        }
+        val collator = Collator.getInstance(Locale.getDefault()).apply {
+            strength = Collator.PRIMARY
+            decomposition = Collator.CANONICAL_DECOMPOSITION
         }
         when (sortMode) {
-            TrackSortMode.DATE_ADDED -> filtered
-            TrackSortMode.TITLE -> filtered.sortedBy { it.title.lowercase() }
-            TrackSortMode.ARTIST -> filtered.sortedBy { it.artist.lowercase() }
-            TrackSortMode.DURATION -> filtered.sortedByDescending { it.durationMs }
+            TrackSortMode.DATE_ADDED -> filtered.sortedWith { first, second ->
+                val dateOrder = second.dateAdded.compareTo(first.dateAdded)
+                if (dateOrder != 0) dateOrder else collator.compare(first.title.trim(), second.title.trim())
+            }
+            TrackSortMode.TITLE -> filtered.sortedWith { first, second ->
+                val titleOrder = collator.compare(first.title.trim(), second.title.trim())
+                if (titleOrder != 0) titleOrder else collator.compare(first.artist.trim(), second.artist.trim())
+            }
+            TrackSortMode.ARTIST -> filtered.sortedWith { first, second ->
+                val firstArtist = splitArtists(first.artist).firstOrNull().orEmpty()
+                val secondArtist = splitArtists(second.artist).firstOrNull().orEmpty()
+                val artistOrder = collator.compare(firstArtist.trim(), secondArtist.trim())
+                if (artistOrder != 0) artistOrder else collator.compare(first.title.trim(), second.title.trim())
+            }
+            TrackSortMode.DURATION -> filtered.sortedWith { first, second ->
+                val durationOrder = second.durationMs.compareTo(first.durationMs)
+                if (durationOrder != 0) durationOrder else collator.compare(first.title.trim(), second.title.trim())
+            }
         }
     }
 
     val filteredPlaylists = remember(playlists, searchQuery) {
-        if (searchQuery.isBlank()) playlists else playlists.filter { it.name.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true) }
+        val query = searchQuery.trim()
+        if (query.isBlank()) playlists else playlists.filter { it.name.contains(query, ignoreCase = true) || it.description.contains(query, ignoreCase = true) }
     }
 
     val filteredArtists = remember(tracks, searchQuery) {
@@ -1456,12 +1477,14 @@ fun LibraryScreen(
                 map.getOrPut(art) { mutableListOf() }.add(trk)
             }
         }
-        if (searchQuery.isBlank()) map else map.filterKeys { it.contains(searchQuery, ignoreCase = true) }
+        val query = searchQuery.trim()
+        if (query.isBlank()) map else map.filterKeys { it.contains(query, ignoreCase = true) }
     }
 
     val filteredAlbums = remember(tracks, searchQuery) {
         val allAlb = tracks.groupBy { it.album }
-        if (searchQuery.isBlank()) allAlb else allAlb.filterKeys { it.contains(searchQuery, ignoreCase = true) }
+        val query = searchQuery.trim()
+        if (query.isBlank()) allAlb else allAlb.filterKeys { it.contains(query, ignoreCase = true) }
     }
 
     Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
