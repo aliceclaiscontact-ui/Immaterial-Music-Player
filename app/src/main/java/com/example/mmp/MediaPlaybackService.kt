@@ -29,6 +29,8 @@ object PlayerBridge {
     var onSeekTo: ((Long) -> Unit)? = null
     var onToggleShuffle: (() -> Unit)? = null
     var onCycleRepeat: (() -> Unit)? = null
+    var onSetShuffleEnabled: ((Boolean) -> Unit)? = null
+    var onSetRepeatMode: ((Int) -> Unit)? = null
 
     var currentTitle: String = "MMP"
     var currentArtist: String = "Готов к воспроизведению"
@@ -122,10 +124,24 @@ class MediaPlaybackService : Service() {
                     if (!isUpdatingInternally) PlayerBridge.onSeekTo?.invoke(pos)
                 }
                 override fun onSetShuffleMode(shuffleMode: Int) {
-                    if (!isUpdatingInternally) PlayerBridge.onToggleShuffle?.invoke()
+                    if (isUpdatingInternally) return
+                    val enabled = when (shuffleMode) {
+                        PlaybackStateCompat.SHUFFLE_MODE_NONE -> false
+                        PlaybackStateCompat.SHUFFLE_MODE_ALL,
+                        PlaybackStateCompat.SHUFFLE_MODE_GROUP -> true
+                        else -> return
+                    }
+                    PlayerBridge.onSetShuffleEnabled?.invoke(enabled)
                 }
                 override fun onSetRepeatMode(repeatMode: Int) {
-                    if (!isUpdatingInternally) PlayerBridge.onCycleRepeat?.invoke()
+                    if (isUpdatingInternally) return
+                    val modeOrdinal = when (repeatMode) {
+                        PlaybackStateCompat.REPEAT_MODE_NONE -> 0
+                        PlaybackStateCompat.REPEAT_MODE_ALL -> 1
+                        PlaybackStateCompat.REPEAT_MODE_ONE -> 2
+                        else -> return
+                    }
+                    PlayerBridge.onSetRepeatMode?.invoke(modeOrdinal)
                 }
                 override fun onCustomAction(action: String?, extras: Bundle?) {
                     when (action) {
