@@ -2951,14 +2951,25 @@ fun CurvedSleepTimerDialog(
 
 @Composable
 fun SettingsCategoryItem(icon: ImageVector, title: String, subtitle: String, textColor: Color, primaryColor: Color, onClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 14.dp, horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = primaryColor, modifier = Modifier.size(28.dp))
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = textColor.copy(0.6f), fontSize = 12.sp, lineHeight = 16.sp)
+    val itemShape = RoundedCornerShape(22.dp)
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(itemShape)
+            .background(textColor.copy(alpha = 0.045f))
+            .border(1.dp, textColor.copy(alpha = 0.075f), itemShape)
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(48.dp).clip(RoundedCornerShape(17.dp)).background(primaryColor.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = primaryColor, modifier = Modifier.size(25.dp))
         }
-        Icon(Icons.Filled.ChevronRight, null, tint = textColor.copy(0.4f))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = textColor.copy(0.62f), fontSize = 12.sp, lineHeight = 16.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        Icon(Icons.Filled.ChevronRight, null, tint = primaryColor.copy(alpha = 0.8f), modifier = Modifier.size(21.dp))
     }
 }
 
@@ -3000,9 +3011,9 @@ fun SettingsAndThemeEditor(
     AnimatedContent(targetState = activeSettingsMenu, label = "") { menu ->
         when (menu) {
             "MAIN" -> {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                     item { Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -3027,12 +3038,12 @@ fun SettingsAndThemeEditor(
                         }
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и Темы", "Цвета, формы обложек, светлая и тёмная тема", textColor, primaryColor) {
+                        SettingsCategoryItem(Icons.Filled.ColorLens, "Интерфейс и темы", "Цветовая схема, акцент и формы элементов", textColor, primaryColor) {
                             activeSettingsMenu = "UI"
                         }
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.GraphicEq, "Звук", "5-полосный эквалайзер, усиление баса и плавный переход", textColor, primaryColor) {
+                        SettingsCategoryItem(Icons.Filled.GraphicEq, "Звук и эквалайзер", "Плавное затухание, эквалайзер и усиление баса", textColor, primaryColor) {
                             activeSettingsMenu = "SOUND"
                         }
                     }
@@ -3042,7 +3053,7 @@ fun SettingsAndThemeEditor(
                         }
                     }
                     item {
-                        SettingsCategoryItem(Icons.Filled.FolderSpecial, "Медиатека и Папки", "Выбор папок с музыкой, пропуск треков от $minDurationSec сек", textColor, primaryColor) {
+                        SettingsCategoryItem(Icons.Filled.FolderSpecial, "Медиатека и папки", "Папки с музыкой и фильтр коротких аудио", textColor, primaryColor) {
                             activeSettingsMenu = "LIBRARY"
                         }
                     }
@@ -3057,7 +3068,7 @@ fun SettingsAndThemeEditor(
             }
             "STREAMING" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp)) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                             IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
@@ -3177,7 +3188,7 @@ fun SettingsAndThemeEditor(
             }
             "LIBRARY" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 40.dp)) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                             IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
@@ -3225,116 +3236,165 @@ fun SettingsAndThemeEditor(
             }
             "UI" -> {
                 BackHandler { activeSettingsMenu = "MAIN" }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 90.dp)
+                ) {
                     item {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                            IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
-                            Text("Интерфейс и Темы", color = textColor, fontWeight = FontWeight.Black, fontSize = 20.sp)
-                        }
-                    }
-                    item {
-                        Text("Режим оформления", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    ExpressiveFilterPill("Тёмная", themeConfig.themeMode == ThemeMode.DARK, primaryColor, textColor) {
-                                        onThemeChange(themeConfig.copy(themeMode = ThemeMode.DARK, bgHex = 0xFF0D0D12))
-                                    }
-                                }
-                                Box(modifier = Modifier.weight(1f)) {
-                                    ExpressiveFilterPill("Светлая", themeConfig.themeMode == ThemeMode.LIGHT, primaryColor, textColor) {
-                                        onThemeChange(themeConfig.copy(themeMode = ThemeMode.LIGHT, bgHex = 0xFFF7F5FA))
-                                    }
-                                }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { activeSettingsMenu = "MAIN" }) {
+                                Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp))
                             }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    ExpressiveFilterPill("Adaptive", themeConfig.themeMode == ThemeMode.ADAPTIVE, primaryColor, textColor) {
-                                        onThemeChange(themeConfig.copy(themeMode = ThemeMode.ADAPTIVE, bgHex = 0xFF0D0D12))
-                                    }
-                                }
-                                Box(modifier = Modifier.weight(1f)) {
-                                    ExpressiveFilterPill("Adaptive Светлая", themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT, primaryColor, textColor) {
-                                        onThemeChange(themeConfig.copy(themeMode = ThemeMode.ADAPTIVE_LIGHT, bgHex = 0xFFF7F5FA))
-                                    }
-                                }
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("Интерфейс и темы", color = textColor, fontWeight = FontWeight.Black, fontSize = 21.sp)
+                                Text("Настрой внешний вид Immaterial", color = textColor.copy(0.58f), fontSize = 12.sp)
                             }
                         }
                     }
                     item {
-                        Text("Акцентный цвет", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            presets.forEach { (name, hex) ->
+                        Column(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                                .background(surfaceColor.copy(alpha = 0.78f))
+                                .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("Цветовая схема", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Режим оформления и акцентный цвет", color = textColor.copy(0.58f), fontSize = 12.sp)
+                            }
+                            Text("Режим оформления", color = textColor.copy(0.82f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            val modes = listOf(
+                                Triple("Тёмная", ThemeMode.DARK, 0xFF0D0D12),
+                                Triple("Светлая", ThemeMode.LIGHT, 0xFFF7F5FA),
+                                Triple("Adaptive", ThemeMode.ADAPTIVE, 0xFF0D0D12),
+                                Triple("Adaptive светлая", ThemeMode.ADAPTIVE_LIGHT, 0xFFF7F5FA)
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                modes.chunked(2).forEach { pair ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        pair.forEach { (label, mode, bg) ->
+                                            val selected = themeConfig.themeMode == mode
+                                            Row(
+                                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp))
+                                                    .background(if (selected) primaryColor.copy(0.16f) else textColor.copy(0.035f))
+                                                    .border(if (selected) 1.5.dp else 1.dp, if (selected) primaryColor else textColor.copy(0.08f), RoundedCornerShape(16.dp))
+                                                    .clickable { onThemeChange(themeConfig.copy(themeMode = mode, bgHex = bg)) }
+                                                    .padding(horizontal = 11.dp, vertical = 13.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(Modifier.size(15.dp).clip(CircleShape).background(if (mode == ThemeMode.LIGHT || mode == ThemeMode.ADAPTIVE_LIGHT) Color(0xFFF4F0FA) else Color(0xFF17131F)).border(1.dp, textColor.copy(0.2f), CircleShape))
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(label, color = if (selected) primaryColor else textColor, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
+                                                if (selected) {
+                                                    Spacer(Modifier.weight(1f))
+                                                    Icon(Icons.Filled.CheckCircle, null, tint = primaryColor, modifier = Modifier.size(17.dp))
+                                                }
+                                            }
+                                        }
+                                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            Text("Акцентный цвет", color = textColor.copy(0.82f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                presets.forEach { (name, hex) ->
+                                    val selected = themeConfig.primaryHex == hex
+                                    Box(
+                                        modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(14.dp))
+                                            .background(Color(hex))
+                                            .border(if (selected) 3.dp else 1.dp, if (selected) textColor else textColor.copy(0.18f), RoundedCornerShape(14.dp))
+                                            .clickable { onThemeChange(themeConfig.copy(themeName = name, primaryHex = hex)) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (selected) Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(19.dp))
+                                    }
+                                }
                                 Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(hex))
-                                        .border(if (themeConfig.primaryHex == hex) 2.5.dp else 0.dp, textColor, CircleShape)
-                                        .clickable { onThemeChange(themeConfig.copy(themeName = name, primaryHex = hex)) }
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(surfaceColor)
-                                    .border(1.dp, textColor.copy(0.2f), CircleShape)
-                                    .clickable { showCustomColorPicker = !showCustomColorPicker },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Filled.Colorize, null, tint = primaryColor, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        AnimatedVisibility(visible = showCustomColorPicker) {
-                            Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(cardShape).background(surfaceColor).padding(16.dp)) {
-                                val previewColor = Color(customRed.toInt(), customGreen.toInt(), customBlue.toInt())
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Палитра", color = textColor, fontWeight = FontWeight.Bold)
-                                    Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(previewColor))
-                                }
-                                Slider(value = customRed, onValueChange = { customRed = it }, valueRange = 40f..255f)
-                                Slider(value = customGreen, onValueChange = { customGreen = it }, valueRange = 40f..255f)
-                                Slider(value = customBlue, onValueChange = { customBlue = it }, valueRange = 40f..255f)
-                                Button(
-                                    onClick = {
-                                        val hex = (0xFFL shl 24) or (customRed.toLong() shl 16) or (customGreen.toLong() shl 8) or customBlue.toLong()
-                                        onThemeChange(themeConfig.copy(themeName = "Custom RGB", primaryHex = hex))
-                                    },
-                                    shape = RoundedCornerShape(50),
-                                    colors = ButtonDefaults.buttonColors(containerColor = previewColor)
-                                ) {
-                                    Text("Применить", color = Color.Black, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                    item {
-                        Text("Форма обложек и кнопок", color = textColor.copy(0.7f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
-                            items(ShapeStyle.entries) { style ->
-                                val isSelected = themeConfig.shapeStyle == style
-                                val previewShape = style.toExpressiveShape()
-                                Box(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(previewShape)
-                                        .background(if (isSelected) primaryColor else surfaceColor)
-                                        .border(if (isSelected) 2.dp else 1.dp, if (isSelected) textColor else textColor.copy(0.25f), previewShape)
-                                        .clickable { onThemeChange(themeConfig.copy(shapeStyle = style)) },
+                                    modifier = Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(14.dp))
+                                        .background(textColor.copy(0.06f)).border(1.dp, textColor.copy(0.12f), RoundedCornerShape(14.dp))
+                                        .clickable { showCustomColorPicker = !showCustomColorPicker },
                                     contentAlignment = Alignment.Center
+                                ) { Icon(Icons.Filled.Colorize, null, tint = primaryColor, modifier = Modifier.size(20.dp)) }
+                            }
+                            AnimatedVisibility(visible = showCustomColorPicker) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                                        .background(textColor.copy(0.045f)).padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(7.dp)
                                 ) {
-                                    if (isSelected) {
-                                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color.Black))
+                                    val previewColor = Color(customRed.toInt(), customGreen.toInt(), customBlue.toInt())
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Свой цвет", color = textColor, fontWeight = FontWeight.Bold)
+                                        Box(Modifier.size(30.dp).clip(CircleShape).background(previewColor).border(1.dp, textColor.copy(0.2f), CircleShape))
+                                    }
+                                    Text("Красный", color = textColor.copy(0.65f), fontSize = 11.sp)
+                                    Slider(value = customRed, onValueChange = { customRed = it }, valueRange = 40f..255f, colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor))
+                                    Text("Зелёный", color = textColor.copy(0.65f), fontSize = 11.sp)
+                                    Slider(value = customGreen, onValueChange = { customGreen = it }, valueRange = 40f..255f, colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor))
+                                    Text("Синий", color = textColor.copy(0.65f), fontSize = 11.sp)
+                                    Slider(value = customBlue, onValueChange = { customBlue = it }, valueRange = 40f..255f, colors = SliderDefaults.colors(thumbColor = primaryColor, activeTrackColor = primaryColor))
+                                    Button(
+                                        onClick = {
+                                            val hex = (0xFFL shl 24) or (customRed.toLong() shl 16) or (customGreen.toLong() shl 8) or customBlue.toLong()
+                                            onThemeChange(themeConfig.copy(themeName = "Custom RGB", primaryHex = hex))
+                                        },
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Применить цвет", color = Color.Black, fontWeight = FontWeight.Bold) }
+                                }
+                            }
+                        }
+                    }
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                                .background(surfaceColor.copy(alpha = 0.78f))
+                                .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("Форма элементов", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Форма кнопок и поверхностей. Обложки всегда остаются квадратными.", color = textColor.copy(0.58f), fontSize = 12.sp)
+                            }
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(ShapeStyle.entries) { style ->
+                                    val selected = themeConfig.shapeStyle == style
+                                    val previewShape = style.toExpressiveShape()
+                                    Column(
+                                        modifier = Modifier.width(78.dp).clip(RoundedCornerShape(18.dp))
+                                            .background(if (selected) primaryColor.copy(0.14f) else textColor.copy(0.035f))
+                                            .border(if (selected) 1.5.dp else 1.dp, if (selected) primaryColor else textColor.copy(0.08f), RoundedCornerShape(18.dp))
+                                            .clickable { onThemeChange(themeConfig.copy(shapeStyle = style)) }
+                                            .padding(vertical = 12.dp, horizontal = 7.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(Modifier.size(40.dp).clip(previewShape).background(if (selected) primaryColor else primaryColor.copy(0.20f)), contentAlignment = Alignment.Center) {
+                                            if (selected) Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(19.dp))
+                                        }
+                                        Text(style.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }, color = if (selected) primaryColor else textColor.copy(0.72f), fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }
                         }
                     }
                     item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
-                            Button(onClick = onExport, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = primaryColor)) { Text("Экспорт темы", color = Color.Black, fontWeight = FontWeight.Bold) }
-                            OutlinedButton(onClick = onImport, shape = RoundedCornerShape(50)) { Text("Импорт темы", color = textColor) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
+                                Icon(Icons.Filled.FileUpload, null, tint = primaryColor)
+                                Spacer(Modifier.width(7.dp))
+                                Text("Экспорт темы", color = textColor, fontWeight = FontWeight.SemiBold)
+                            }
+                            OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
+                                Icon(Icons.Filled.FileDownload, null, tint = primaryColor)
+                                Spacer(Modifier.width(7.dp))
+                                Text("Импорт темы", color = textColor, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
@@ -3361,7 +3421,7 @@ fun SettingsAndThemeEditor(
                         .apply()
                 }
 
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 120.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp)) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                             IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
@@ -3459,7 +3519,7 @@ fun SettingsAndThemeEditor(
                 var waveAnimEnabled by remember { mutableStateOf(prefs.getBoolean("anim_wave_enabled", true)) }
                 var blurLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_blur", false)) }
 
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 120.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp)) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                             IconButton(onClick = { activeSettingsMenu = "MAIN" }) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
