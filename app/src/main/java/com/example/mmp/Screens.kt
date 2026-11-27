@@ -1775,6 +1775,7 @@ fun MiniPlayerBar(
 @Composable
 fun FullScreenPlayerOverlay(
     track: Track,
+    playbackSource: String,
     metadata: DetailedMetadata,
     isPlaying: Boolean,
     currentPosMs: Long,
@@ -1865,7 +1866,7 @@ fun FullScreenPlayerOverlay(
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                     Text(
-                        text = track.album.ifBlank { "Сейчас играет" },
+                        text = playbackSource.ifBlank { "Моя Медиатека" },
                         color = textColor,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,

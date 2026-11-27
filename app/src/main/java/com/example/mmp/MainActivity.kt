@@ -204,6 +204,7 @@ fun MMPApp(
     }
 
     var currentTrack by remember { mutableStateOf<Track?>(null) }
+    var currentPlaybackSource by remember { mutableStateOf(prefs.getString("last_playback_source", "Моя Медиатека") ?: "Моя Медиатека") }
     var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
     var isPlaying by remember { mutableStateOf(false) }
     var isMediaPlayerPrepared by remember { mutableStateOf(false) }
@@ -404,8 +405,12 @@ fun MMPApp(
         }
     }
 
-    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L, isRetry: Boolean = false) {
+    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L, isRetry: Boolean = false, sourceLabel: String? = null) {
         if (!isRetry) streamRetryCount = 0
+        if (!isRetry && !sourceLabel.isNullOrBlank()) {
+            currentPlaybackSource = sourceLabel
+            prefs.edit().putString("last_playback_source", sourceLabel).apply()
+        }
         if (currentTrack?.id != track.id) {
             loopPointAMs = null
             loopPointBMs = null
@@ -744,7 +749,7 @@ fun MMPApp(
             }
 
             if (mixed.isNotEmpty()) {
-                playTrack(mixed.first(), mixed)
+                playTrack(mixed.first(), mixed, sourceLabel = "Моя волна")
                 Toast.makeText(context, "«Моя волна» играет!", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(context, "Не удалось сформировать волну", Toast.LENGTH_SHORT).show()
@@ -976,7 +981,7 @@ fun MMPApp(
                             },
                             onRestartAppClick = { onRestartApp() },
                             onThemeChange = { themeConfig = it; StorageHelper.saveTheme(prefs, it) },
-                            onTrackClick = { playTrack(it, deviceTracks) },
+                            onTrackClick = { playTrack(it, deviceTracks, sourceLabel = "Моя Медиатека") },
                             onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
                             onStartMyWaveClick = { startMyWave5050() },
                             onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
@@ -997,7 +1002,13 @@ fun MMPApp(
                             openedPlaylist = openedPlaylist,
                             openedArtist = openedArtist,
                             openedAlbum = openedAlbum,
-                            onPlayContext = { queue, track -> playTrack(track, queue) },
+                            onPlayContext = { queue, track ->
+                                val source = openedPlaylist?.name?.let { "Плейлист • $it" }
+                                    ?: openedArtist?.let { "Исполнитель • $it" }
+                                    ?: openedAlbum?.let { "Альбом • $it" }
+                                    ?: "Моя Медиатека"
+                                playTrack(track, queue, sourceLabel = source)
+                            },
                             onTogglePlay = { togglePlayPause() },
                             onToggleShuffle = { toggleShuffle() },
                             onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
@@ -1057,14 +1068,14 @@ fun MMPApp(
                                                 savedScTracks = updated
                                                 StorageHelper.saveSoundCloudTracks(prefs, updated)
                                             }
-                                            playTrack(playable, queueTracks.ifEmpty { listOf(playable) })
+                                            playTrack(playable, queueTracks.ifEmpty { listOf(playable) }, sourceLabel = "YouTube Music")
                                         } else {
                                             Toast.makeText(context, "Не удалось получить аудиопоток", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 },
                                 onPlaySavedTrack = { savedTrk ->
-                                    playTrack(savedTrk, likedScTracks.ifEmpty { listOf(savedTrk) })
+                                    playTrack(savedTrk, likedScTracks.ifEmpty { listOf(savedTrk) }, sourceLabel = if (savedTrk.folderName == "YouTube Music") "YouTube Music" else "SoundCloud")
                                 },
                                 onDownloadYtTrack = { ytTrack ->
                                     Toast.makeText(context, "Скачиваем «${ytTrack.title}»...", Toast.LENGTH_SHORT).show()
@@ -1272,6 +1283,7 @@ fun MMPApp(
                     val qIdx = currentQueue.indexOfFirst { it.id == activeTrack.id }
                     FullScreenPlayerOverlay(
                         track = activeTrack,
+                        playbackSource = currentPlaybackSource,
                         metadata = currentMetadata,
                         isPlaying = isPlaying,
                         currentPosMs = currentPositionMs,
