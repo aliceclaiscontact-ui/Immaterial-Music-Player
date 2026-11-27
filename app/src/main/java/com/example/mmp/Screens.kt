@@ -1115,7 +1115,8 @@ fun CleanHeaderLayout(
     onPlayContext: (List<Track>, Track) -> Unit,
     onTogglePlay: () -> Unit,
     onToggleShuffle: () -> Unit,
-    onAddTrackToPlaylistClick: (Track) -> Unit
+    onAddTrackToPlaylistClick: (Track) -> Unit,
+    onAddMultipleTracksToPlaylist: (List<Track>) -> Unit
 ) {
     BackHandler { onBack() }
     val context = LocalContext.current
@@ -1134,14 +1135,9 @@ fun CleanHeaderLayout(
         item {
             Column(modifier = Modifier.fillMaxWidth().background(bgColor).padding(horizontal = 20.dp, vertical = 16.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack, modifier = Modifier.size(42.dp).clip(CircleShape).background(surfaceColor)) {
-                        Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp))
-                    }
-                    if (onEditPlaylistClick != null) {
-                        IconButton(onClick = onEditPlaylistClick, modifier = Modifier.size(42.dp).clip(CircleShape).background(surfaceColor)) {
-                            Icon(Icons.Filled.Edit, "Изменить", tint = primaryColor, modifier = Modifier.size(20.dp))
-                        }
-                    }
+                    IconButton(onClick = onBack, modifier = Modifier.size(42.dp).clip(CircleShape).background(surfaceColor)) { Icon(Icons.Filled.ArrowBackIosNew, null, tint = textColor, modifier = Modifier.size(18.dp)) }
+                    if (onEditPlaylistClick != null) IconButton(onClick = onEditPlaylistClick, modifier = Modifier.size(42.dp).clip(CircleShape).background(surfaceColor)) { Icon(Icons.Filled.Edit, "Изменить", tint = primaryColor, modifier = Modifier.size(20.dp)) }
+                    else Spacer(modifier = Modifier.size(42.dp))
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
@@ -1154,27 +1150,21 @@ fun CleanHeaderLayout(
                 Text(title, color = textColor, fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(subtitle, color = textColor.copy(0.65f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = {
-                            onToggleShuffle()
-                            if (!isContextPlaying && tracks.isNotEmpty()) onPlayContext(tracks.shuffled(), tracks.random())
-                        },
-                        modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isShuffleEnabled) primaryColor.copy(0.22f) else surfaceColor)
-                    ) {
-                        Icon(Icons.Filled.Shuffle, "Shuffle", tint = if (isShuffleEnabled) primaryColor else textColor.copy(0.75f), modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.height(18.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(if (isShuffleEnabled) primaryColor.copy(0.20f) else surfaceColor).clickable {
+                        onToggleShuffle(); if (!isContextPlaying && tracks.isNotEmpty()) onPlayContext(tracks.shuffled(), tracks.random())
+                    }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.Shuffle, "Перемешать", tint = if (isShuffleEnabled) primaryColor else textColor, modifier = Modifier.size(25.dp)) }
+                    Box(modifier = Modifier.weight(1.55f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(primaryColor).clickable {
+                        if (isContextPlaying) onTogglePlay() else if (tracks.isNotEmpty()) onPlayContext(tracks, tracks.first())
+                    }, contentAlignment = Alignment.Center) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            Icon(if (isContextPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (isContextPlaying) "Пауза" else "Играть", tint = Color.Black, modifier = Modifier.size(27.dp))
+                            Text(if (isContextPlaying) "Пауза" else "Играть", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
                     }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Box(
-                        modifier = Modifier.size(60.dp).clip(CircleShape).background(primaryColor).clickable {
-                            if (isContextPlaying) onTogglePlay()
-                            else if (tracks.isNotEmpty()) onPlayContext(tracks, tracks.first())
-                        },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(if (isContextPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(34.dp))
+                    Box(modifier = Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(surfaceColor).clickable { if (tracks.isNotEmpty()) onAddMultipleTracksToPlaylist(tracks) }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Add, "Добавить треки в плейлист", tint = textColor, modifier = Modifier.size(25.dp))
                     }
                 }
             }
@@ -1231,52 +1221,40 @@ fun AppleMusicArtistScreen(
     Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             item {
-                Box(modifier = Modifier.fillMaxWidth().height(410.dp)) {
-                    val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                    if (validHero != null) {
-                        Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp), alpha = 0.7f)
-                        Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize().background(surfaceColor), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(110.dp))
-                        }
+                Column(modifier = Modifier.fillMaxWidth().background(bgColor).padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onBack, modifier = Modifier.size(42.dp).clip(CircleShape).background(surfaceColor)) { Icon(Icons.Filled.ArrowBackIosNew, "Назад", tint = textColor, modifier = Modifier.size(18.dp)) }
+                        Spacer(modifier = Modifier.size(42.dp))
                     }
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(
-                            Brush.verticalGradient(colors = listOf(Color.Black.copy(0.25f), Color.Transparent, bgColor.copy(0.88f), bgColor))
-                        )
-                    )
-
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 18.dp, start = 16.dp, end = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onBack, modifier = Modifier.size(42.dp).clip(CircleShape).background(Color.Black.copy(0.45f))) {
-                            Icon(Icons.Filled.ArrowBackIosNew, "Назад", tint = Color.White, modifier = Modifier.size(18.dp))
-                        }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
+                        val validHero = heroBitmap?.takeIf { !it.isRecycled }
+                        if (validHero != null) {
+                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(24.dp), alpha = 0.55f)
+                            Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        } else Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(90.dp))
                     }
-
-                    Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(artistName, color = textColor, fontSize = 38.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { onToggleShuffle(); if (artistTracks.isNotEmpty()) onPlayContext(artistTracks.shuffled(), artistTracks.random()) }) {
-                                Icon(Icons.Filled.Shuffle, "Shuffle", tint = if (isShuffleEnabled) primaryColor else textColor, modifier = Modifier.size(28.dp))
-                            }
-                            Box(
-                                modifier = Modifier.size(58.dp).clip(CircleShape).background(primaryColor).clickable {
-                                    if (isArtistPlaying) onTogglePlay()
-                                    else if (artistTracks.isNotEmpty()) onPlayContext(artistTracks, artistTracks.first())
-                                },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(34.dp))
-                            }
-                            IconButton(onClick = { showSearchBar = !showSearchBar }) {
-                                Icon(Icons.Filled.Search, "Search", tint = textColor, modifier = Modifier.size(28.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(artistName, color = textColor, fontSize = 28.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Исполнитель • ${artistTracks.size} треков", color = textColor.copy(0.65f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(if (isShuffleEnabled) primaryColor.copy(0.20f) else surfaceColor).clickable {
+                            onToggleShuffle(); if (artistTracks.isNotEmpty()) onPlayContext(artistTracks.shuffled(), artistTracks.random())
+                        }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.Shuffle, "Перемешать", tint = if (isShuffleEnabled) primaryColor else textColor, modifier = Modifier.size(25.dp)) }
+                        Box(modifier = Modifier.weight(1.55f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(primaryColor).clickable {
+                            if (isArtistPlaying) onTogglePlay() else if (artistTracks.isNotEmpty()) onPlayContext(artistTracks, artistTracks.first())
+                        }, contentAlignment = Alignment.Center) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                Icon(if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (isArtistPlaying) "Пауза" else "Играть", tint = Color.Black, modifier = Modifier.size(27.dp))
+                                Text(if (isArtistPlaying) "Пауза" else "Играть", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             }
                         }
+                        Box(modifier = Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(surfaceColor).clickable { showSearchBar = !showSearchBar }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.Search, "Поиск треков", tint = textColor, modifier = Modifier.size(25.dp)) }
                     }
                 }
             }
-
             if (showSearchBar) {
                 item {
                     OutlinedTextField(
@@ -1293,7 +1271,7 @@ fun AppleMusicArtistScreen(
             item {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Песни", color = textColor, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                        Text("Популярные треки", color = textColor, fontSize = 21.sp, fontWeight = FontWeight.Black)
                         Spacer(modifier = Modifier.width(6.dp))
                         Icon(Icons.Filled.ChevronRight, null, tint = textColor.copy(0.6f))
                     }
@@ -1426,14 +1404,14 @@ fun LibraryScreen(
     if (openedPlaylist != null) {
         val currentPl = playlists.find { it.name == openedPlaylist.name } ?: openedPlaylist
         val plTracks = remember(currentPl, tracks) { resolvePlaylistTracks(currentPl, tracks) }
-        CleanHeaderLayout(currentPl.name, if (currentPl.description.isNotBlank()) currentPl.description else "Плейлист • ${plTracks.size} треков", plTracks, currentPl.coverUri, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedPlaylist(null) }, { onEditPlaylist(currentPl) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
+        CleanHeaderLayout(currentPl.name, if (currentPl.description.isNotBlank()) currentPl.description else "Плейлист • ${plTracks.size} треков", plTracks, currentPl.coverUri, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedPlaylist(null) }, { onEditPlaylist(currentPl) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick, onAddMultipleTracksToPlaylist)
         return
     }
 
     if (openedAlbum != null) {
         val albumTracks = run { tracks.filter { it.album == openedAlbum } }
         val artistName = albumTracks.firstOrNull()?.artist ?: "Неизвестный исполнитель"
-        CleanHeaderLayout(openedAlbum, "Альбом • $artistName", albumTracks, null, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedAlbum(null) }, null, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick)
+        CleanHeaderLayout(openedAlbum, "Альбом • $artistName", albumTracks, null, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedAlbum(null) }, null, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick, onAddMultipleTracksToPlaylist)
         return
     }
 
