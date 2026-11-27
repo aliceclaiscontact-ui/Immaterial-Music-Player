@@ -3079,7 +3079,6 @@ fun SettingsCategoryItem(
 }
 
 @Composable
-fun SettingsAndThemeEditor(@Composable
 fun SettingsAndThemeEditor(
     allRawTracks: List<Track>,
     themeConfig: MMPThemeConfig,
