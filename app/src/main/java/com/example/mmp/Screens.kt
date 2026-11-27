@@ -303,7 +303,7 @@ fun TrackCoverThumb(track: Track, shape: Shape, primaryColor: Color, sizeDp: Int
     LaunchedEffect(track.id, track.customCoverUri) {
         bitmap = loadTrackThumbnail(context, track)
     }
-    Box(modifier = Modifier.size(sizeDp.dp).clip(shape).background(primaryColor.copy(0.18f)), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.size(sizeDp.dp).clip(RoundedCornerShape(12.dp)).background(primaryColor.copy(0.18f)), contentAlignment = Alignment.Center) {
         val validBmp = bitmap?.takeIf { !it.isRecycled }
         if (validBmp != null) Image(validBmp.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         else Icon(Icons.Filled.MusicNote, null, tint = primaryColor, modifier = Modifier.size((sizeDp * 0.5f).dp))
@@ -351,7 +351,7 @@ fun PlaylistThumb(playlist: PlaylistItem, allTracks: List<Track>, expressiveShap
         }
     }
 
-    Box(modifier = Modifier.size(sizeDp.dp).clip(expressiveShape).background(primaryColor.copy(0.2f)), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.size(sizeDp.dp).clip(RoundedCornerShape(14.dp)).background(primaryColor.copy(0.2f)), contentAlignment = Alignment.Center) {
         val valid = coverBmp?.takeIf { !it.isRecycled }
         if (valid != null) {
             Image(valid.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -1121,7 +1121,10 @@ fun CleanHeaderLayout(
     onAddTrackToPlaylistClick: (Track) -> Unit,
     onAddMultipleTracksToPlaylist: (List<Track>) -> Unit,
     onOpenPlaylistTrackPicker: (() -> Unit)? = null,
-    onToggleTrackInPlaylist: ((Track) -> Unit)? = null
+    onToggleTrackInPlaylist: ((Track) -> Unit)? = null,
+    showAddButton: Boolean = true,
+    albumRepeatEnabled: Boolean = false,
+    onToggleAlbumRepeat: (() -> Unit)? = null
 ) {
     BackHandler { onBack() }
     val context = LocalContext.current
@@ -1145,13 +1148,16 @@ fun CleanHeaderLayout(
                     else Spacer(modifier = Modifier.size(42.dp))
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Box(modifier = Modifier.size(250.dp).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                     val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                    if (validHero != null) Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(34.dp), alpha = 0.42f)
-                    Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor), contentAlignment = Alignment.Center) {
+                    if (validHero != null) {
+                        Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(264.dp).blur(42.dp), alpha = 0.28f)
+                        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
+                    }
+                    Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
                         if (validHero != null) Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks, primaryColor, 210)
-                        else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(90.dp))
+                        else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks, primaryColor, 224)
+                        else Icon(Icons.Filled.Album, null, tint = primaryColor, modifier = Modifier.size(72.dp))
                     }
                 }
                 Spacer(modifier = Modifier.height(20.dp))
@@ -1171,8 +1177,18 @@ fun CleanHeaderLayout(
                             Text(if (isContextPlaying) "Пауза" else "Играть", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
                     }
-                    Box(modifier = Modifier.weight(1f).height(54.dp).clip(RoundedCornerShape(18.dp)).background(surfaceColor).clickable { if (onOpenPlaylistTrackPicker != null) onOpenPlaylistTrackPicker() else if (tracks.isNotEmpty()) onAddMultipleTracksToPlaylist(tracks) }, contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Add, "Добавить треки в плейлист", tint = textColor, modifier = Modifier.size(25.dp))
+                    if (showAddButton) {
+                        Box(Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(17.dp)).background(surfaceColor).clickable {
+                            if (onOpenPlaylistTrackPicker != null) onOpenPlaylistTrackPicker() else if (tracks.isNotEmpty()) onAddMultipleTracksToPlaylist(tracks)
+                        }, contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Add, "Добавить треки", tint = textColor, modifier = Modifier.size(23.dp))
+                        }
+                    } else {
+                        Box(Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(17.dp))
+                            .background(if (albumRepeatEnabled) primaryColor.copy(0.18f) else surfaceColor)
+                            .clickable { onToggleAlbumRepeat?.invoke() }, contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Repeat, "Повтор альбома", tint = if (albumRepeatEnabled) primaryColor else textColor, modifier = Modifier.size(23.dp))
+                        }
                     }
                 }
             }
@@ -1235,12 +1251,15 @@ fun AppleMusicArtistScreen(
                         Spacer(modifier = Modifier.size(42.dp))
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Box(modifier = Modifier.size(250.dp).align(Alignment.CenterHorizontally), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                         val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                        if (validHero != null) Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(34.dp), alpha = 0.42f)
-                        Box(modifier = Modifier.size(210.dp).clip(expressiveShape).background(surfaceColor), contentAlignment = Alignment.Center) {
+                        if (validHero != null) {
+                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(264.dp).blur(42.dp), alpha = 0.28f)
+                            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
+                        }
+                        Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
                             if (validHero != null) Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                            else Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(90.dp))
+                            else Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(72.dp))
                         }
                     }
                     Spacer(modifier = Modifier.height(20.dp))
@@ -1393,7 +1412,9 @@ fun LibraryScreen(
     onSetOpenedAlbum: (String?) -> Unit,
     onEditPlaylist: (PlaylistItem) -> Unit,
     onCreateNewPlaylistClick: () -> Unit,
-    onRescanClick: () -> Unit
+    onRescanClick: () -> Unit,
+    albumRepeatEnabled: Boolean = false,
+    onToggleAlbumRepeat: (() -> Unit)? = null
 ) {
     var category by remember { mutableIntStateOf(0) }
     var isSearchActive by remember { mutableStateOf(false) }
@@ -1419,10 +1440,7 @@ fun LibraryScreen(
         return
     }
 
-    if (openedAlbum != null) {
-        val albumTracks = run { tracks.filter { it.album == openedAlbum } }
-        val artistName = albumTracks.firstOrNull()?.artist ?: "Неизвестный исполнитель"
-        CleanHeaderLayout(openedAlbum, "Альбом • $artistName", albumTracks, null, primaryColor, textColor, surfaceColor, bgColor, expressiveShape, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedAlbum(null) }, null, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick, onAddMultipleTracksToPlaylist)
+album detail block
         return
     }
 
@@ -3675,11 +3693,17 @@ fun QueueManagementSheet(
     onDismiss: () -> Unit, onSelectTrack: (Track) -> Unit, onMoveTrack: (Int, Int) -> Unit, onRemoveTrack: (Int) -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     var draggingId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
+    var autoScrollDirection by remember { mutableIntStateOf(0) }
+    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 76.dp.toPx() }
     val latestQueue by rememberUpdatedState(queue)
+    LaunchedEffect(draggingId, autoScrollDirection) {
+        while (draggingId != null && autoScrollDirection != 0) {
+            listState.scrollBy(autoScrollDirection * 18f)
+            kotlinx.coroutines.delay(16)
+        }
+    }
     BackHandler { onDismiss() }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
         Column(Modifier.fillMaxWidth().padding(10.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(16.dp).heightIn(min = 320.dp, max = 690.dp)) {
@@ -3697,7 +3721,7 @@ fun QueueManagementSheet(
                 itemsIndexed(queue, key = { _, t -> t.id }) { index, trk ->
                     val current = currentTrack?.id == trk.id
                     val dragging = draggingId == trk.id
-                    Row(Modifier.fillMaxWidth().zIndex(if (dragging) 1f else 0f).graphicsLayer {
+                    Row(Modifier.animateItemPlacement().fillMaxWidth().zIndex(if (dragging) 1f else 0f).graphicsLayer {
                         translationY = if (dragging) dragOffset else 0f
                         scaleX = if (dragging) 1.02f else 1f
                         scaleY = if (dragging) 1.02f else 1f
@@ -3712,9 +3736,9 @@ fun QueueManagementSheet(
                         IconButton(onClick = { onRemoveTrack(index) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, null, tint = textColor.copy(0.55f), modifier = Modifier.size(18.dp)) }
                         Box(Modifier.size(36.dp).pointerInput(trk.id) {
                             detectDragGestures(
-                                onDragStart = { draggingId = trk.id; dragOffset = 0f },
-                                onDragEnd = { draggingId = null; dragOffset = 0f },
-                                onDragCancel = { draggingId = null; dragOffset = 0f },
+                                onDragStart = { draggingId = trk.id; dragOffset = 0f; autoScrollDirection = 0 },
+                                onDragEnd = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
+                                onDragCancel = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
                                 onDrag = { change, delta ->
                                     change.consume()
                                     dragOffset += delta.y
@@ -3727,8 +3751,11 @@ fun QueueManagementSheet(
                                         onMoveTrack(currentIndex, target.index)
                                         dragOffset = 0f
                                     }
-                                    if (center < info.viewportStartOffset + edge) scope.launch { listState.scrollBy(-22f) }
-                                    else if (center > info.viewportEndOffset - edge) scope.launch { listState.scrollBy(22f) }
+                                    autoScrollDirection = when {
+                                        center < info.viewportStartOffset + edge -> -1
+                                        center > info.viewportEndOffset - edge -> 1
+                                        else -> 0
+                                    }
                                 }
                             )
                         }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.DragIndicator, "Перетащить", tint = primaryColor, modifier = Modifier.size(21.dp)) }

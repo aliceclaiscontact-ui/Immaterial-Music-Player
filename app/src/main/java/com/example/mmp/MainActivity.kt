@@ -1019,6 +1019,8 @@ fun MMPApp(
                             },
                             onTogglePlay = { togglePlayPause() },
                             onToggleShuffle = { toggleShuffle() },
+                            albumRepeatEnabled = repeatMode != RepeatMode.OFF,
+                            onToggleAlbumRepeat = { setRepeatMode(if (repeatMode == RepeatMode.OFF) RepeatMode.ALL else RepeatMode.OFF) },
                             onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
                             onAddMultipleTracksToPlaylist = { tracksToAddToPlaylist = it },
                             onOpenPlaylistTrackPicker = { playlistTrackPickerTarget = it },
