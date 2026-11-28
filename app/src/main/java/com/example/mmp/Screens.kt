@@ -432,7 +432,7 @@ fun HomeScreen(
         ).show()
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), horizontalAlignment = Alignment.Start) {
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             if (settingsOnly) "Настройки" else "Главная",
@@ -1873,36 +1873,36 @@ fun LibraryScreen(
                                                 .background(surfaceColor)
                                         ) {
                                             PlaylistThumb(pl, tracks, expressiveShape, primaryColor, 148, fillBounds = true)
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(7.dp)
-                                                    .size(34.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color.Black.copy(0.48f))
-                                                    .clickable { onEditPlaylist(pl) },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(Icons.Outlined.MoreVert, "Изменить плейлист", tint = Color.White, modifier = Modifier.size(19.dp))
-                                            }
                                         }
                                         Spacer(modifier = Modifier.height(9.dp))
-                                        Text(
-                                            pl.name,
-                                            color = textColor,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                pl.name,
+                                                modifier = Modifier.weight(1f),
+                                                color = textColor,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            IconButton(
+                                                onClick = { onEditPlaylist(pl) },
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(Icons.Outlined.Edit, "Изменить плейлист", tint = textColor.copy(0.62f), modifier = Modifier.size(16.dp))
+                                            }
+                                        }
                                         Text(
                                             "$plCount треков",
-                                            modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
+                                            modifier = Modifier.fillMaxWidth(),
                                             color = textColor.copy(0.68f),
-                                            fontSize = 12.sp,
+                                            fontSize = 11.sp,
                                             maxLines = 1,
                                             softWrap = false,
-                                            overflow = TextOverflow.Ellipsis
+                                            overflow = TextOverflow.Clip
                                         )
                                     }
                                 }
