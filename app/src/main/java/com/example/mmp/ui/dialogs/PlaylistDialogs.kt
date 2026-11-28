@@ -205,6 +205,7 @@ fun QueueManagementSheet(
     queue: List<Track>, currentTrack: Track?, cardShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color,
     onDismiss: () -> Unit, onSelectTrack: (Track) -> Unit, onMoveTrack: (Int, Int) -> Unit, onRemoveTrack: (Int) -> Unit
 ) {
+    val upcomingQueue = remember(queue, currentTrack?.id) { queue.filterNot { it.id == currentTrack?.id } }
     val listState = rememberLazyListState()
     var draggingId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
@@ -243,7 +244,7 @@ fun QueueManagementSheet(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Очередь воспроизведения", color = textColor, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                    Text("${queue.size} треков", color = textColor.copy(0.62f), fontSize = 13.sp)
+                    Text("${upcomingQueue.size} следующих треков", color = textColor.copy(0.62f), fontSize = 13.sp)
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, "Закрыть очередь", tint = textColor)
@@ -270,13 +271,13 @@ fun QueueManagementSheet(
             }
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Далее", color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("Следующие треки", color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
                 Text("Удерживай  ≡  чтобы изменить порядок", color = textColor.copy(0.52f), fontSize = 10.sp)
             }
             Spacer(Modifier.height(8.dp))
 
-            if (queue.isEmpty()) {
+            if (upcomingQueue.isEmpty()) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.QueueMusic, null, tint = primaryColor.copy(0.8f), modifier = Modifier.size(48.dp))
@@ -292,7 +293,7 @@ fun QueueManagementSheet(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 12.dp)
                 ) {
-                    itemsIndexed(queue, key = { _, track -> trackStableKey(track) }) { index, track ->
+                    itemsIndexed(upcomingQueue, key = { _, track -> trackStableKey(track) }) { index, track ->
                         val isCurrent = currentTrack?.id == track.id
                         val isDragging = draggingId == track.id
                         Row(
@@ -317,7 +318,7 @@ fun QueueManagementSheet(
                                 Text("${track.artist} • ${formatMillis(track.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             IconButton(
-                                onClick = { if (!isCurrent) onRemoveTrack(index) },
+                                onClick = { if (!isCurrent) onRemoveTrack(latestQueue.indexOfFirst { it.id == track.id }) },
                                 enabled = !isCurrent,
                                 modifier = Modifier.size(38.dp)
                             ) {
@@ -342,8 +343,12 @@ fun QueueManagementSheet(
                                                 val target = layout.visibleItemsInfo.firstOrNull {
                                                     center >= it.offset && center <= it.offset + it.size
                                                 }
-                                                if (target != null && from >= 0 && target.index != from) {
-                                                    onMoveTrack(from, target.index)
+                                                val targetTrack = target?.let { upcomingQueue.getOrNull(it.index) }
+                                                val targetOriginalIndex = targetTrack?.let { item ->
+                                                    latestQueue.indexOfFirst { it.id == item.id }
+                                                } ?: -1
+                                                if (target != null && from >= 0 && targetOriginalIndex >= 0 && targetOriginalIndex != from) {
+                                                    onMoveTrack(from, targetOriginalIndex)
                                                     dragOffset = 0f
                                                 }
                                                 autoScrollDirection = when {
