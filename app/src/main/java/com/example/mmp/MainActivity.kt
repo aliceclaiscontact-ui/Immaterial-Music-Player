@@ -948,12 +948,8 @@ fun MMPApp(
 
     val cardShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toCardShape() }
     val expressiveShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toExpressiveShape() }
-    val effectivePrimaryHex = remember(themeConfig.themeMode, themeConfig.primaryHex, currentMetadata.coverArt) {
-        if ((themeConfig.themeMode == ThemeMode.ADAPTIVE || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT) && currentMetadata.coverArt != null) {
-            extractDominantColor(currentMetadata.coverArt, themeConfig.primaryHex)
-        } else themeConfig.primaryHex
-    }
-    val primaryColor by animateColorAsState(Color(effectivePrimaryHex), tween(500), label = "")
+    // Artwork never overrides the accent selected in the theme settings.
+    val primaryColor by animateColorAsState(Color(themeConfig.primaryHex), tween(300), label = "")
     val secondaryColor = Color(themeConfig.secondaryHex)
     val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
     LaunchedEffect(isLightMode) { onThemeLightChanged(isLightMode) }
