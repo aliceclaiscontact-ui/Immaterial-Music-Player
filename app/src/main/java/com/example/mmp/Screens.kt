@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -448,7 +449,12 @@ fun HomeScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
 
-        AnimatedContent(targetState = activeSubTab, transitionSpec = { fadeIn(tween(240)) togetherWith fadeOut(tween(180)) }, label = "") { subTab ->
+        AnimatedContent(
+            targetState = activeSubTab,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            transitionSpec = { fadeIn(tween(240)) togetherWith fadeOut(tween(180)) },
+            label = ""
+        ) { subTab ->
             if (subTab == 0) {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxSize()) {
                     if (!hasPermission) {
@@ -1106,6 +1112,61 @@ fun SoundCloudScreen(
 }
 
 @Composable
+@Composable
+private fun ArtworkAtmosphere(
+    bitmap: Bitmap?,
+    accentColor: Color,
+    backgroundColor: Color,
+    modifier: Modifier = Modifier,
+    overlayAlpha: Float = 0.62f
+) {
+    Box(
+        modifier = modifier.background(
+            Brush.verticalGradient(
+                listOf(accentColor.copy(alpha = 0.24f), backgroundColor, backgroundColor)
+            )
+        )
+    ) {
+        if (bitmap != null && !bitmap.isRecycled) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = 1.42f
+                        scaleY = 1.42f
+                    }
+                    .blur(72.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded),
+                alpha = 0.72f
+            )
+        }
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    listOf(
+                        backgroundColor.copy(alpha = overlayAlpha * 0.58f),
+                        backgroundColor.copy(alpha = overlayAlpha * 0.18f),
+                        backgroundColor.copy(alpha = overlayAlpha * 0.94f)
+                    )
+                )
+            )
+        )
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.horizontalGradient(
+                    listOf(
+                        backgroundColor.copy(alpha = 0.42f),
+                        Color.Transparent,
+                        backgroundColor.copy(alpha = 0.42f)
+                    )
+                )
+            )
+        )
+    }
+}
+
 fun CleanHeaderLayout(
     title: String,
     subtitle: String,
@@ -1157,10 +1218,13 @@ fun CleanHeaderLayout(
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                     val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                    if (validHero != null) {
-                        Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.35f; scaleY = 1.35f }.blur(64.dp), alpha = 0.42f)
-                        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
-                    }
+                    ArtworkAtmosphere(
+                        bitmap = validHero,
+                        accentColor = primaryColor,
+                        backgroundColor = bgColor,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp)),
+                        overlayAlpha = 0.68f
+                    )
                     Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
                         if (validHero != null) Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                         else if (customCoverUri == null && tracks.isNotEmpty()) PlaylistGridCover(tracks, primaryColor, 224)
@@ -1260,10 +1324,13 @@ fun AppleMusicArtistScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                         val validHero = heroBitmap?.takeIf { !it.isRecycled }
-                        if (validHero != null) {
-                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.35f; scaleY = 1.35f }.blur(64.dp), alpha = 0.42f)
-                            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
-                        }
+                        ArtworkAtmosphere(
+                            bitmap = validHero,
+                            accentColor = primaryColor,
+                            backgroundColor = bgColor,
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp)),
+                            overlayAlpha = 0.68f
+                        )
                         Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
                             if (validHero != null) Image(bitmap = validHero.asImageBitmap(), contentDescription = artistName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                             else Icon(Icons.Filled.Person, null, tint = textColor.copy(0.3f), modifier = Modifier.size(72.dp))
@@ -1637,7 +1704,11 @@ fun LibraryScreen(
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 val cat = category
                 when (cat) {
-                    0 -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
+                    0 -> LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 140.dp)
+                    ) {
                         items(sortedTracks, key = { it.id }) { track ->
                             val isSel = selectedTrackIds.contains(track.id)
                             TrackListItem(
@@ -1760,31 +1831,68 @@ fun LibraryScreen(
                                         )
                                         Text(
                                             "$plCount треков",
-                                            color = textColor.copy(0.58f),
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = textColor.copy(0.68f),
                                             fontSize = 12.sp,
-                                            maxLines = 1
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
                             }
                         }
                     }
-                    2 -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                    2 -> LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 140.dp)
+                    ) {
                         items(filteredArtists.keys.toList()) { artist ->
                             val artistTrackList = filteredArtists[artist] ?: emptyList()
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedArtist(artist) }.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (artistTrackList.isNotEmpty()) { TrackCoverThumb(artistTrackList.firstOrNull { it.customCoverUri != null } ?: artistTrackList.first(), CircleShape, primaryColor, 44); Spacer(modifier = Modifier.width(14.dp)) }
-                                Column(modifier = Modifier.weight(1f)) { Text(artist, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${artistTrackList.size} треков", color = textColor.copy(0.6f), fontSize = 12.sp) }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clip(cardShape)
+                                    .background(surfaceColor)
+                                    .border(1.dp, textColor.copy(0.08f), cardShape)
+                                    .clickable { onSetOpenedArtist(artist) }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (artistTrackList.isNotEmpty()) {
+                                    TrackCoverThumb(artistTrackList.firstOrNull { it.customCoverUri != null } ?: artistTrackList.first(), expressiveShape, primaryColor, 46)
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(artist, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${artistTrackList.size} треков", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                                 Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
                             }
                         }
                     }
-                    else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+                    else -> LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 140.dp)
+                    ) {
                         items(filteredAlbums.keys.toList()) { album ->
                             val albumTrackList = filteredAlbums[album] ?: emptyList()
-                            Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor).clickable { onSetOpenedAlbum(album) }.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (albumTrackList.isNotEmpty()) { TrackCoverThumb(albumTrackList.firstOrNull { it.customCoverUri != null } ?: albumTrackList.first(), expressiveShape, primaryColor, 46); Spacer(modifier = Modifier.width(14.dp)) }
-                                Column(modifier = Modifier.weight(1f)) { Text(album, color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${albumTrackList.firstOrNull()?.artist ?: ""} • ${albumTrackList.size} тр.", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clip(cardShape)
+                                    .background(surfaceColor)
+                                    .border(1.dp, textColor.copy(0.08f), cardShape)
+                                    .clickable { onSetOpenedAlbum(album) }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (albumTrackList.isNotEmpty()) {
+                                    TrackCoverThumb(albumTrackList.firstOrNull { it.customCoverUri != null } ?: albumTrackList.first(), expressiveShape, primaryColor, 46)
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(album, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${albumTrackList.firstOrNull()?.artist ?: ""} • ${albumTrackList.size} тр.", color = textColor.copy(0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                                 Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
                             }
                         }
@@ -1977,11 +2085,13 @@ fun FullScreenPlayerOverlay(
     val latestOnPlayPause by rememberUpdatedState(onPlayPause)
 
     Box(modifier = Modifier.fillMaxSize().background(bgColor).clickable(enabled = true, onClick = {})) {
-        if (validArt != null) {
-            Image(validArt.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(85.dp), alpha = 0.25f)
-        } else {
-            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(primaryColor.copy(0.22f), secondaryColor.copy(0.12f), bgColor))))
-        }
+        ArtworkAtmosphere(
+            bitmap = validArt,
+            accentColor = primaryColor,
+            backgroundColor = bgColor,
+            modifier = Modifier.fillMaxSize(),
+            overlayAlpha = 0.78f
+        )
 
         Column(
             modifier = Modifier
@@ -2639,17 +2749,13 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                 }
             } else {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (validArt != null) {
-            Image(
-                bitmap = validArt.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(65.dp),
-                alpha = 0.42f
-            )
-        } else {
-            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(primaryColor.copy(0.32f), secondaryColor.copy(0.2f), bgColor))))
-        }
+                    ArtworkAtmosphere(
+                        bitmap = validArt,
+                        accentColor = primaryColor,
+                        backgroundColor = bgColor,
+                        modifier = Modifier.fillMaxSize(),
+                        overlayAlpha = 0.74f
+                    )
         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.45f)))
 
         Column(
@@ -3145,23 +3251,6 @@ fun SettingsAndThemeEditor(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Настройки", color = textColor, fontWeight = FontWeight.Black, fontSize = 26.sp, textAlign = TextAlign.Start)
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = primaryColor.copy(alpha = 0.15f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, primaryColor.copy(alpha = 0.35f))
-                            ) {
-                                Text("v1.5.0", color = primaryColor, fontWeight = FontWeight.Bold, fontSize = 11.sp,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                            }
-                        }
-                    }
                     item {
                         SettingsCategoryItem(Icons.Filled.CloudQueue, "Стриминг", "Активно: ${selectedStreamState.title}", textColor, primaryColor, { activeSettingsMenu = "STREAMING" }, compact = true)
                     }
@@ -3907,22 +3996,26 @@ fun FrostedDockBar(
     onCreateClick: () -> Unit
 ) {
     val streamLabel = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) "YT Music" else "SoundCloud"
-    val streamIcon = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) Icons.Filled.PlayCircleOutline else Icons.Filled.CloudQueue
+    val streamIcon = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) Icons.Outlined.GraphicEq else Icons.Outlined.CloudQueue
 
     Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(surfaceColor.copy(0.95f)).border(1.dp, textColor.copy(0.12f), cardShape).padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-        DockVerticalItem(Icons.Filled.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
-        DockVerticalItem(Icons.Filled.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
+        DockVerticalItem(Icons.Outlined.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
+        DockVerticalItem(Icons.Outlined.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
         DockVerticalItem(streamIcon, streamLabel, selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
-        DockVerticalItem(Icons.Filled.AddCircle, "Создать", false, primaryColor, textColor, Modifier.weight(1f), onCreateClick)
+        DockVerticalItem(Icons.Outlined.Add, "Создать", false, primaryColor, textColor, Modifier.weight(1f), onCreateClick)
     }
 }
 
 @Composable
 fun DockVerticalItem(icon: ImageVector, label: String, selected: Boolean, primaryColor: Color, textColor: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Column(modifier = modifier.clip(RoundedCornerShape(16.dp)).clickable { onClick() }.padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Box(modifier = Modifier.width(48.dp).height(28.dp).clip(RoundedCornerShape(50)).background(if (selected) primaryColor.copy(0.24f) else Color.Transparent), contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (selected) primaryColor else textColor.copy(0.7f), modifier = Modifier.size(20.dp)) }
-        Spacer(modifier = Modifier.height(3.dp))
-        Text(label, color = if (selected) primaryColor else textColor.copy(0.75f), fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(14.dp)).clickable { onClick() }.padding(vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(icon, null, tint = if (selected) primaryColor else textColor.copy(0.62f), modifier = Modifier.size(21.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(label, color = if (selected) primaryColor else textColor.copy(0.68f), fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
