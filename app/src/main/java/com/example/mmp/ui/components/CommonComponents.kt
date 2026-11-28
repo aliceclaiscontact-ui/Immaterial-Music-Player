@@ -341,53 +341,85 @@ fun AddToPlaylistSheet(
     onSelectPlaylist: (PlaylistItem) -> Unit,
     onCreateNewPlaylistClick: () -> Unit
 ) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.55f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(onClick = {}).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(modifier = Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.3f)))
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("В какой плейлист добавить?", color = textColor, fontWeight = FontWeight.Black, fontSize = 19.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(if (tracks.size == 1) tracks.first().title else "Выбрано треков: ${tracks.size}", color = primaryColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(modifier = Modifier.height(16.dp))
-
+    BackHandler { onDismiss() }
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.58f)).clickable { onDismiss() },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp).navigationBarsPadding()
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(surfaceColor).clickable(onClick = {})
+                .padding(horizontal = 18.dp, vertical = 14.dp)
+                .heightIn(min = 300.dp, max = 650.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Box(Modifier.width(36.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.24f)).align(Alignment.CenterHorizontally))
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Добавить в плейлист", color = textColor, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (tracks.size == 1) tracks.first().title else "Выбрано треков: ${tracks.size}",
+                        color = textColor.copy(0.62f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Закрыть", tint = textColor) }
+            }
+            Spacer(Modifier.height(14.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(cardShape)
-                    .background(primaryColor.copy(0.18f))
-                    .border(1.dp, primaryColor, cardShape)
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                    .background(primaryColor.copy(0.16f))
                     .clickable { onCreateNewPlaylistClick() }
-                    .padding(14.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(modifier = Modifier.size(42.dp).clip(expressiveShape).background(primaryColor), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Add, null, tint = Color.Black, modifier = Modifier.size(22.dp))
+                Box(Modifier.size(48.dp).clip(RoundedCornerShape(18.dp)).background(primaryColor), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Add, null, tint = Color.Black, modifier = Modifier.size(25.dp))
                 }
-                Spacer(modifier = Modifier.width(14.dp))
-                Text("Создать новый плейлист", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Создать плейлист", color = textColor, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Text("Новая коллекция для выбранных треков", color = textColor.copy(0.62f), fontSize = 11.sp)
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = primaryColor)
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
+            Spacer(Modifier.height(18.dp))
+            Text("Ваши плейлисты", color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
             if (playlists.isEmpty()) {
-                Text("Плейлистов пока нет", color = textColor.copy(0.65f), fontSize = 13.sp)
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.LibraryMusic, null, tint = primaryColor.copy(0.8f), modifier = Modifier.size(42.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("Плейлистов пока нет", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Создай первый плейлист выше", color = textColor.copy(0.58f), fontSize = 12.sp)
+                    }
+                }
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.heightIn(max = 260.dp)) {
-                    items(playlists) { pl ->
-                        val plCount = resolvePlaylistTracks(pl, allTracks).size
-                        val alreadyContainsAll = tracks.isNotEmpty() && tracks.all { track ->
-                            pl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && pl.trackFilePaths.contains(track.filePath))
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
+                    items(playlists, key = { it.name }) { playlist ->
+                        val count = resolvePlaylistTracks(playlist, allTracks).size
+                        val containsAll = tracks.isNotEmpty() && tracks.all { track ->
+                            playlist.trackIds.contains(track.id) ||
+                                (track.filePath.isNotBlank() && playlist.trackFilePaths.contains(track.filePath))
                         }
-                        Row(modifier = Modifier.fillMaxWidth().clip(cardShape).background(textColor.copy(0.06f)).clickable { onSelectPlaylist(pl) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                PlaylistThumb(pl, allTracks, expressiveShape, primaryColor, 46)
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column {
-                                    Text(pl.name, color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Треков: $plCount", color = textColor.copy(0.6f), fontSize = 11.sp)
-                                }
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                                .background(if (containsAll) primaryColor.copy(0.13f) else textColor.copy(0.045f))
+                                .clickable { onSelectPlaylist(playlist) }
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            PlaylistThumb(playlist, allTracks, RoundedCornerShape(14.dp), primaryColor, 54)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(playlist.name, color = textColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("$count треков", color = textColor.copy(0.58f), fontSize = 11.sp)
                             }
-                            Icon(if (alreadyContainsAll) Icons.Filled.CheckCircle else Icons.Filled.Add, null, tint = if (alreadyContainsAll) Color(0xFF42C878) else primaryColor)
+                            Box(Modifier.size(38.dp).clip(CircleShape).background(if (containsAll) primaryColor else textColor.copy(0.06f)), contentAlignment = Alignment.Center) {
+                                Icon(if (containsAll) Icons.Filled.Check else Icons.Filled.Add, null, tint = if (containsAll) Color.Black else primaryColor, modifier = Modifier.size(20.dp))
+                            }
                         }
                     }
                 }
@@ -404,38 +436,73 @@ fun PlaylistTrackPickerSheet(
 ) {
     var query by remember(playlist.name) { mutableStateOf("") }
     val selectedIds = remember(currentTracks) { currentTracks.map { it.id }.toSet() }
-    val filtered = remember(allTracks, query) { if (query.isBlank()) allTracks else allTracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.contains(query, true) } }
+    val filtered = remember(allTracks, query) {
+        if (query.isBlank()) allTracks
+        else allTracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.contains(query, true) }
+    }
     BackHandler { onDismiss() }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(Modifier.fillMaxWidth().padding(12.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(onClick = {}).padding(18.dp).heightIn(min = 360.dp, max = 680.dp)) {
-            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.28f)).align(Alignment.CenterHorizontally))
-            Spacer(Modifier.height(12.dp))
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.60f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp).navigationBarsPadding()
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(surfaceColor).clickable(onClick = {})
+                .padding(horizontal = 18.dp, vertical = 14.dp)
+                .heightIn(min = 380.dp, max = 720.dp)
+        ) {
+            Box(Modifier.width(36.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.24f)).align(Alignment.CenterHorizontally))
+            Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Добавить треки", color = textColor, fontSize = 21.sp, fontWeight = FontWeight.Black)
+                    Text("Добавить треки", color = textColor, fontSize = 23.sp, fontWeight = FontWeight.Bold)
                     Text("В плейлист «${playlist.name}»", color = textColor.copy(0.62f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, null, tint = textColor) }
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Закрыть", tint = textColor) }
             }
-            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Поиск по медиатеке") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = primaryColor) }, shape = RoundedCornerShape(16.dp))
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("Найти трек или исполнителя") },
+                leadingIcon = { Icon(Icons.Filled.Search, null, tint = primaryColor) },
+                shape = RoundedCornerShape(22.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = primaryColor,
+                    unfocusedBorderColor = textColor.copy(0.16f),
+                    focusedTextColor = textColor,
+                    unfocusedTextColor = textColor,
+                    cursorColor = primaryColor
+                )
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Медиатека", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("${selectedIds.size} добавлено", color = primaryColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
             Spacer(Modifier.height(8.dp))
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
                 items(filtered, key = { trackStableKey(it) }) { track ->
                     val added = selectedIds.contains(track.id)
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (added) primaryColor.copy(0.10f) else textColor.copy(0.04f)).clickable { onToggleTrack(track) }.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TrackCoverThumb(track, expressiveShape, primaryColor, 44)
-                        Spacer(Modifier.width(10.dp))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                            .background(if (added) primaryColor.copy(0.13f) else textColor.copy(0.035f))
+                            .clickable { onToggleTrack(track) }.padding(9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TrackCoverThumb(track, RoundedCornerShape(12.dp), primaryColor, 46)
+                        Spacer(Modifier.width(11.dp))
                         Column(Modifier.weight(1f)) {
                             Text(track.title, color = textColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text("${track.artist} • ${formatMillis(track.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        IconButton(onClick = { onToggleTrack(track) }, modifier = Modifier.size(40.dp).clip(CircleShape).background(if (added) Color(0xFF42C878).copy(0.15f) else primaryColor.copy(0.12f))) {
-                            Icon(if (added) Icons.Filled.Check else Icons.Filled.Add, null, tint = if (added) Color(0xFF42C878) else primaryColor)
+                        Box(Modifier.size(38.dp).clip(CircleShape).background(if (added) primaryColor else textColor.copy(0.06f)), contentAlignment = Alignment.Center) {
+                            Icon(if (added) Icons.Filled.Check else Icons.Filled.Add, null, tint = if (added) Color.Black else primaryColor, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
             }
-            Text("${selectedIds.size} треков в плейлисте", color = textColor.copy(0.58f), fontSize = 11.sp)
         }
     }
 }
