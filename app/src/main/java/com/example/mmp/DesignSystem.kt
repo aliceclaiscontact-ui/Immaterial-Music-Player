@@ -23,8 +23,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Outline
@@ -120,32 +118,13 @@ fun FrostedDockBar(
     isLightMode: Boolean,
     onTabSelected: (Int) -> Unit
 ) {
-    val panelShape = RoundedCornerShape(MMPShapeRadii.large)
-    val panelBrush = Brush.verticalGradient(
-        if (isLightMode) listOf(
-            Color.White.copy(alpha = 0.78f),
-            Color(0xFFF3EAFB).copy(alpha = 0.66f),
-            surfaceColor.copy(alpha = 0.62f)
-        ) else listOf(
-            Color(0xFF76558E).copy(alpha = 0.42f),
-            Color(0xFF49305F).copy(alpha = 0.50f),
-            Color(0xFF241331).copy(alpha = 0.62f)
-        )
-    )
-    val edgeBrush = Brush.verticalGradient(
-        listOf(
-            Color.White.copy(alpha = if (isLightMode) 0.78f else 0.28f),
-            primaryColor.copy(alpha = 0.18f),
-            Color.White.copy(alpha = 0.06f)
-        )
-    )
+    val panelShape = RoundedCornerShape(MMPShapeRadii.medium)
+    val solidSurface = if (isLightMode) Color(0xFFF0F1F2) else Color(0xFF202328)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(18.dp, panelShape, clip = false)
             .clip(panelShape)
-            .background(panelBrush)
-            .border(1.dp, edgeBrush, panelShape)
+            .background(solidSurface)
             .padding(horizontal = 6.dp, vertical = 7.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
@@ -156,7 +135,6 @@ fun FrostedDockBar(
         DockItem(Icons.Outlined.Settings, "Настройки", selectedTab == 3, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(3) }
     }
 }
-
 @Composable
 private fun DockItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
