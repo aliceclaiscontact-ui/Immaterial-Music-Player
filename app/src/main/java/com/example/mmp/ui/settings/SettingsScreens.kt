@@ -744,8 +744,8 @@ fun SettingsAndThemeEditor(
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Размытие неактивных строк текста", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Мягкий фокус на текущей строке песни", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                    Text("Плавная смена строк песни", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Motion blur при переходе к следующей строке текста", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                                 Switch(
                                     checked = blurLyricsEnabled,
