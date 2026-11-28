@@ -58,10 +58,7 @@ enum class TrackSortMode(val label: String) {
 }
 
 enum class ShapeStyle(val label: String) {
-    SQUIRCLE("Плавная"),
-    COOKIE("Клевер"),
-    FLOWER("Цветок"),
-    STAR("Звезда")
+    SQUIRCLE("Стандартная")
 }
 
 enum class ThemeMode(val label: String) {
@@ -368,26 +365,36 @@ suspend fun shareTrackCardImage(
 fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
     if (bitmap == null || bitmap.isRecycled) return fallbackHex
     return try {
-        val scaled = Bitmap.createScaledBitmap(bitmap, 16, 16, false)
-        var rSum = 0L; var gSum = 0L; var bSum = 0L; var count = 0L
-        for (x in 0 until 16) {
-            for (y in 0 until 16) {
+        val scaled = Bitmap.createScaledBitmap(bitmap, 32, 32, false)
+        val hueBins = Array(24) { mutableListOf<FloatArray>() }
+
+        for (x in 0 until 32) {
+            for (y in 0 until 32) {
                 val pixel = scaled.getPixel(x, y)
-                val r = (pixel shr 16) and 0xFF
-                val g = (pixel shr 8) and 0xFF
-                val b = pixel and 0xFF
-                val brightness = (r + g + b) / 3
-                if (brightness in 35..235) {
-                    rSum += r; gSum += g; bSum += b; count++
-                }
+                val hsv = FloatArray(3)
+                android.graphics.Color.colorToHSV(pixel, hsv)
+
+                // Ignore near-gray, nearly black and almost-white pixels.
+                if (hsv[1] < 0.28f || hsv[2] !in 0.18f..0.94f) continue
+
+                val hueBin = (hsv[0] / 15f).toInt().coerceIn(0, 23)
+                hueBins[hueBin].add(hsv)
             }
         }
-        if (count == 0L) return fallbackHex
-        val rAvg = (rSum / count).coerceIn(60, 255)
-        val gAvg = (gSum / count).coerceIn(60, 255)
-        val bAvg = (bSum / count).coerceIn(60, 255)
-        (0xFFL shl 24) or (rAvg shl 16) or (gAvg shl 8) or bAvg
-    } catch (_: Exception) { fallbackHex }
+
+        val dominantBin = hueBins
+            .filter { it.size >= 2 }
+            .maxByOrNull { bin -> bin.sumOf { it[1].toDouble() } }
+            ?: return fallbackHex
+
+        val hue = dominantBin.map { it[0] }.average().toFloat()
+        val saturation = dominantBin.map { it[1] }.average().toFloat().coerceIn(0.46f, 0.86f)
+        val value = dominantBin.map { it[2] }.average().toFloat().coerceIn(0.62f, 0.90f)
+
+        android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, value)).toLong() and 0xFFFFFFFFL
+    } catch (_: Exception) {
+        fallbackHex
+    }
 }
 
 fun parseLrcText(raw: String): List<LyricLine> {
@@ -615,6 +622,75 @@ object StorageHelper {
             }
         } catch (_: Throwable) {}
         return list
+    }
+
+    fun saveDeviceLibraryCache(context: Context, tracks: List<Track>) {
+        val atomicFile = android.util.AtomicFile(File(context.filesDir, "device_library_cache_v1.json"))
+        try {
+            val array = JSONArray()
+            tracks.forEach { track ->
+                array.put(JSONObject().apply {
+                    put("id", track.id)
+                    put("uri", track.uri.toString())
+                    put("title", track.title)
+                    put("artist", track.artist)
+                    put("album", track.album)
+                    put("durationMs", track.durationMs)
+                    put("mimeType", track.mimeType)
+                    put("sizeBytes", track.sizeBytes)
+                    put("filePath", track.filePath)
+                    put("folderPath", track.folderPath)
+                    put("folderName", track.folderName)
+                    put("dateAdded", track.dateAdded)
+                    if (track.customCoverUri != null) put("customCoverUri", track.customCoverUri)
+                    if (track.customLyrics != null) put("customLyrics", track.customLyrics)
+                })
+            }
+            val output = atomicFile.startWrite()
+            try {
+                output.write(array.toString().toByteArray(Charsets.UTF_8))
+                atomicFile.finishWrite(output)
+            } catch (_: Throwable) {
+                atomicFile.failWrite(output)
+            }
+        } catch (_: Throwable) {
+            // The in-memory library remains usable if disk caching is temporarily unavailable.
+        }
+    }
+
+    fun loadDeviceLibraryCache(context: Context): List<Track> {
+        val atomicFile = android.util.AtomicFile(File(context.filesDir, "device_library_cache_v1.json"))
+        return try {
+            val raw = atomicFile.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val array = JSONArray(raw)
+            val tracks = mutableListOf<Track>()
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val uri = item.optString("uri", "")
+                if (uri.isBlank()) continue
+                tracks.add(
+                    Track(
+                        id = item.optLong("id"),
+                        uri = Uri.parse(uri),
+                        title = item.optString("title", "Неизвестный трек"),
+                        artist = item.optString("artist", "Неизвестный исполнитель"),
+                        album = item.optString("album", "Без альбома"),
+                        durationMs = item.optLong("durationMs", 0L),
+                        mimeType = item.optString("mimeType", "audio/mpeg"),
+                        sizeBytes = item.optLong("sizeBytes", 0L),
+                        filePath = item.optString("filePath", ""),
+                        folderPath = item.optString("folderPath", ""),
+                        folderName = item.optString("folderName", "Music"),
+                        customCoverUri = item.optString("customCoverUri", "").ifBlank { null },
+                        customLyrics = item.optString("customLyrics", "").ifBlank { null },
+                        dateAdded = item.optLong("dateAdded", 0L)
+                    )
+                )
+            }
+            tracks
+        } catch (_: Throwable) {
+            emptyList()
+        }
     }
 
     fun saveTheme(prefs: SharedPreferences, config: MMPThemeConfig) {
@@ -853,11 +929,17 @@ fun applyOverridesToTrack(track: Track, overrides: Map<Long, TrackTagOverride>):
     )
 }
 
+data class DeviceMusicScanResult(
+    val tracks: List<Track>,
+    val isComplete: Boolean
+)
+
 private val deviceMusicScanMutex = Mutex()
 
-suspend fun scanDeviceMusic(context: Context): List<Track> = deviceMusicScanMutex.withLock {
+suspend fun scanDeviceMusicResult(context: Context): DeviceMusicScanResult = deviceMusicScanMutex.withLock {
     withContext(Dispatchers.IO) {
         val byPath = LinkedHashMap<String, Track>()
+        var mediaStoreQuerySucceeded = false
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         } else {
@@ -875,13 +957,16 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = deviceMusicScanMute
             MediaStore.Audio.Media.DATE_ADDED
         )
         try {
-            context.contentResolver.query(
+            val mediaStoreCursor = context.contentResolver.query(
                 collection,
                 projection,
                 "${MediaStore.Audio.Media.IS_MUSIC} != 0",
                 null,
                 "${MediaStore.Audio.Media.DATE_ADDED} DESC"
-            )?.use { cursor ->
+            )
+            if (mediaStoreCursor != null) {
+                mediaStoreQuerySucceeded = true
+                mediaStoreCursor.use { cursor ->
                 val idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
                 val titleCol = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
                 val artistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST)
@@ -923,6 +1008,7 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = deviceMusicScanMute
                         }
                     }
                 }
+                }
             }
         } catch (_: SecurityException) {
             // Permission may have been revoked while the query was running.
@@ -930,45 +1016,58 @@ suspend fun scanDeviceMusic(context: Context): List<Track> = deviceMusicScanMute
             // A transient provider error must not crash the player.
         }
 
-        // Extra discovery for files downloaded by Imma3 but not indexed by MediaStore yet.
-        try {
-            val musicRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            val subDirs = listOf(
-                File(musicRoot, "Playlists"),
-                File(musicRoot, "MMP_SoundCloud"),
-                File(musicRoot, "Imma3_YTMusic")
-            )
-            val supportedExtensions = setOf("mp3", "m4a", "flac", "wav", "ogg", "opus")
-            for (dir in subDirs) {
-                try {
-                    if (!dir.isDirectory) continue
-                    dir.walkTopDown().maxDepth(7).forEach { file ->
-                        try {
-                            if (
-                                file.isFile &&
-                                file.length() > 2048L &&
-                                file.extension.lowercase(Locale.ROOT) in supportedExtensions
-                            ) {
-                                val path = file.absolutePath
-                                if (!byPath.containsKey(path)) {
-                                    byPath[path] = buildTrackFromLocalFile(file, file.parentFile?.name ?: "Playlists")
-                                }
-                            }
-                        } catch (_: Exception) {
-                            // Skip inaccessible files without aborting the complete scan.
-                        }
-                    }
-                } catch (_: Exception) {
-                    // Skip one inaccessible download directory and continue.
-                }
-            }
-        } catch (_: Exception) {
-            // Public Music directory can be unavailable on scoped-storage devices.
-        }
-
-        byPath.values.toList()
+        DeviceMusicScanResult(byPath.values.toList(), mediaStoreQuerySucceeded)
     }
 }
+
+suspend fun scanUnindexedDownloadTracks(context: Context): List<Track> = withContext(Dispatchers.IO) {
+    val byPath = LinkedHashMap<String, Track>()
+    try {
+        val musicRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val subDirs = listOf(
+            File(musicRoot, "Playlists"),
+            File(musicRoot, "MMP_SoundCloud"),
+            File(musicRoot, "Imma3_YTMusic")
+        )
+        val supportedExtensions = setOf("mp3", "m4a", "flac", "wav", "ogg", "opus")
+        for (dir in subDirs) {
+            try {
+                if (!dir.isDirectory) continue
+                dir.walkTopDown().maxDepth(7).forEach { file ->
+                    try {
+                        if (
+                            file.isFile &&
+                            file.length() > 2048L &&
+                            file.extension.lowercase(Locale.ROOT) in supportedExtensions
+                        ) {
+                            val path = file.absolutePath
+                            if (!byPath.containsKey(path)) {
+                                byPath[path] = buildTrackFromLocalFile(file, file.parentFile?.name ?: "Playlists")
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Skip inaccessible files without aborting the complete scan.
+                    }
+                }
+            } catch (_: Exception) {
+                // Skip one inaccessible download directory and continue.
+            }
+        }
+    } catch (_: Exception) {
+        // Public Music directory can be unavailable on scoped-storage devices.
+    }
+
+    byPath.values.toList()
+}
+
+suspend fun scanDeviceMusic(context: Context): List<Track> {
+    val mediaStore = scanDeviceMusicResult(context)
+    val fallback = scanUnindexedDownloadTracks(context)
+    return (mediaStore.tracks + fallback).distinctBy {
+        it.filePath.ifBlank { it.uri.toString() }
+    }
+}
+
 private const val MAX_ARTWORK_BYTES = 16 * 1024 * 1024
 
 private fun readArtworkBytes(input: InputStream): ByteArray? {

@@ -47,6 +47,8 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -104,14 +106,41 @@ fun MMPApp(
     var rawDeviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var libraryRefreshJob by remember { mutableStateOf<Job?>(null) }
 
+    suspend fun refreshDeviceLibraryNow() {
+        val mediaStoreResult = scanDeviceMusicResult(context)
+        if (mediaStoreResult.isComplete) {
+            rawDeviceTracks = mediaStoreResult.tracks
+            val mediaStoreSnapshot = rawDeviceTracks
+            withContext(Dispatchers.IO) {
+                StorageHelper.saveDeviceLibraryCache(context, mediaStoreSnapshot)
+            }
+        } else if (mediaStoreResult.tracks.isNotEmpty()) {
+            rawDeviceTracks = (rawDeviceTracks + mediaStoreResult.tracks).distinctBy {
+                it.filePath.ifBlank { it.uri.toString() }
+            }
+        }
+
+        // This slower compatibility pass runs only after the main MediaStore list is visible.
+        val unindexedDownloads = scanUnindexedDownloadTracks(context)
+        if (unindexedDownloads.isNotEmpty()) {
+            rawDeviceTracks = (rawDeviceTracks + unindexedDownloads).distinctBy {
+                it.filePath.ifBlank { it.uri.toString() }
+            }
+            val completeSnapshot = rawDeviceTracks
+            withContext(Dispatchers.IO) {
+                StorageHelper.saveDeviceLibraryCache(context, completeSnapshot)
+            }
+        }
+    }
+
     fun scheduleDeviceLibraryRefresh() {
         libraryRefreshJob?.cancel()
         libraryRefreshJob = scope.launch {
             delay(850L)
             try {
-                rawDeviceTracks = scanDeviceMusic(context)
+                refreshDeviceLibraryNow()
             } catch (_: Throwable) {
-                // Keep the last good library snapshot if a scan fails.
+                // Keep the last good cache and current in-memory library on transient failures.
             }
         }
     }
@@ -357,8 +386,13 @@ fun MMPApp(
         val granted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
         hasAudioPermission = granted
         if (granted) {
-            val scanned = scanDeviceMusic(context)
-            rawDeviceTracks = scanned
+            val cachedTracks = withContext(Dispatchers.IO) {
+                StorageHelper.loadDeviceLibraryCache(context)
+            }
+            if (cachedTracks.isNotEmpty()) {
+                rawDeviceTracks = cachedTracks
+            }
+            refreshDeviceLibraryNow()
         } else {
             permissionLauncher.launch(audioPermission)
         }
@@ -948,14 +982,23 @@ fun MMPApp(
 
     val cardShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toCardShape() }
     val expressiveShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toExpressiveShape() }
-    // Artwork never overrides the accent selected in the theme settings.
-    val primaryColor by animateColorAsState(Color(themeConfig.primaryHex), tween(300), label = "")
-    val secondaryColor = Color(themeConfig.secondaryHex)
+    val isAdaptiveMode = themeConfig.themeMode == ThemeMode.ADAPTIVE || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
+    val effectivePrimaryHex = remember(themeConfig.themeMode, themeConfig.primaryHex, currentMetadata.coverArt) {
+        if (isAdaptiveMode) extractDominantColor(currentMetadata.coverArt, themeConfig.primaryHex)
+        else themeConfig.primaryHex
+    }
+    val primaryColor by animateColorAsState(Color(effectivePrimaryHex), tween(320), label = "")
+    val secondaryColor = Color(if (isAdaptiveMode) effectivePrimaryHex else themeConfig.secondaryHex)
     val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
     LaunchedEffect(isLightMode) { onThemeLightChanged(isLightMode) }
+    val neutralBackgroundHex = when (themeConfig.themeMode) {
+        ThemeMode.ADAPTIVE -> 0xFF15191D
+        ThemeMode.ADAPTIVE_LIGHT -> 0xFFF4F6F5
+        else -> themeConfig.bgHex
+    }
     val bgColor by animateColorAsState(
-        if (isLightMode) Color(0xFFF4F6F5) else Color(themeConfig.bgHex),
-        tween(400),
+        if (isLightMode) Color(0xFFF4F6F5) else Color(neutralBackgroundHex),
+        tween(320),
         label = ""
     )
     val textColor = if (isLightMode) Color(0xFF18201F) else Color(0xFFF1F5F4)
@@ -1086,7 +1129,7 @@ fun MMPApp(
                             onRescanClick = {
                                 Toast.makeText(context, "Обновляем медиатеку...", Toast.LENGTH_SHORT).show()
                                 scope.launch {
-                                    rawDeviceTracks = scanDeviceMusic(context)
+                                    refreshDeviceLibraryNow()
                                     Toast.makeText(context, "Медиатека обновлена!", Toast.LENGTH_SHORT).show()
                                 }
                             }
@@ -1143,7 +1186,7 @@ fun MMPApp(
                                         if (file != null) {
                                             Toast.makeText(context, "Сохранено: ${file.name}", Toast.LENGTH_LONG).show()
                                             delay(700)
-                                            rawDeviceTracks = scanDeviceMusic(context)
+                                            refreshDeviceLibraryNow()
                                         } else {
                                             Toast.makeText(context, "Ошибка скачивания", Toast.LENGTH_SHORT).show()
                                         }
@@ -1233,7 +1276,7 @@ fun MMPApp(
                                         if (file != null) {
                                             Toast.makeText(context, "Сохранено: ${file.name}", Toast.LENGTH_LONG).show()
                                             delay(700)
-                                            rawDeviceTracks = scanDeviceMusic(context)
+                                            refreshDeviceLibraryNow()
                                         } else {
                                             Toast.makeText(context, "Не удалось скачать трек", Toast.LENGTH_SHORT).show()
                                         }
@@ -1276,7 +1319,7 @@ fun MMPApp(
                                         downloadingPlaylistTitle = null
                                         Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
                                         delay(800)
-                                        rawDeviceTracks = scanDeviceMusic(context)
+                                        refreshDeviceLibraryNow()
                                     }
                                 },
                                 downloadingPlaylistTitle = downloadingPlaylistTitle,
@@ -1417,7 +1460,7 @@ fun MMPApp(
                                 if (file != null) {
                                     Toast.makeText(context, "Трек сохранён: ${file.name}", Toast.LENGTH_LONG).show()
                                     delay(700)
-                                    rawDeviceTracks = scanDeviceMusic(context)
+                                    refreshDeviceLibraryNow()
                                 } else {
                                     Toast.makeText(context, "Ошибка скачивания", Toast.LENGTH_SHORT).show()
                                 }

@@ -1,7 +1,6 @@
 package com.example.mmp
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,10 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CloudQueue
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.LibraryMusic
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,21 +23,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Matrix
-import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.asComposePath
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.graphics.shapes.CornerRounding
-import androidx.graphics.shapes.RoundedPolygon
-import androidx.graphics.shapes.star
-import androidx.graphics.shapes.toPath
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
 
 object ImmaU1Palette {
     const val Accent: Long = 0xFF79D6C3L
@@ -52,62 +39,13 @@ object ImmaU1Palette {
 
 object MMPShapeRadii {
     val small = 8.dp
-    val medium = 16.dp
-    val large = 24.dp
-}
-
-private class RoundedPolygonComposeShape(
-    private val polygon: RoundedPolygon
-) : Shape {
-    override fun createOutline(
-        size: androidx.compose.ui.geometry.Size,
-        layoutDirection: LayoutDirection,
-        density: Density
-    ): Outline {
-        val path = polygon.toPath().asComposePath()
-        val bounds = polygon.calculateBounds()
-        val polygonWidth = (bounds[2] - bounds[0]).coerceAtLeast(0.0001f)
-        val polygonHeight = (bounds[3] - bounds[1]).coerceAtLeast(0.0001f)
-        val matrix = Matrix()
-        matrix.scale(size.width / polygonWidth, size.height / polygonHeight)
-        matrix.translate(-bounds[0], -bounds[1])
-        path.transform(matrix)
-        return Outline.Generic(path)
-    }
-}
-
-private fun createLobedPolygon(lobes: Int, innerRadius: Float): RoundedPolygon {
-    val pointCount = 96
-    val vertices = FloatArray(pointCount * 2)
-    for (index in 0 until pointCount) {
-        val angle = (2.0 * PI * index / pointCount) - PI / 2.0
-        val wave = (cos(lobes * angle) + 1.0) / 2.0
-        val radius = innerRadius + (1.0 - innerRadius) * wave
-        vertices[index * 2] = (radius * cos(angle)).toFloat()
-        vertices[index * 2 + 1] = (radius * sin(angle)).toFloat()
-    }
-    return RoundedPolygon(vertices = vertices, rounding = CornerRounding(radius = 0.018f, smoothing = 0.82f))
-}
-
-private val cloverPolygon by lazy { createLobedPolygon(lobes = 4, innerRadius = 0.48f) }
-private val flowerPolygon by lazy { createLobedPolygon(lobes = 6, innerRadius = 0.76f) }
-private val starPolygon by lazy {
-    RoundedPolygon.star(
-        numVerticesPerRadius = 5,
-        radius = 1f,
-        innerRadius = 0.52f,
-        rounding = CornerRounding(radius = 0.075f, smoothing = 0.72f)
-    )
+    val medium = 12.dp
+    val large = 18.dp
 }
 
 fun ShapeStyle.toCardShape(): Shape = RoundedCornerShape(MMPShapeRadii.large)
 
-fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
-    ShapeStyle.SQUIRCLE -> RoundedCornerShape(MMPShapeRadii.medium)
-    ShapeStyle.COOKIE -> RoundedPolygonComposeShape(cloverPolygon)
-    ShapeStyle.FLOWER -> RoundedPolygonComposeShape(flowerPolygon)
-    ShapeStyle.STAR -> RoundedPolygonComposeShape(starPolygon)
-}
+fun ShapeStyle.toExpressiveShape(): Shape = RoundedCornerShape(MMPShapeRadii.medium)
 
 @Composable
 fun FrostedDockBar(
@@ -119,22 +57,22 @@ fun FrostedDockBar(
     onTabSelected: (Int) -> Unit
 ) {
     val panelShape = RoundedCornerShape(MMPShapeRadii.medium)
-    val solidSurface = if (isLightMode) Color(0xFFF0F1F2) else Color(0xFF202328)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(panelShape)
-            .background(solidSurface)
+            .background(surfaceColor)
             .padding(horizontal = 6.dp, vertical = 7.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        DockItem(Icons.Outlined.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
-        DockItem(Icons.Outlined.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
-        DockItem(Icons.Outlined.CloudQueue, "Онлайн", selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
-        DockItem(Icons.Outlined.Settings, "Настройки", selectedTab == 3, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(3) }
+        DockItem(Icons.Filled.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
+        DockItem(Icons.Filled.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
+        DockItem(Icons.Filled.CloudQueue, "Онлайн", selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
+        DockItem(Icons.Filled.Settings, "Настройки", selectedTab == 3, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(3) }
     }
 }
+
 @Composable
 private fun DockItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -149,7 +87,7 @@ private fun DockItem(
         modifier = modifier
             .height(54.dp)
             .clip(RoundedCornerShape(MMPShapeRadii.medium))
-            .background(if (selected) primaryColor.copy(alpha = 0.17f) else Color.Transparent)
+            .background(if (selected) primaryColor.copy(alpha = 0.15f) else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -158,10 +96,15 @@ private fun DockItem(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (selected) primaryColor else textColor.copy(alpha = 0.70f),
+            tint = if (selected) primaryColor else textColor.copy(alpha = 0.76f),
             modifier = Modifier.size(22.dp)
         )
         Spacer(Modifier.height(3.dp))
-        Text(label, color = if (selected) primaryColor else textColor.copy(alpha = 0.72f), fontSize = 10.sp, maxLines = 1)
+        Text(
+            label,
+            color = if (selected) primaryColor else textColor.copy(alpha = 0.78f),
+            fontSize = 10.sp,
+            maxLines = 1
+        )
     }
 }
