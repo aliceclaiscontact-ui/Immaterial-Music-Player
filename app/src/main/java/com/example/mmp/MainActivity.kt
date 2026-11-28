@@ -959,12 +959,12 @@ fun MMPApp(
     val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
     LaunchedEffect(isLightMode) { onThemeLightChanged(isLightMode) }
     val bgColor by animateColorAsState(
-        if (isLightMode) Color(0xFFF8F4FC) else Color(themeConfig.bgHex),
+        if (isLightMode) Color(0xFFF4F6F5) else Color(themeConfig.bgHex),
         tween(400),
         label = ""
     )
-    val textColor = if (isLightMode) Color(0xFF21152D) else Color(0xFFF8F0FF)
-    val surfaceColor = if (isLightMode) Color(0xFFECE4F3) else Color(0xFF3B2452)
+    val textColor = if (isLightMode) Color(0xFF18201F) else Color(0xFFF1F5F4)
+    val surfaceColor = if (isLightMode) Color(0xFFE6ECEA) else Color(0xFF222A2D)
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         uri?.let { context.contentResolver.openOutputStream(it)?.use { out -> out.write(themeConfig.toJson().toByteArray()) }; Toast.makeText(context, "Тема сохранена!", Toast.LENGTH_SHORT).show() }
