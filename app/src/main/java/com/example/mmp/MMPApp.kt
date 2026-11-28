@@ -966,26 +966,30 @@ fun MMPApp(
     val cardShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toCardShape() }
     val expressiveShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toExpressiveShape() }
     val isAdaptiveMode = themeConfig.themeMode == ThemeMode.ADAPTIVE || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
-    val effectivePrimaryHex = remember(themeConfig.themeMode, themeConfig.primaryHex, currentMetadata.coverArt) {
+    val effectivePrimaryHex = remember(themeConfig.themeMode, themeConfig.primaryHex, currentMetadata.coverArt, currentTrack?.id) {
         if (isAdaptiveMode) extractDominantColor(currentMetadata.coverArt, themeConfig.primaryHex)
         else themeConfig.primaryHex
     }
-    val primaryColor by animateColorAsState(Color(effectivePrimaryHex), tween(320), label = "")
+    val primaryColor by animateColorAsState(
+        Color(effectivePrimaryHex),
+        tween(420, easing = FastOutSlowInEasing),
+        label = "adaptive-accent"
+    )
     val secondaryColor = Color(if (isAdaptiveMode) effectivePrimaryHex else themeConfig.secondaryHex)
     val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
     LaunchedEffect(isLightMode) { onThemeLightChanged(isLightMode) }
     val neutralBackgroundHex = when (themeConfig.themeMode) {
-        ThemeMode.ADAPTIVE -> 0xFF15191D
-        ThemeMode.ADAPTIVE_LIGHT -> 0xFFF4F6F5
+        ThemeMode.ADAPTIVE -> 0xFF141218
+        ThemeMode.ADAPTIVE_LIGHT -> 0xFFF7F4FA
         else -> themeConfig.bgHex
     }
     val bgColor by animateColorAsState(
-        if (isLightMode) Color(0xFFF4F6F5) else Color(neutralBackgroundHex),
-        tween(320),
-        label = ""
+        if (isLightMode) Color(0xFFF7F4FA) else Color(neutralBackgroundHex),
+        tween(420, easing = FastOutSlowInEasing),
+        label = "material-background"
     )
-    val textColor = if (isLightMode) Color(0xFF18201F) else Color(0xFFF1F5F4)
-    val surfaceColor = if (isLightMode) Color(0xFFE6ECEA) else Color(0xFF222A2D)
+    val textColor = if (isLightMode) Color(0xFF1D1B20) else Color(0xFFE6E1E9)
+    val surfaceColor = if (isLightMode) Color(0xFFF0ECF4) else Color(0xFF211F26)
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         uri?.let { context.contentResolver.openOutputStream(it)?.use { out -> out.write(themeConfig.toJson().toByteArray()) }; Toast.makeText(context, "Тема сохранена!", Toast.LENGTH_SHORT).show() }
@@ -1010,9 +1014,9 @@ fun MMPApp(
     val appColorScheme = if (isLightMode) {
         lightColorScheme(
             primary = primaryColor,
-            onPrimary = Color(0xFF10201D),
+            onPrimary = Color(0xFF21152D),
             secondary = secondaryColor,
-            onSecondary = Color(0xFF10201D),
+            onSecondary = Color(0xFF21152D),
             tertiary = Color(0xFF6C648F),
             onTertiary = Color.White,
             background = bgColor,
@@ -1028,9 +1032,9 @@ fun MMPApp(
     } else {
         darkColorScheme(
             primary = primaryColor,
-            onPrimary = Color(0xFF081512),
+            onPrimary = Color(0xFF21152D),
             secondary = secondaryColor,
-            onSecondary = Color(0xFF081512),
+            onSecondary = Color(0xFF21152D),
             tertiary = Color(0xFFB8A8E8),
             onTertiary = Color(0xFF251C3A),
             background = bgColor,

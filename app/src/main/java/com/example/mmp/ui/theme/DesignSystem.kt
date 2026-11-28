@@ -1,47 +1,36 @@
 package com.example.mmp.ui.theme
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.mmp.domain.model.ShapeStyle
 
-object ImmaU1Palette {
-    const val Accent: Long = 0xFF79D6C3L
-    const val Secondary: Long = 0xFF4EAA9AL
-    const val Background: Long = 0xFF15191DL
-    const val Surface: Long = 0xFF222A2DL
-    const val LightBackground: Long = 0xFFF4F6F5L
-    const val LightSurface: Long = 0xFFE6ECEAL
-    const val DarkText: Long = 0xFFF1F5F4L
+object Material3ExpressivePalette {
+    const val Accent: Long = 0xFF6750A4L
+    const val Secondary: Long = 0xFF625B71L
+    const val Background: Long = 0xFF141218L
+    const val Surface: Long = 0xFF211F26L
+    const val LightBackground: Long = 0xFFF7F4FAL
+    const val LightSurface: Long = 0xFFF0ECF4L
+    const val DarkText: Long = 0xFFE6E1E9L
 }
 
 object MMPShapeRadii {
-    val small = 8.dp
-    val medium = 12.dp
-    val large = 18.dp
+    val small = 12.dp
+    val medium = 22.dp
+    val large = 30.dp
 }
 
 fun ShapeStyle.toCardShape(): Shape = RoundedCornerShape(MMPShapeRadii.large)
@@ -57,55 +46,45 @@ fun FrostedDockBar(
     isLightMode: Boolean,
     onTabSelected: (Int) -> Unit
 ) {
-    val panelShape = RoundedCornerShape(MMPShapeRadii.medium)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(panelShape)
-            .background(surfaceColor)
-            .padding(horizontal = 6.dp, vertical = 7.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
+    val destinations = listOf(
+        Icons.Filled.Home to "Главная",
+        Icons.Filled.LibraryMusic to "Медиатека",
+        Icons.Filled.CloudQueue to "Онлайн",
+        Icons.Filled.Settings to "Настройки"
+    )
+    Surface(
+        color = surfaceColor,
+        contentColor = textColor,
+        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+        tonalElevation = if (isLightMode) 3.dp else 1.dp,
+        shadowElevation = 5.dp
     ) {
-        DockItem(Icons.Filled.Home, "Главная", selectedTab == 0, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(0) }
-        DockItem(Icons.Filled.LibraryMusic, "Медиатека", selectedTab == 1, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(1) }
-        DockItem(Icons.Filled.CloudQueue, "Онлайн", selectedTab == 2, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(2) }
-        DockItem(Icons.Filled.Settings, "Настройки", selectedTab == 3, primaryColor, textColor, Modifier.weight(1f)) { onTabSelected(3) }
-    }
-}
-
-@Composable
-private fun DockItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    selected: Boolean,
-    primaryColor: Color,
-    textColor: Color,
-    modifier: Modifier,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = modifier
-            .height(54.dp)
-            .clip(RoundedCornerShape(MMPShapeRadii.medium))
-            .background(if (selected) primaryColor.copy(alpha = 0.15f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 2.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = if (selected) primaryColor else textColor.copy(alpha = 0.76f),
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            label,
-            color = if (selected) primaryColor else textColor.copy(alpha = 0.78f),
-            fontSize = 10.sp,
-            maxLines = 1
-        )
+        NavigationBar(
+            containerColor = Color.Transparent,
+            contentColor = textColor,
+            tonalElevation = 0.dp
+        ) {
+            destinations.forEachIndexed { index, destination ->
+                NavigationBarItem(
+                    selected = selectedTab == index,
+                    onClick = { onTabSelected(index) },
+                    icon = {
+                        androidx.compose.material3.Icon(
+                            destination.first,
+                            contentDescription = destination.second
+                        )
+                    },
+                    label = { Text(destination.second) },
+                    alwaysShowLabel = true,
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = primaryColor,
+                        selectedTextColor = primaryColor,
+                        indicatorColor = primaryColor.copy(alpha = 0.18f),
+                        unselectedIconColor = textColor.copy(alpha = 0.72f),
+                        unselectedTextColor = textColor.copy(alpha = 0.72f)
+                    )
+                )
+            }
+        }
     }
 }

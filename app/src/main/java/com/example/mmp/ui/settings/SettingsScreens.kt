@@ -717,7 +717,7 @@ fun SettingsAndThemeEditor(
                 val ctx = LocalContext.current
                 val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
                 var waveAnimEnabled by remember { mutableStateOf(prefs.getBoolean("anim_wave_enabled", true)) }
-                var blurLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_blur", false)) }
+                var blurLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("anim_lyrics_blur", true)) }
 
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
                     item {
@@ -744,8 +744,8 @@ fun SettingsAndThemeEditor(
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Плавная смена строк песни", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Motion blur при переходе к следующей строке текста", color = textColor.copy(0.6f), fontSize = 12.sp)
+                                    Text("Эффект текста песни", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text("Motion Blur и плавная смена фокуса между строками, как в Apple Music", color = textColor.copy(0.6f), fontSize = 12.sp)
                                 }
                                 Switch(
                                     checked = blurLyricsEnabled,

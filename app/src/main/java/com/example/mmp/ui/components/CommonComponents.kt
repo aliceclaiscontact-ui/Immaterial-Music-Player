@@ -341,17 +341,23 @@ fun AddToPlaylistSheet(
     onSelectPlaylist: (PlaylistItem) -> Unit,
     onCreateNewPlaylistClick: () -> Unit
 ) {
+    var query by remember { mutableStateOf("") }
+    val filteredPlaylists = remember(playlists, query) {
+        if (query.isBlank()) playlists else playlists.filter { it.name.contains(query, ignoreCase = true) }
+    }
     BackHandler { onDismiss() }
-    Box(
+    BoxWithConstraints(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.58f)).clickable { onDismiss() },
         contentAlignment = Alignment.BottomCenter
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp).navigationBarsPadding()
+            Modifier.widthIn(max = 680.dp).fillMaxWidth().padding(horizontal = 8.dp).navigationBarsPadding()
                 .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                .background(surfaceColor).clickable(onClick = {})
+                .background(surfaceColor)
+                .border(1.dp, textColor.copy(0.10f), RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .clickable(onClick = {})
                 .padding(horizontal = 18.dp, vertical = 14.dp)
-                .heightIn(min = 300.dp, max = 650.dp),
+                .heightIn(max = (maxHeight * 0.92f).coerceAtLeast(300.dp)),
             horizontalAlignment = Alignment.Start
         ) {
             Box(Modifier.width(36.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.24f)).align(Alignment.CenterHorizontally))
@@ -387,18 +393,41 @@ fun AddToPlaylistSheet(
             Spacer(Modifier.height(18.dp))
             Text("Ваши плейлисты", color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
-            if (playlists.isEmpty()) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("Найти плейлист") },
+                leadingIcon = { Icon(Icons.Filled.Search, null, tint = primaryColor) },
+                shape = RoundedCornerShape(20.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = primaryColor,
+                    unfocusedBorderColor = textColor.copy(0.16f),
+                    focusedTextColor = textColor,
+                    unfocusedTextColor = textColor,
+                    cursorColor = primaryColor
+                )
+            )
+            Spacer(Modifier.height(8.dp))
+            if (filteredPlaylists.isEmpty()) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.LibraryMusic, null, tint = primaryColor.copy(0.8f), modifier = Modifier.size(42.dp))
                         Spacer(Modifier.height(8.dp))
-                        Text("Плейлистов пока нет", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Создай первый плейлист выше", color = textColor.copy(0.58f), fontSize = 12.sp)
+                        Text(
+                            if (playlists.isEmpty()) "Плейлистов пока нет" else "Ничего не найдено",
+                            color = textColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            if (playlists.isEmpty()) "Создай первый плейлист выше" else "Попробуй другое название",
+                            color = textColor.copy(0.58f), fontSize = 12.sp
+                        )
                     }
                 }
             } else {
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
-                    items(playlists, key = { it.name }) { playlist ->
+                    items(filteredPlaylists, key = { it.name }) { playlist ->
                         val count = resolvePlaylistTracks(playlist, allTracks).size
                         val containsAll = tracks.isNotEmpty() && tracks.all { track ->
                             playlist.trackIds.contains(track.id) ||
@@ -441,13 +470,18 @@ fun PlaylistTrackPickerSheet(
         else allTracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.contains(query, true) }
     }
     BackHandler { onDismiss() }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.60f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.60f)).clickable { onDismiss() },
+        contentAlignment = Alignment.BottomCenter
+    ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp).navigationBarsPadding()
+            Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 8.dp).navigationBarsPadding()
                 .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                .background(surfaceColor).clickable(onClick = {})
+                .background(surfaceColor)
+                .border(1.dp, textColor.copy(0.10f), RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .clickable(onClick = {})
                 .padding(horizontal = 18.dp, vertical = 14.dp)
-                .heightIn(min = 380.dp, max = 720.dp)
+                .heightIn(max = (maxHeight * 0.94f).coerceAtLeast(320.dp))
         ) {
             Box(Modifier.width(36.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.24f)).align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(16.dp))
@@ -482,8 +516,18 @@ fun PlaylistTrackPickerSheet(
                 Text("${selectedIds.size} добавлено", color = primaryColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(8.dp))
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
-                items(filtered, key = { trackStableKey(it) }) { track ->
+            if (filtered.isEmpty()) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.Search, null, tint = primaryColor, modifier = Modifier.size(42.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("Треки не найдены", color = textColor, fontWeight = FontWeight.SemiBold)
+                        Text("Измени поисковый запрос", color = textColor.copy(0.60f), fontSize = 12.sp)
+                    }
+                }
+            } else {
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
+                    items(filtered, key = { trackStableKey(it) }) { track ->
                     val added = selectedIds.contains(track.id)
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
@@ -502,6 +546,7 @@ fun PlaylistTrackPickerSheet(
                         }
                     }
                 }
+            }
             }
         }
     }

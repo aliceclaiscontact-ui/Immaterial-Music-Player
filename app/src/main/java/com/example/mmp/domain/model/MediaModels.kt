@@ -32,10 +32,10 @@ enum class ThemeMode(val label: String) {
 }
 
 data class MMPThemeConfig(
-    val themeName: String = "Imma 1",
-    val primaryHex: Long = 0xFF79D6C3,
-    val secondaryHex: Long = 0xFF4EAA9A,
-    val bgHex: Long = 0xFF15191D,
+    val themeName: String = "Material 3 Expressive",
+    val primaryHex: Long = 0xFF6750A4,
+    val secondaryHex: Long = 0xFF625B71,
+    val bgHex: Long = 0xFF141218,
     val shapeStyle: ShapeStyle = ShapeStyle.SQUIRCLE,
     val themeMode: ThemeMode = ThemeMode.DARK,
     val blurIntensity: Float = 18f
@@ -61,10 +61,10 @@ data class MMPThemeConfig(
                 val modeName = json.optString("themeMode", "DARK")
                 val mode = ThemeMode.entries.find { it.name == modeName } ?: ThemeMode.DARK
                 MMPThemeConfig(
-                    themeName = json.optString("themeName", "Imma 1"),
-                    primaryHex = json.optLong("primaryHex", 0xFF79D6C3),
-                    secondaryHex = json.optLong("secondaryHex", 0xFF4EAA9A),
-                    bgHex = json.optLong("bgHex", 0xFF15191D),
+                    themeName = json.optString("themeName", "Material 3 Expressive"),
+                    primaryHex = json.optLong("primaryHex", 0xFF6750A4),
+                    secondaryHex = json.optLong("secondaryHex", 0xFF625B71),
+                    bgHex = json.optLong("bgHex", 0xFF141218),
                     shapeStyle = style,
                     themeMode = mode,
                     blurIntensity = json.optDouble("blurIntensity", 18.0).toFloat()

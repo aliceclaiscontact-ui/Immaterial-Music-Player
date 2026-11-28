@@ -202,49 +202,75 @@ fun EditTrackTagsDialog(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QueueManagementSheet(
-    queue: List<Track>, currentTrack: Track?, cardShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color,
-    onDismiss: () -> Unit, onSelectTrack: (Track) -> Unit, onMoveTrack: (Int, Int) -> Unit, onRemoveTrack: (Int) -> Unit
+    queue: List<Track>,
+    currentTrack: Track?,
+    cardShape: Shape,
+    primaryColor: Color,
+    textColor: Color,
+    surfaceColor: Color,
+    onDismiss: () -> Unit,
+    onSelectTrack: (Track) -> Unit,
+    onMoveTrack: (Int, Int) -> Unit,
+    onRemoveTrack: (Int) -> Unit
 ) {
-    val upcomingQueue = remember(queue, currentTrack?.id) { queue.filterNot { it.id == currentTrack?.id } }
+    // Show only items after the active song. Keep original indexes so move/remove
+    // callbacks continue to address the source queue, not the filtered display list.
+    val upcomingEntries = remember(queue, currentTrack?.id) {
+        val activeIndex = queue.indexOfFirst { it.id == currentTrack?.id }
+        queue.mapIndexedNotNull { index, track ->
+            if (activeIndex >= 0 && index <= activeIndex) null else index to track
+        }
+    }
+    val latestUpcomingEntries by rememberUpdatedState(upcomingEntries)
     val listState = rememberLazyListState()
-    var draggingId by remember { mutableStateOf<Long?>(null) }
+    var draggingIndex by remember { mutableIntStateOf(-1) }
+    var dropTargetIndex by remember { mutableIntStateOf(-1) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var autoScrollDirection by remember { mutableIntStateOf(0) }
-    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
-    val latestQueue by rememberUpdatedState(queue)
+    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 76.dp.toPx() }
 
-    LaunchedEffect(draggingId, autoScrollDirection) {
-        while (draggingId != null && autoScrollDirection != 0) {
-            listState.scrollBy(autoScrollDirection * 14f)
+    LaunchedEffect(draggingIndex, autoScrollDirection) {
+        while (draggingIndex >= 0 && autoScrollDirection != 0) {
+            listState.scrollBy(autoScrollDirection * 12f)
             kotlinx.coroutines.delay(16)
         }
     }
     BackHandler { onDismiss() }
 
-    Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.60f)).clickable { onDismiss() },
+    BoxWithConstraints(
+        Modifier.fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.62f))
+            .clickable { onDismiss() },
         contentAlignment = Alignment.BottomCenter
     ) {
+        val sheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
         Column(
-            Modifier.fillMaxWidth()
+            Modifier.widthIn(max = 720.dp).fillMaxWidth()
                 .padding(horizontal = 8.dp)
                 .navigationBarsPadding()
-                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .clip(sheetShape)
                 .background(surfaceColor)
-                .border(1.dp, textColor.copy(0.10f), RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .border(1.dp, textColor.copy(alpha = 0.10f), sheetShape)
                 .clickable(onClick = {})
-                .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 12.dp)
-                .heightIn(min = 340.dp, max = 720.dp)
+                .padding(horizontal = 18.dp, vertical = 14.dp)
+                .heightIn(max = (maxHeight * 0.92f).coerceAtLeast(320.dp))
         ) {
             Box(
                 Modifier.width(36.dp).height(4.dp).clip(CircleShape)
                     .background(textColor.copy(0.24f)).align(Alignment.CenterHorizontally)
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Очередь воспроизведения", color = textColor, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                    Text("${upcomingQueue.size} следующих треков", color = textColor.copy(0.62f), fontSize = 13.sp)
+                    Text("Очередь", color = textColor, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        when (upcomingEntries.size) {
+                            0 -> "Нет следующих треков"
+                            1 -> "1 следующий трек"
+                            else -> "${upcomingEntries.size} следующих треков"
+                        },
+                        color = textColor.copy(0.62f), fontSize = 12.sp
+                    )
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, "Закрыть очередь", tint = textColor)
@@ -258,14 +284,14 @@ fun QueueManagementSheet(
                         .background(primaryColor.copy(0.14f)).padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TrackCoverThumb(currentTrack, RoundedCornerShape(14.dp), primaryColor, 52)
+                    TrackCoverThumb(currentTrack, RoundedCornerShape(16.dp), primaryColor, 54)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("СЕЙЧАС ИГРАЕТ", color = primaryColor, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Text(currentTrack.title, color = textColor, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(currentTrack.artist, color = textColor.copy(0.62f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Icon(Icons.Filled.Equalizer, null, tint = primaryColor, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Filled.Equalizer, null, tint = primaryColor, modifier = Modifier.size(23.dp))
                 }
                 Spacer(Modifier.height(18.dp))
             }
@@ -273,17 +299,17 @@ fun QueueManagementSheet(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Следующие треки", color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                Text("Удерживай  ≡  чтобы изменить порядок", color = textColor.copy(0.52f), fontSize = 10.sp)
+                Text("Удерживай  ≡  для сортировки", color = textColor.copy(0.55f), fontSize = 10.sp)
             }
             Spacer(Modifier.height(8.dp))
 
-            if (upcomingQueue.isEmpty()) {
+            if (upcomingEntries.isEmpty()) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Filled.QueueMusic, null, tint = primaryColor.copy(0.8f), modifier = Modifier.size(48.dp))
-                        Spacer(Modifier.height(10.dp))
+                        Icon(Icons.Filled.QueueMusic, null, tint = primaryColor.copy(0.86f), modifier = Modifier.size(52.dp))
+                        Spacer(Modifier.height(12.dp))
                         Text("Очередь пока пуста", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Добавленные треки появятся здесь", color = textColor.copy(0.58f), fontSize = 12.sp)
+                        Text("Добавленные треки появятся здесь", color = textColor.copy(0.60f), fontSize = 12.sp)
                     }
                 }
             } else {
@@ -293,63 +319,102 @@ fun QueueManagementSheet(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 12.dp)
                 ) {
-                    itemsIndexed(upcomingQueue, key = { _, track -> trackStableKey(track) }) { index, track ->
-                        val isCurrent = currentTrack?.id == track.id
-                        val isDragging = draggingId == track.id
+                    itemsIndexed(
+                        upcomingEntries,
+                        key = { _, entry -> "${entry.first}_${trackStableKey(entry.second)}" }
+                    ) { index, entry ->
+                        val originalIndex = entry.first
+                        val track = entry.second
+                        val isDragging = draggingIndex == index
+                        val isDropTarget = dropTargetIndex == index && draggingIndex >= 0 && !isDragging
+                        val rowShape = RoundedCornerShape(22.dp)
+
                         Row(
                             Modifier.animateItemPlacement().fillMaxWidth()
                                 .zIndex(if (isDragging) 1f else 0f)
                                 .graphicsLayer {
                                     translationY = if (isDragging) dragOffset else 0f
-                                    scaleX = if (isDragging) 1.015f else 1f
-                                    scaleY = if (isDragging) 1.015f else 1f
-                                    shadowElevation = if (isDragging) 10.dp.toPx() else 0f
+                                    scaleX = if (isDragging) 1.025f else 1f
+                                    scaleY = if (isDragging) 1.025f else 1f
+                                    shadowElevation = if (isDragging) 15.dp.toPx() else 0f
                                 }
-                                .clip(RoundedCornerShape(22.dp))
-                                .background(if (isCurrent) primaryColor.copy(0.14f) else textColor.copy(0.045f))
-                                .clickable { onSelectTrack(track) }
+                                .clip(rowShape)
+                                .background(
+                                    when {
+                                        isDragging -> primaryColor.copy(0.18f)
+                                        isDropTarget -> primaryColor.copy(0.10f)
+                                        else -> textColor.copy(0.045f)
+                                    }
+                                )
+                                .border(
+                                    if (isDragging || isDropTarget) 1.5.dp else 0.dp,
+                                    if (isDragging || isDropTarget) primaryColor.copy(0.72f) else Color.Transparent,
+                                    rowShape
+                                )
+                                .clickable(enabled = draggingIndex < 0) { onSelectTrack(track) }
                                 .padding(horizontal = 10.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TrackCoverThumb(track, RoundedCornerShape(12.dp), primaryColor, 48)
+                            TrackCoverThumb(track, RoundedCornerShape(14.dp), primaryColor, 50)
                             Spacer(Modifier.width(11.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(track.title, color = if (isCurrent) primaryColor else textColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${track.artist} • ${formatMillis(track.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    track.title, color = textColor, fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    "${track.artist} • ${formatMillis(track.durationMs)}",
+                                    color = textColor.copy(0.60f), fontSize = 11.sp,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
                             }
                             IconButton(
-                                onClick = { if (!isCurrent) onRemoveTrack(latestQueue.indexOfFirst { it.id == track.id }) },
-                                enabled = !isCurrent,
+                                onClick = { onRemoveTrack(originalIndex) },
+                                enabled = draggingIndex < 0,
                                 modifier = Modifier.size(38.dp)
                             ) {
-                                Icon(Icons.Filled.Close, "Убрать из очереди", tint = if (isCurrent) textColor.copy(0.22f) else textColor.copy(0.55f), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Filled.Close, "Убрать из очереди", tint = textColor.copy(0.56f), modifier = Modifier.size(18.dp))
                             }
                             Box(
                                 Modifier.size(40.dp).clip(CircleShape)
-                                    .background(if (isDragging) primaryColor.copy(0.20f) else Color.Transparent)
-                                    .pointerInput(track.id) {
+                                    .background(if (isDragging) primaryColor.copy(0.22f) else Color.Transparent)
+                                    .pointerInput(index, trackStableKey(track)) {
                                         detectDragGestures(
-                                            onDragStart = { draggingId = track.id; dragOffset = 0f; autoScrollDirection = 0 },
-                                            onDragEnd = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
-                                            onDragCancel = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
+                                            onDragStart = {
+                                                draggingIndex = index
+                                                dropTargetIndex = index
+                                                dragOffset = 0f
+                                                autoScrollDirection = 0
+                                            },
+                                            onDragEnd = {
+                                                val from = latestUpcomingEntries.getOrNull(draggingIndex)?.first
+                                                val to = latestUpcomingEntries.getOrNull(dropTargetIndex)?.first
+                                                if (from != null && to != null && from != to) {
+                                                    onMoveTrack(from, to)
+                                                }
+                                                draggingIndex = -1
+                                                dropTargetIndex = -1
+                                                dragOffset = 0f
+                                                autoScrollDirection = 0
+                                            },
+                                            onDragCancel = {
+                                                draggingIndex = -1
+                                                dropTargetIndex = -1
+                                                dragOffset = 0f
+                                                autoScrollDirection = 0
+                                            },
                                             onDrag = { change, delta ->
                                                 change.consume()
                                                 dragOffset += delta.y
                                                 val layout = listState.layoutInfo
-                                                val dragged = layout.visibleItemsInfo.firstOrNull { it.key == trackStableKey(track) }
+                                                val dragged = layout.visibleItemsInfo.firstOrNull { it.index == draggingIndex }
                                                     ?: return@detectDragGestures
-                                                val from = latestQueue.indexOfFirst { trackStableKey(it) == trackStableKey(track) }
                                                 val center = dragged.offset + dragged.size / 2 + dragOffset
-                                                val target = layout.visibleItemsInfo.firstOrNull {
-                                                    center >= it.offset && center <= it.offset + it.size
+                                                val target = layout.visibleItemsInfo.minByOrNull {
+                                                    kotlin.math.abs((it.offset + it.size / 2) - center)
                                                 }
-                                                val targetTrack = target?.let { upcomingQueue.getOrNull(it.index) }
-                                                val targetOriginalIndex = targetTrack?.let { item ->
-                                                    latestQueue.indexOfFirst { it.id == item.id }
-                                                } ?: -1
-                                                if (target != null && from >= 0 && targetOriginalIndex >= 0 && targetOriginalIndex != from) {
-                                                    onMoveTrack(from, targetOriginalIndex)
-                                                    dragOffset = 0f
+                                                if (target != null) {
+                                                    dropTargetIndex = target.index.coerceIn(0, latestUpcomingEntries.lastIndex.coerceAtLeast(0))
                                                 }
                                                 autoScrollDirection = when {
                                                     center < layout.viewportStartOffset + edge -> -1

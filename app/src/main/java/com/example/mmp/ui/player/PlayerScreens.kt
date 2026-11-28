@@ -1038,7 +1038,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                             val distance = abs(idx - activeLyricIndex)
                             val ctx = LocalContext.current
                             val prefs = remember { ctx.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
-                            val blurLyricsEnabled = remember { prefs.getBoolean("anim_lyrics_blur", false) }
+                            val blurLyricsEnabled = remember { prefs.getBoolean("anim_lyrics_blur", true) }
 
                             val isInSelectedLoop = (loopStartLineIdx != null && loopEndLineIdx != null && idx in loopStartLineIdx!!..loopEndLineIdx!!) ||
                                 (loopStartLineIdx == idx)
@@ -1095,9 +1095,9 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                                     label = "lyrics-motion-blur"
                                 ) { activeLine ->
                                     val lyricBlur by transition.animateFloat(
-                                        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
+                                        transitionSpec = { tween(380, easing = FastOutSlowInEasing) },
                                         label = "lyrics-motion-blur-radius"
-                                    ) { active -> if (active) 0f else if (blurLyricsEnabled) 2.6f else 0f }
+                                    ) { active -> if (active) 0f else if (blurLyricsEnabled) 4.0f else 0f }
 
                                     if (activeLine && line.words.isNotEmpty()) {
                                         val wordAnnotated = buildAnnotatedString {

@@ -236,11 +236,16 @@ suspend fun shareTrackCardImage(
 }
 
 fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
-    if (bitmap == null || bitmap.isRecycled) return fallbackHex
+    if (bitmap == null || bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return fallbackHex
     var scaled: Bitmap? = null
     return try {
-        val sample = Bitmap.createScaledBitmap(bitmap, 48, 48, true).also { scaled = it }
-        val binCount = 30 // 12-degree hue buckets.
+        // Preserve the source aspect ratio so the algorithm does not artificially
+        // amplify edges or large background areas in non-square cover artwork.
+        val scale = minOf(64f / bitmap.width, 64f / bitmap.height)
+        val sampleWidth = maxOf(1, (bitmap.width * scale).toInt())
+        val sampleHeight = maxOf(1, (bitmap.height * scale).toInt())
+        val sample = Bitmap.createScaledBitmap(bitmap, sampleWidth, sampleHeight, true).also { scaled = it }
+        val binCount = 36 // 10-degree hue buckets.
         val weights = DoubleArray(binCount)
         val hueSin = DoubleArray(binCount)
         val hueCos = DoubleArray(binCount)
@@ -256,12 +261,12 @@ fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
                 val saturation = hsv[1]
                 val value = hsv[2]
 
-                // Skip neutral, near-black and blown-out pixels. Strongly saturated
-                // artwork colors should outweigh muddy shadows and warm neutrals.
-                if (saturation < 0.22f || value < 0.14f || value > 0.985f) continue
+                // Ignore neutrals, deep shadows and glare. A stronger chroma curve
+                // helps vivid purple/blue pigments beat broad, muted brown/beige areas.
+                if (saturation < 0.28f || value < 0.16f || value > 0.985f) continue
 
-                val bin = (hsv[0] / 12f).toInt().coerceIn(0, binCount - 1)
-                val weight = saturation.toDouble().pow(2.2) * (0.55 + 0.45 * value)
+                val bin = (hsv[0] / 10f).toInt().coerceIn(0, binCount - 1)
+                val weight = saturation.toDouble().pow(3.0) * (0.45 + 0.55 * value)
                 val radians = Math.toRadians(hsv[0].toDouble())
                 weights[bin] += weight
                 hueSin[bin] += kotlin.math.sin(radians) * weight
@@ -273,22 +278,25 @@ fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
 
         if (weights.sum() <= 0.0) return fallbackHex
 
-        // Score neighbouring buckets together so a hue near a bucket edge
-        // does not cause the adaptive accent to jump between unrelated colors.
+        // Merge neighbouring hue bins to avoid abrupt changes at bucket boundaries.
         val dominant = (0 until binCount).maxByOrNull { index ->
             weights[(index - 1 + binCount) % binCount] +
-                weights[index] * 2.0 +
+                weights[index] * 2.2 +
                 weights[(index + 1) % binCount]
         } ?: return fallbackHex
-        val selected = listOf((dominant - 1 + binCount) % binCount, dominant, (dominant + 1) % binCount)
+        val selected = listOf(
+            (dominant - 1 + binCount) % binCount,
+            dominant,
+            (dominant + 1) % binCount
+        )
         val totalWeight = selected.sumOf { weights[it] }
         if (totalWeight <= 0.0) return fallbackHex
 
         val sinTotal = selected.sumOf { hueSin[it] }
         val cosTotal = selected.sumOf { hueCos[it] }
         val hue = ((Math.toDegrees(kotlin.math.atan2(sinTotal, cosTotal)) + 360.0) % 360.0).toFloat()
-        val saturation = (selected.sumOf { saturationSum[it] } / totalWeight).toFloat().coerceIn(0.48f, 0.92f)
-        val value = (selected.sumOf { valueSum[it] } / totalWeight).toFloat().coerceIn(0.58f, 0.90f)
+        val saturation = (selected.sumOf { saturationSum[it] } / totalWeight).toFloat().coerceIn(0.52f, 0.94f)
+        val value = (selected.sumOf { valueSum[it] } / totalWeight).toFloat().coerceIn(0.58f, 0.92f)
 
         android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, value)).toLong() and 0xFFFFFFFFL
     } catch (_: Exception) {
