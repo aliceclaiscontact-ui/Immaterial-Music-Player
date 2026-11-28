@@ -628,12 +628,17 @@ object StorageHelper {
             stored.primaryHex == 0xFFFF66C4L &&
             stored.secondaryHex == 0xFF7B61FFL &&
             stored.bgHex == 0xFF0D0D12L
-        return if (isUntouchedLegacyDefault) {
+        val isGeneratedPurpleImmaDefault =
+            stored.themeName == "Imma U1" &&
+            stored.primaryHex == 0xFFD9A1FAL &&
+            stored.secondaryHex == 0xFFAD86E8L &&
+            stored.bgHex == 0xFF2A1040L
+        return if (isUntouchedLegacyDefault || isGeneratedPurpleImmaDefault) {
             stored.copy(
-                themeName = "Imma U1",
-                primaryHex = 0xFFD9A1FAL,
-                secondaryHex = 0xFFAD86E8L,
-                bgHex = 0xFF2A1040L
+                themeName = "Imma 1",
+                primaryHex = 0xFF79D6C3L,
+                secondaryHex = 0xFF4EAA9AL,
+                bgHex = 0xFF15191DL
             ).also { migrated -> saveTheme(prefs, migrated) }
         } else stored
     }
