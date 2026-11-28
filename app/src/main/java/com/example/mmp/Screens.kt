@@ -312,13 +312,13 @@ fun TrackCoverThumb(track: Track, shape: Shape, primaryColor: Color, sizeDp: Int
 }
 
 @Composable
-fun PlaylistGridCover(tracks: List<Track>, primaryColor: Color, sizeDp: Int = 54) {
+fun PlaylistGridCover(tracks: List<Track>, primaryColor: Color, sizeDp: Int = 54, fillBounds: Boolean = false) {
     val context = LocalContext.current
     val previewTracks = remember(tracks) { tracks.take(4) }
     val bitmaps = remember { mutableStateListOf<Bitmap?>(null, null, null, null) }
     LaunchedEffect(previewTracks) { previewTracks.forEachIndexed { index, track -> bitmaps[index] = loadTrackThumbnail(context, track) } }
 
-    Box(modifier = Modifier.size(sizeDp.dp).clip(RoundedCornerShape(12.dp)).background(primaryColor.copy(0.18f))) {
+    Box(modifier = (if (fillBounds) Modifier.fillMaxSize() else Modifier.size(sizeDp.dp)).clip(RoundedCornerShape(12.dp)).background(primaryColor.copy(0.18f))) {
         if (previewTracks.isEmpty()) {
             Icon(Icons.Filled.QueueMusic, null, tint = primaryColor, modifier = Modifier.align(Alignment.Center))
         } else if (previewTracks.size < 4) {
@@ -357,7 +357,7 @@ fun PlaylistThumb(playlist: PlaylistItem, allTracks: List<Track>, expressiveShap
         if (valid != null) {
             Image(valid.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
-            PlaylistGridCover(resolvedTracks, primaryColor, sizeDp)
+            PlaylistGridCover(resolvedTracks, primaryColor, sizeDp, fillBounds = fillBounds)
         }
     }
 }
@@ -433,7 +433,12 @@ fun HomeScreen(
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            ExpressiveFilterPill("История прослушивания", activeSubTab == 0, primaryColor, textColor) { activeSubTab = 0 }
+            Text(
+                if (activeSubTab == 0) "Главная" else "Настройки",
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+                color = textColor
+            )
             IconButton(
                 onClick = { activeSubTab = if (activeSubTab == 1) 0 else 1 },
                 modifier = Modifier.size(44.dp).clip(CircleShape).background(if (activeSubTab == 1) primaryColor else surfaceColor).border(1.dp, if (activeSubTab == 1) primaryColor else textColor.copy(0.12f), CircleShape)
@@ -1133,6 +1138,7 @@ fun CleanHeaderLayout(
     val isContextPlaying = isPlaying && currentTrack != null && tracks.any { it.id == currentTrack.id }
 
     LaunchedEffect(tracks, customCoverUri) {
+        heroBitmap = null
         if (customCoverUri != null) {
             heroBitmap = loadBitmapFromUriOrHttp(context, customCoverUri, 512)
         } else {
@@ -1152,7 +1158,7 @@ fun CleanHeaderLayout(
                 Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                     val validHero = heroBitmap?.takeIf { !it.isRecycled }
                     if (validHero != null) {
-                        Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.18f; scaleY = 1.18f }.blur(48.dp), alpha = 0.34f)
+                        Image(validHero.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.35f; scaleY = 1.35f }.blur(64.dp), alpha = 0.42f)
                         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
                     }
                     Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
@@ -1255,7 +1261,7 @@ fun AppleMusicArtistScreen(
                     Box(Modifier.fillMaxWidth().height(264.dp), contentAlignment = Alignment.Center) {
                         val validHero = heroBitmap?.takeIf { !it.isRecycled }
                         if (validHero != null) {
-                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.18f; scaleY = 1.18f }.blur(48.dp), alpha = 0.34f)
+                            Image(bitmap = validHero.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.35f; scaleY = 1.35f }.blur(64.dp), alpha = 0.42f)
                             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(bgColor.copy(0.08f), bgColor.copy(0.82f)))))
                         }
                         Box(Modifier.size(224.dp).clip(RoundedCornerShape(24.dp)).background(surfaceColor), contentAlignment = Alignment.Center) {
@@ -1430,7 +1436,27 @@ fun LibraryScreen(
         val artistTracks = remember(tracks, openedArtist) {
             tracks.filter { trk -> splitArtists(trk.artist).any { it.equals(openedArtist, ignoreCase = true) } }
         }
-        AppleMusicArtistScreen(openedArtist, artistTracks, cardShape, expressiveShape, primaryColor, textColor, surfaceColor, bgColor, currentTrack, isPlaying, isShuffleEnabled, { onSetOpenedArtist(null) }, onPlayContext, onTogglePlay, onToggleShuffle, onAddTrackToPlaylistClick, onAddMultipleTracksToPlaylist)
+        CleanHeaderLayout(
+            title = openedArtist,
+            subtitle = "Исполнитель • ${artistTracks.size} треков",
+            tracks = artistTracks,
+            customCoverUri = null,
+            primaryColor = primaryColor,
+            textColor = textColor,
+            surfaceColor = surfaceColor,
+            bgColor = bgColor,
+            expressiveShape = expressiveShape,
+            currentTrack = currentTrack,
+            isPlaying = isPlaying,
+            isShuffleEnabled = isShuffleEnabled,
+            onBack = { onSetOpenedArtist(null) },
+            onPlayContext = onPlayContext,
+            onTogglePlay = onTogglePlay,
+            onToggleShuffle = onToggleShuffle,
+            onAddTrackToPlaylistClick = onAddTrackToPlaylistClick,
+            onAddMultipleTracksToPlaylist = onAddMultipleTracksToPlaylist,
+            showAddButton = true
+        )
         return
     }
 
@@ -1568,32 +1594,40 @@ fun LibraryScreen(
 
             Spacer(modifier = Modifier.height(11.dp))
 
-            LazyRow(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                items(listOf(
+                listOf(
                     Triple("Треки", Icons.Filled.MusicNote, 0),
                     Triple("Плейлисты", Icons.Filled.QueueMusic, 1),
                     Triple("Артисты", Icons.Filled.Person, 2),
                     Triple("Альбомы", Icons.Filled.Album, 3)
-                )) { (label, icon, index) ->
+                ).forEach { (label, icon, index) ->
                     val selected = category == index
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(17.dp))
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
                             .background(if (selected) primaryColor else surfaceColor)
-                            .border(1.dp, if (selected) primaryColor.copy(0.35f) else textColor.copy(0.07f), RoundedCornerShape(17.dp))
+                            .border(1.dp, if (selected) primaryColor.copy(0.35f) else textColor.copy(0.07f), RoundedCornerShape(14.dp))
                             .clickable { category = index }
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                            .padding(horizontal = 3.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(icon, label, tint = if (selected) Color.Black else textColor, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text(label, color = if (selected) Color.Black else textColor, fontSize = 10.5.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, softWrap = false)
+                        Icon(icon, label, tint = if (selected) Color.Black else textColor, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            label,
+                            color = if (selected) Color.Black else textColor,
+                            fontSize = 9.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
@@ -1936,6 +1970,11 @@ fun FullScreenPlayerOverlay(
     }
 
     val validArt = metadata.coverArt?.takeIf { !it.isRecycled }
+    val latestCurrentPosMs by rememberUpdatedState(currentPosMs)
+    val latestTrackDurationMs by rememberUpdatedState(track.durationMs)
+    val latestIsPlaying by rememberUpdatedState(isPlaying)
+    val latestOnSeek by rememberUpdatedState(onSeek)
+    val latestOnPlayPause by rememberUpdatedState(onPlayPause)
 
     Box(modifier = Modifier.fillMaxSize().background(bgColor).clickable(enabled = true, onClick = {})) {
         if (validArt != null) {
@@ -2062,23 +2101,23 @@ fun FullScreenPlayerOverlay(
                             }
                         )
                     }
-                    .pointerInput(track.id, currentPosMs) {
+                    .pointerInput(track.id) {
                         detectTapGestures(
                             onTap = { showFullLyricsOverlay = true },
                             onDoubleTap = { offset ->
                                 val relX = offset.x / coverWidthPx
                                 when {
                                     relX < 0.35f -> {
-                                        onSeek((currentPosMs - 10000L).coerceAtLeast(0L))
+                                        latestOnSeek((latestCurrentPosMs - 10000L).coerceAtLeast(0L))
                                         doubleTapFeedback = "-10 сек"
                                     }
                                     relX > 0.65f -> {
-                                        onSeek((currentPosMs + 10000L).coerceAtMost(track.durationMs.coerceAtLeast(1L)))
+                                        latestOnSeek((latestCurrentPosMs + 10000L).coerceAtMost(latestTrackDurationMs.coerceAtLeast(1L)))
                                         doubleTapFeedback = "+10 сек"
                                     }
                                     else -> {
-                                        onPlayPause()
-                                        doubleTapFeedback = if (isPlaying) "Пауза" else "Играет"
+                                        latestOnPlayPause()
+                                        doubleTapFeedback = if (latestIsPlaying) "Пауза" else "Играет"
                                     }
                                 }
                             }
@@ -2392,7 +2431,7 @@ fun SpeedPitchSheet(
                 .clip(cardShape)
                 .background(surfaceColor)
                 .border(1.dp, textColor.copy(0.14f), cardShape)
-                .clickable(enabled = false, onClick = {})
+                .clickable(onClick = {})
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -3010,51 +3049,35 @@ fun SettingsCategoryItem(
 ) {
     val itemShape = RoundedCornerShape(20.dp)
     if (compact) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 128.dp)
+                .heightIn(min = 72.dp)
                 .clip(itemShape)
                 .background(textColor.copy(alpha = 0.045f))
                 .border(1.dp, textColor.copy(alpha = 0.075f), itemShape)
                 .clickable { onClick() }
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalAlignment = Alignment.Start
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Box(
+                Modifier.size(42.dp).clip(RoundedCornerShape(14.dp))
+                    .background(primaryColor.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    Modifier.size(40.dp).clip(RoundedCornerShape(14.dp))
-                        .background(primaryColor.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(icon, null, tint = primaryColor, modifier = Modifier.size(22.dp))
-                }
-                Icon(Icons.Filled.ChevronRight, null, tint = primaryColor.copy(alpha = 0.8f), modifier = Modifier.size(19.dp))
+                Icon(icon, null, tint = primaryColor, modifier = Modifier.size(22.dp))
             }
-            Text(
-                title,
-                color = textColor,
-                fontSize = 14.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Start,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                subtitle,
-                color = textColor.copy(0.62f),
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
-                textAlign = TextAlign.Start,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            Spacer(Modifier.width(12.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                horizontalAlignment = Alignment.Start
+            ) {
+                Text(title, color = textColor, fontSize = 14.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = textColor.copy(0.62f), fontSize = 11.sp, lineHeight = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Filled.ChevronRight, null, tint = primaryColor.copy(alpha = 0.8f), modifier = Modifier.size(19.dp))
         }
     } else {
         Row(
@@ -3117,14 +3140,12 @@ fun SettingsAndThemeEditor(
     AnimatedContent(targetState = activeSettingsMenu, label = "") { menu ->
         when (menu) {
             "MAIN" -> {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
+                    item {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -3808,7 +3829,7 @@ fun QueueManagementSheet(
     }
     BackHandler { onDismiss() }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(Modifier.fillMaxWidth().padding(10.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(16.dp).heightIn(min = 320.dp, max = 690.dp)) {
+        Column(Modifier.fillMaxWidth().padding(10.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(onClick = {}).padding(16.dp).heightIn(min = 320.dp, max = 690.dp)) {
             Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.28f)).align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -3835,7 +3856,13 @@ fun QueueManagementSheet(
                             Text(trk.title, color = if (current) primaryColor else textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text("${trk.artist} • ${formatMillis(trk.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        IconButton(onClick = { onRemoveTrack(index) }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, null, tint = textColor.copy(0.55f), modifier = Modifier.size(18.dp)) }
+                        IconButton(
+                            onClick = { if (!current) onRemoveTrack(index) },
+                            enabled = !current,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Filled.Close, null, tint = if (current) textColor.copy(0.22f) else textColor.copy(0.55f), modifier = Modifier.size(18.dp))
+                        }
                         Box(Modifier.size(36.dp).pointerInput(trk.id) {
                             detectDragGestures(
                                 onDragStart = { draggingId = trk.id; dragOffset = 0f; autoScrollDirection = 0 },
@@ -3929,7 +3956,7 @@ fun TrackListItem(
             .fillMaxWidth()
             .clip(cardShape)
             .background(if (isSelected) primaryColor.copy(0.22f) else surfaceColor)
-            .border(if (isSelected) 1.5.dp else 1.dp, if (isSelected) primaryColor else primaryColor.copy(0.22f), cardShape)
+            .border(if (isSelected) 1.5.dp else 1.dp, if (isSelected) primaryColor else textColor.copy(0.08f), cardShape)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
@@ -3978,7 +4005,7 @@ fun AddToPlaylistSheet(
     onCreateNewPlaylistClick: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.55f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(onClick = {}).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(modifier = Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.3f)))
             Spacer(modifier = Modifier.height(16.dp))
             Text("В какой плейлист добавить?", color = textColor, fontWeight = FontWeight.Black, fontSize = 19.sp)
@@ -4043,7 +4070,7 @@ fun PlaylistTrackPickerSheet(
     val filtered = remember(allTracks, query) { if (query.isBlank()) allTracks else allTracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.contains(query, true) } }
     BackHandler { onDismiss() }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(Modifier.fillMaxWidth().padding(12.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(18.dp).heightIn(min = 360.dp, max = 680.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(onClick = {}).padding(18.dp).heightIn(min = 360.dp, max = 680.dp)) {
             Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.28f)).align(Alignment.CenterHorizontally))
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -4079,7 +4106,7 @@ fun PlaylistTrackPickerSheet(
 @Composable
 fun CreateMenuSheet(cardShape: Shape, expressiveShape: Shape, primaryColor: Color, textColor: Color, surfaceColor: Color, onDismiss: () -> Unit, onSelectPlaylist: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.55f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(enabled = false, onClick = {}).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(onClick = {}).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(modifier = Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.3f)))
             Spacer(modifier = Modifier.height(16.dp))
             Text("Что создаём?", color = textColor, fontWeight = FontWeight.Black, fontSize = 19.sp)

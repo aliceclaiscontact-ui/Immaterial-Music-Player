@@ -1430,19 +1430,24 @@ fun MMPApp(
                     textColor = textColor,
                     surfaceColor = surfaceColor,
                     onDismiss = { showQueueSheet = false },
-                    onSelectTrack = { playTrack(it) },
+                    onSelectTrack = { playTrack(it); showQueueSheet = false },
                     onMoveTrack = { from, to ->
-                        val mutable = currentQueue.toMutableList()
-                        val item = mutable.removeAt(from)
-                        mutable.add(to, item)
-                        currentQueue = mutable
-                        StorageHelper.saveLastQueue(prefs, mutable)
+                        if (from in currentQueue.indices && to in currentQueue.indices && from != to) {
+                            val mutable = currentQueue.toMutableList()
+                            val item = mutable.removeAt(from)
+                            mutable.add(to, item)
+                            currentQueue = mutable
+                            StorageHelper.saveLastQueue(prefs, mutable)
+                        }
                     },
                     onRemoveTrack = { idx ->
-                        val mutable = currentQueue.toMutableList()
-                        mutable.removeAt(idx)
-                        currentQueue = mutable
-                        StorageHelper.saveLastQueue(prefs, mutable)
+                        val target = currentQueue.getOrNull(idx)
+                        if (target != null && target.id != currentTrack?.id) {
+                            val mutable = currentQueue.toMutableList()
+                            mutable.removeAt(idx)
+                            currentQueue = mutable
+                            StorageHelper.saveLastQueue(prefs, mutable)
+                        }
                     }
                 )
             }
