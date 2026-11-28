@@ -48,5 +48,6 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.2.0")
     implementation("androidx.compose.material:material-icons-extended:1.6.0")
     implementation("androidx.compose.animation:animation:1.6.0")
+    implementation("androidx.graphics:graphics-shapes:1.1.0")
     implementation("androidx.media:media:1.7.0")
 }

@@ -19,11 +19,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.LruCache
-import androidx.compose.foundation.shape.CutCornerShape
-import androidx.compose.foundation.shape.GenericShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -63,101 +58,10 @@ enum class TrackSortMode(val label: String) {
 }
 
 enum class ShapeStyle(val label: String) {
-    SQUIRCLE("Плавный"),
+    SQUIRCLE("Плавная"),
     COOKIE("Клевер"),
-    STAR("Звезда"),
     FLOWER("Цветок"),
-    HEXAGON("Шестигранник"),
-    HEART("Сердце"),
-    ARCH("Арка"),
-    SHARP("Острый"),
-    CYBER("Срез")
-}
-
-fun ShapeStyle.toCardShape(): Shape = when (this) {
-    ShapeStyle.SQUIRCLE -> RoundedCornerShape(26.dp)
-    ShapeStyle.COOKIE -> RoundedCornerShape(30.dp)
-    ShapeStyle.STAR -> RoundedCornerShape(22.dp)
-    ShapeStyle.FLOWER -> RoundedCornerShape(28.dp)
-    ShapeStyle.HEXAGON -> CutCornerShape(14.dp)
-    ShapeStyle.HEART -> RoundedCornerShape(26.dp)
-    ShapeStyle.ARCH -> RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
-    ShapeStyle.SHARP -> RoundedCornerShape(6.dp)
-    ShapeStyle.CYBER -> CutCornerShape(16.dp)
-}
-
-fun ShapeStyle.toExpressiveShape(): Shape = when (this) {
-    ShapeStyle.SQUIRCLE -> RoundedCornerShape(28.dp)
-    ShapeStyle.SHARP -> RoundedCornerShape(8.dp)
-    ShapeStyle.CYBER -> CutCornerShape(22)
-    ShapeStyle.ARCH -> RoundedCornerShape(topStartPercent = 50, topEndPercent = 50, bottomStartPercent = 14, bottomEndPercent = 14)
-    ShapeStyle.HEXAGON -> GenericShape { size, _ ->
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val r = min(cx, cy)
-        for (i in 0 until 6) {
-            val angle = i * PI / 3 - PI / 2
-            val x = (cx + r * cos(angle)).toFloat()
-            val y = (cy + r * sin(angle)).toFloat()
-            if (i == 0) moveTo(x, y) else lineTo(x, y)
-        }
-        close()
-    }
-    ShapeStyle.STAR -> GenericShape { size, _ ->
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val r = min(cx, cy)
-        val points = 12
-        val total = points * 2
-        for (i in 0 until total) {
-            val angle = i * PI / points - PI / 2
-            val rad = if (i % 2 == 0) r else r * 0.82f
-            val x = (cx + rad * cos(angle)).toFloat()
-            val y = (cy + rad * sin(angle)).toFloat()
-            if (i == 0) moveTo(x, y) else lineTo(x, y)
-        }
-        close()
-    }
-    ShapeStyle.COOKIE -> GenericShape { size, _ ->
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val baseR = min(cx, cy) * 0.90f
-        val amp = min(cx, cy) * 0.10f
-        val steps = 120
-        for (i in 0..steps) {
-            val t = i * 2 * PI / steps
-            val rad = baseR + amp * cos(8 * t)
-            val x = (cx + rad * cos(t)).toFloat()
-            val y = (cy + rad * sin(t)).toFloat()
-            if (i == 0) moveTo(x, y) else lineTo(x, y)
-        }
-        close()
-    }
-    ShapeStyle.FLOWER -> GenericShape { size, _ ->
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val baseR = min(cx, cy) * 0.86f
-        val amp = min(cx, cy) * 0.14f
-        val steps = 120
-        for (i in 0..steps) {
-            val t = i * 2 * PI / steps
-            val rad = baseR + amp * cos(6 * t)
-            val x = (cx + rad * cos(t)).toFloat()
-            val y = (cy + rad * sin(t)).toFloat()
-            if (i == 0) moveTo(x, y) else lineTo(x, y)
-        }
-        close()
-    }
-    ShapeStyle.HEART -> GenericShape { size, _ ->
-        val w = size.width
-        val h = size.height
-        moveTo(w * 0.5f, h * 0.92f)
-        cubicTo(w * 0.08f, h * 0.64f, -w * 0.05f, h * 0.24f, w * 0.26f, h * 0.10f)
-        cubicTo(w * 0.42f, h * 0.03f, w * 0.50f, h * 0.18f, w * 0.50f, h * 0.26f)
-        cubicTo(w * 0.50f, h * 0.18f, w * 0.58f, h * 0.03f, w * 0.74f, h * 0.10f)
-        cubicTo(w * 1.05f, h * 0.24f, w * 0.92f, h * 0.64f, w * 0.5f, h * 0.92f)
-        close()
-    }
+    STAR("Звезда")
 }
 
 enum class ThemeMode(val label: String) {
@@ -168,10 +72,10 @@ enum class ThemeMode(val label: String) {
 }
 
 data class MMPThemeConfig(
-    val themeName: String = "Expressive Pink",
-    val primaryHex: Long = 0xFFFF66C4,
-    val secondaryHex: Long = 0xFF7B61FF,
-    val bgHex: Long = 0xFF0D0D12,
+    val themeName: String = "Imma U1",
+    val primaryHex: Long = 0xFFD9A1FA,
+    val secondaryHex: Long = 0xFFAD86E8,
+    val bgHex: Long = 0xFF2A1040,
     val shapeStyle: ShapeStyle = ShapeStyle.SQUIRCLE,
     val themeMode: ThemeMode = ThemeMode.DARK,
     val blurIntensity: Float = 18f
@@ -197,10 +101,10 @@ data class MMPThemeConfig(
                 val modeName = json.optString("themeMode", "DARK")
                 val mode = ThemeMode.entries.find { it.name == modeName } ?: ThemeMode.DARK
                 MMPThemeConfig(
-                    themeName = json.optString("themeName", "Custom Theme"),
-                    primaryHex = json.optLong("primaryHex", 0xFFFF66C4),
-                    secondaryHex = json.optLong("secondaryHex", 0xFF7B61FF),
-                    bgHex = json.optLong("bgHex", 0xFF0D0D12),
+                    themeName = json.optString("themeName", "Imma U1"),
+                    primaryHex = json.optLong("primaryHex", 0xFFD9A1FA),
+                    secondaryHex = json.optLong("secondaryHex", 0xFFAD86E8),
+                    bgHex = json.optLong("bgHex", 0xFF2A1040),
                     shapeStyle = style,
                     themeMode = mode,
                     blurIntensity = json.optDouble("blurIntensity", 18.0).toFloat()
@@ -718,7 +622,20 @@ object StorageHelper {
     }
 
     fun loadTheme(prefs: SharedPreferences): MMPThemeConfig {
-        return MMPThemeConfig.fromJson(prefs.getString("saved_theme_v3", null) ?: "") ?: MMPThemeConfig()
+        val stored = MMPThemeConfig.fromJson(prefs.getString("saved_theme_v3", null) ?: "") ?: MMPThemeConfig()
+        val isUntouchedLegacyDefault =
+            stored.themeName == "Expressive Pink" &&
+            stored.primaryHex == 0xFFFF66C4L &&
+            stored.secondaryHex == 0xFF7B61FFL &&
+            stored.bgHex == 0xFF0D0D12L
+        return if (isUntouchedLegacyDefault) {
+            stored.copy(
+                themeName = "Imma U1",
+                primaryHex = 0xFFD9A1FAL,
+                secondaryHex = 0xFFAD86E8L,
+                bgHex = 0xFF2A1040L
+            ).also { migrated -> saveTheme(prefs, migrated) }
+        } else stored
     }
 
     fun saveMinDurationSec(prefs: SharedPreferences, sec: Int) {

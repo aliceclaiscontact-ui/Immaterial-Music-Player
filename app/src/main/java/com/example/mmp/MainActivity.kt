@@ -927,7 +927,6 @@ fun MMPApp(
     DisposableEffect(Unit) { onDispose { try { exoPlayer.release() } catch (_: Throwable) {} } }
 
     var selectedBottomTab by remember { mutableIntStateOf(0) }
-    var showCreateStep1Sheet by remember { mutableStateOf(false) }
     var showCreateStep2Dialog by remember { mutableStateOf(false) }
     var pendingPlaylistCoverUri by remember { mutableStateOf<String?>(null) }
     var tracksToAddToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -959,9 +958,13 @@ fun MMPApp(
     val secondaryColor = Color(themeConfig.secondaryHex)
     val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
     LaunchedEffect(isLightMode) { onThemeLightChanged(isLightMode) }
-    val bgColor by animateColorAsState(if (isLightMode) Color(0xFFF6F5FA) else Color(0xFF0D0D12), tween(400), label = "")
-    val textColor = if (isLightMode) Color(0xFF14141C) else Color.White
-    val surfaceColor = if (isLightMode) Color(0xFFE9E7F2) else Color(0xFF1A1A26)
+    val bgColor by animateColorAsState(
+        if (isLightMode) Color(0xFFF8F4FC) else Color(themeConfig.bgHex),
+        tween(400),
+        label = ""
+    )
+    val textColor = if (isLightMode) Color(0xFF21152D) else Color(0xFFF8F0FF)
+    val surfaceColor = if (isLightMode) Color(0xFFECE4F3) else Color(0xFF3B2452)
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         uri?.let { context.contentResolver.openOutputStream(it)?.use { out -> out.write(themeConfig.toJson().toByteArray()) }; Toast.makeText(context, "Тема сохранена!", Toast.LENGTH_SHORT).show() }
@@ -995,7 +998,7 @@ fun MMPApp(
             Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = if (hideDock) 82.dp else 152.dp)) {
                 AnimatedContent(targetState = selectedBottomTab, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) }, label = "") { tab ->
                     when (tab) {
-                        0 -> HomeScreen(
+                        0, 3 -> HomeScreen(
                             allRawTracks = rawDeviceTracks,
                             deviceTracks = deviceTracks,
                             trackPlaysAllTime = trackPlaysAllTime,
@@ -1035,7 +1038,8 @@ fun MMPApp(
                             onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
                             onStartMyWaveClick = { startMyWave5050() },
                             onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
-                            onImportTheme = { importLauncher.launch(arrayOf("*/*")) }
+                            onImportTheme = { importLauncher.launch(arrayOf("*/*")) },
+                            settingsOnly = tab == 3
                         )
                         1 -> LibraryScreen(
                             tracks = allMergedTracks,
@@ -1335,7 +1339,14 @@ fun MMPApp(
                 )
 
                 if (!hideDock) {
-                    FrostedDockBar(selectedBottomTab, activeStreamingProvider, cardShape, primaryColor, textColor, surfaceColor, { selectedBottomTab = it }, { showCreateStep1Sheet = true })
+                    FrostedDockBar(
+                        selectedTab = selectedBottomTab,
+                        primaryColor = primaryColor,
+                        textColor = textColor,
+                        surfaceColor = surfaceColor,
+                        isLightMode = isLightMode,
+                        onTabSelected = { selectedBottomTab = it }
+                    )
                 }
             }
 
@@ -1630,14 +1641,6 @@ fun MMPApp(
                         showCreateStep2Dialog = true
                     }
                 )
-            }
-
-            AnimatedVisibility(
-                visible = showCreateStep1Sheet,
-                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
-                exit = fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 2 })
-            ) {
-                CreateMenuSheet(cardShape, expressiveShape, primaryColor, textColor, surfaceColor, { showCreateStep1Sheet = false }, { showCreateStep1Sheet = false; pendingPlaylistCoverUri = null; showCreateStep2Dialog = true })
             }
 
             if (showCreateStep2Dialog) {
