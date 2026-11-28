@@ -236,36 +236,64 @@ suspend fun shareTrackCardImage(
 
 fun extractDominantColor(bitmap: Bitmap?, fallbackHex: Long): Long {
     if (bitmap == null || bitmap.isRecycled) return fallbackHex
+    var scaled: Bitmap? = null
     return try {
-        val scaled = Bitmap.createScaledBitmap(bitmap, 32, 32, false)
-        val hueBins = Array(24) { mutableListOf<FloatArray>() }
+        val sample = Bitmap.createScaledBitmap(bitmap, 48, 48, true).also { scaled = it }
+        val binCount = 30 // 12-degree hue buckets.
+        val weights = DoubleArray(binCount)
+        val hueSin = DoubleArray(binCount)
+        val hueCos = DoubleArray(binCount)
+        val saturationSum = DoubleArray(binCount)
+        val valueSum = DoubleArray(binCount)
 
-        for (x in 0 until 32) {
-            for (y in 0 until 32) {
-                val pixel = scaled.getPixel(x, y)
+        for (y in 0 until sample.height) {
+            for (x in 0 until sample.width) {
+                val pixel = sample.getPixel(x, y)
+                if (android.graphics.Color.alpha(pixel) < 160) continue
                 val hsv = FloatArray(3)
                 android.graphics.Color.colorToHSV(pixel, hsv)
+                val saturation = hsv[1]
+                val value = hsv[2]
 
-                // Ignore near-gray, nearly black and almost-white pixels.
-                if (hsv[1] < 0.28f || hsv[2] !in 0.18f..0.94f) continue
+                // Skip neutral, near-black and blown-out pixels. Strongly saturated
+                // artwork colors should outweigh muddy shadows and warm neutrals.
+                if (saturation < 0.22f || value < 0.14f || value > 0.985f) continue
 
-                val hueBin = (hsv[0] / 15f).toInt().coerceIn(0, 23)
-                hueBins[hueBin].add(hsv)
+                val bin = (hsv[0] / 12f).toInt().coerceIn(0, binCount - 1)
+                val weight = saturation.toDouble().pow(2.2) * (0.55 + 0.45 * value)
+                val radians = Math.toRadians(hsv[0].toDouble())
+                weights[bin] += weight
+                hueSin[bin] += kotlin.math.sin(radians) * weight
+                hueCos[bin] += kotlin.math.cos(radians) * weight
+                saturationSum[bin] += saturation * weight
+                valueSum[bin] += value * weight
             }
         }
 
-        val dominantBin = hueBins
-            .filter { it.size >= 2 }
-            .maxByOrNull { bin -> bin.sumOf { it[1].toDouble() } }
-            ?: return fallbackHex
+        if (weights.sum() <= 0.0) return fallbackHex
 
-        val hue = dominantBin.map { it[0] }.average().toFloat()
-        val saturation = dominantBin.map { it[1] }.average().toFloat().coerceIn(0.46f, 0.86f)
-        val value = dominantBin.map { it[2] }.average().toFloat().coerceIn(0.62f, 0.90f)
+        // Score neighbouring buckets together so a hue near a bucket edge
+        // does not cause the adaptive accent to jump between unrelated colors.
+        val dominant = (0 until binCount).maxByOrNull { index ->
+            weights[(index - 1 + binCount) % binCount] +
+                weights[index] * 2.0 +
+                weights[(index + 1) % binCount]
+        } ?: return fallbackHex
+        val selected = listOf((dominant - 1 + binCount) % binCount, dominant, (dominant + 1) % binCount)
+        val totalWeight = selected.sumOf { weights[it] }
+        if (totalWeight <= 0.0) return fallbackHex
+
+        val sinTotal = selected.sumOf { hueSin[it] }
+        val cosTotal = selected.sumOf { hueCos[it] }
+        val hue = ((Math.toDegrees(kotlin.math.atan2(sinTotal, cosTotal)) + 360.0) % 360.0).toFloat()
+        val saturation = (selected.sumOf { saturationSum[it] } / totalWeight).toFloat().coerceIn(0.48f, 0.92f)
+        val value = (selected.sumOf { valueSum[it] } / totalWeight).toFloat().coerceIn(0.58f, 0.90f)
 
         android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, value)).toLong() and 0xFFFFFFFFL
     } catch (_: Exception) {
         fallbackHex
+    } finally {
+        scaled?.takeIf { it !== bitmap && !it.isRecycled }?.recycle()
     }
 }
 
