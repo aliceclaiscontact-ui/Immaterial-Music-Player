@@ -209,75 +209,156 @@ fun QueueManagementSheet(
     var draggingId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var autoScrollDirection by remember { mutableIntStateOf(0) }
-    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 76.dp.toPx() }
+    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
     val latestQueue by rememberUpdatedState(queue)
+
     LaunchedEffect(draggingId, autoScrollDirection) {
         while (draggingId != null && autoScrollDirection != 0) {
-            listState.scrollBy(autoScrollDirection * 18f)
+            listState.scrollBy(autoScrollDirection * 14f)
             kotlinx.coroutines.delay(16)
         }
     }
     BackHandler { onDismiss() }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(0.58f)).clickable { onDismiss() }, contentAlignment = Alignment.BottomCenter) {
-        Column(Modifier.fillMaxWidth().padding(10.dp).navigationBarsPadding().clip(cardShape).background(surfaceColor).border(1.dp, textColor.copy(0.12f), cardShape).clickable(onClick = {}).padding(16.dp).heightIn(min = 320.dp, max = 690.dp)) {
-            Box(Modifier.width(38.dp).height(4.dp).clip(CircleShape).background(textColor.copy(0.28f)).align(Alignment.CenterHorizontally))
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Очередь", color = textColor, fontWeight = FontWeight.Black, fontSize = 21.sp)
-                    Text("${queue.size} треков • удерживай и перетаскивай", color = textColor.copy(0.58f), fontSize = 12.sp)
+
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.60f)).clickable { onDismiss() },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Column(
+            Modifier.fillMaxWidth()
+                .padding(horizontal = 8.dp)
+                .navigationBarsPadding()
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(surfaceColor)
+                .border(1.dp, textColor.copy(0.10f), RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .clickable(onClick = {})
+                .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 12.dp)
+                .heightIn(min = 340.dp, max = 720.dp)
+        ) {
+            Box(
+                Modifier.width(36.dp).height(4.dp).clip(CircleShape)
+                    .background(textColor.copy(0.24f)).align(Alignment.CenterHorizontally)
+            )
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Очередь воспроизведения", color = textColor, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                    Text("${queue.size} треков", color = textColor.copy(0.62f), fontSize = 13.sp)
                 }
-                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, null, tint = textColor) }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, "Закрыть очередь", tint = textColor)
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, verticalArrangement = Arrangement.spacedBy(7.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
-                itemsIndexed(queue, key = { _, t -> t.id }) { index, trk ->
-                    val current = currentTrack?.id == trk.id
-                    val dragging = draggingId == trk.id
-                    Row(Modifier.animateItemPlacement().fillMaxWidth().zIndex(if (dragging) 1f else 0f).graphicsLayer {
-                        translationY = if (dragging) dragOffset else 0f
-                        scaleX = if (dragging) 1.02f else 1f
-                        scaleY = if (dragging) 1.02f else 1f
-                        shadowElevation = if (dragging) 12.dp.toPx() else 0f
-                    }.clip(RoundedCornerShape(16.dp)).background(if (current) primaryColor.copy(0.16f) else textColor.copy(0.045f)).clickable { onSelectTrack(trk) }.padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TrackCoverThumb(trk, RoundedCornerShape(8.dp), primaryColor, 44)
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(trk.title, color = if (current) primaryColor else textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${trk.artist} • ${formatMillis(trk.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        IconButton(
-                            onClick = { if (!current) onRemoveTrack(index) },
-                            enabled = !current,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Filled.Close, null, tint = if (current) textColor.copy(0.22f) else textColor.copy(0.55f), modifier = Modifier.size(18.dp))
-                        }
-                        Box(Modifier.size(36.dp).pointerInput(trk.id) {
-                            detectDragGestures(
-                                onDragStart = { draggingId = trk.id; dragOffset = 0f; autoScrollDirection = 0 },
-                                onDragEnd = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
-                                onDragCancel = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
-                                onDrag = { change, delta ->
-                                    change.consume()
-                                    dragOffset += delta.y
-                                    val info = listState.layoutInfo
-                                    val dragged = info.visibleItemsInfo.firstOrNull { it.key == trk.id } ?: return@detectDragGestures
-                                    val currentIndex = latestQueue.indexOfFirst { it.id == trk.id }
-                                    val center = dragged.offset + dragged.size / 2 + dragOffset
-                                    val target = info.visibleItemsInfo.firstOrNull { center >= it.offset && center <= it.offset + it.size }
-                                    if (target != null && currentIndex >= 0 && target.index != currentIndex) {
-                                        onMoveTrack(currentIndex, target.index)
-                                        dragOffset = 0f
-                                    }
-                                    autoScrollDirection = when {
-                                        center < info.viewportStartOffset + edge -> -1
-                                        center > info.viewportEndOffset - edge -> 1
-                                        else -> 0
-                                    }
+            Spacer(Modifier.height(14.dp))
+
+            if (currentTrack != null) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                        .background(primaryColor.copy(0.14f)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TrackCoverThumb(currentTrack, RoundedCornerShape(14.dp), primaryColor, 52)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("СЕЙЧАС ИГРАЕТ", color = primaryColor, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(currentTrack.title, color = textColor, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(currentTrack.artist, color = textColor.copy(0.62f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Icon(Icons.Filled.Equalizer, null, tint = primaryColor, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.height(18.dp))
+            }
+
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Далее", color = textColor, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("Удерживай  ≡  чтобы изменить порядок", color = textColor.copy(0.52f), fontSize = 10.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+
+            if (queue.isEmpty()) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.QueueMusic, null, tint = primaryColor.copy(0.8f), modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(10.dp))
+                        Text("Очередь пока пуста", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Добавленные треки появятся здесь", color = textColor.copy(0.58f), fontSize = 12.sp)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 12.dp)
+                ) {
+                    itemsIndexed(queue, key = { _, track -> trackStableKey(track) }) { index, track ->
+                        val isCurrent = currentTrack?.id == track.id
+                        val isDragging = draggingId == track.id
+                        Row(
+                            Modifier.animateItemPlacement().fillMaxWidth()
+                                .zIndex(if (isDragging) 1f else 0f)
+                                .graphicsLayer {
+                                    translationY = if (isDragging) dragOffset else 0f
+                                    scaleX = if (isDragging) 1.015f else 1f
+                                    scaleY = if (isDragging) 1.015f else 1f
+                                    shadowElevation = if (isDragging) 10.dp.toPx() else 0f
                                 }
-                            )
-                        }, contentAlignment = Alignment.Center) { Icon(Icons.Filled.DragIndicator, "Перетащить", tint = primaryColor, modifier = Modifier.size(21.dp)) }
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(if (isCurrent) primaryColor.copy(0.14f) else textColor.copy(0.045f))
+                                .clickable { onSelectTrack(track) }
+                                .padding(horizontal = 10.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TrackCoverThumb(track, RoundedCornerShape(12.dp), primaryColor, 48)
+                            Spacer(Modifier.width(11.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(track.title, color = if (isCurrent) primaryColor else textColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${track.artist} • ${formatMillis(track.durationMs)}", color = textColor.copy(0.58f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            IconButton(
+                                onClick = { if (!isCurrent) onRemoveTrack(index) },
+                                enabled = !isCurrent,
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(Icons.Filled.Close, "Убрать из очереди", tint = if (isCurrent) textColor.copy(0.22f) else textColor.copy(0.55f), modifier = Modifier.size(18.dp))
+                            }
+                            Box(
+                                Modifier.size(40.dp).clip(CircleShape)
+                                    .background(if (isDragging) primaryColor.copy(0.20f) else Color.Transparent)
+                                    .pointerInput(track.id) {
+                                        detectDragGestures(
+                                            onDragStart = { draggingId = track.id; dragOffset = 0f; autoScrollDirection = 0 },
+                                            onDragEnd = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
+                                            onDragCancel = { draggingId = null; dragOffset = 0f; autoScrollDirection = 0 },
+                                            onDrag = { change, delta ->
+                                                change.consume()
+                                                dragOffset += delta.y
+                                                val layout = listState.layoutInfo
+                                                val dragged = layout.visibleItemsInfo.firstOrNull { it.key == trackStableKey(track) }
+                                                    ?: return@detectDragGestures
+                                                val from = latestQueue.indexOfFirst { trackStableKey(it) == trackStableKey(track) }
+                                                val center = dragged.offset + dragged.size / 2 + dragOffset
+                                                val target = layout.visibleItemsInfo.firstOrNull {
+                                                    center >= it.offset && center <= it.offset + it.size
+                                                }
+                                                if (target != null && from >= 0 && target.index != from) {
+                                                    onMoveTrack(from, target.index)
+                                                    dragOffset = 0f
+                                                }
+                                                autoScrollDirection = when {
+                                                    center < layout.viewportStartOffset + edge -> -1
+                                                    center > layout.viewportEndOffset - edge -> 1
+                                                    else -> 0
+                                                }
+                                            }
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.DragIndicator, "Перетащить", tint = primaryColor, modifier = Modifier.size(22.dp))
+                            }
+                        }
                     }
                 }
             }
