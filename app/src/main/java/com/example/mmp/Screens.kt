@@ -3301,12 +3301,12 @@ fun SettingsAndThemeEditor(
     var selectedStreamState by remember(activeStreamingProvider) { mutableStateOf(activeStreamingProvider) }
 
     val presets = listOf(
-        "Imma Lilac" to 0xFFD9A1FA,
-        "Violet" to 0xFFAD86E8,
-        "Orchid" to 0xFFE8A9E8,
-        "Iris" to 0xFF9D8BF2,
-        "Lavender" to 0xFFB9A8F5,
-        "Mauve" to 0xFFD69BCB
+        "Mint" to 0xFF79D6C3,
+        "Ocean" to 0xFF62B8D8,
+        "Sky" to 0xFF83AEEB,
+        "Teal" to 0xFF4EAA9A,
+        "Coral" to 0xFFFF9278,
+        "Rose" to 0xFFE88FA6
     )
 
     var showCustomColorPicker by remember { mutableStateOf(false) }
@@ -3326,8 +3326,9 @@ fun SettingsAndThemeEditor(
             "MAIN" -> {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                    contentPadding = PaddingValues(start = 0.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                    horizontalAlignment = Alignment.Start
                 ) {
                     item { Text("ПОДКЛЮЧЕНИЯ", color = textColor.copy(0.48f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp) }
                     item {
@@ -3544,7 +3545,7 @@ fun SettingsAndThemeEditor(
                     item {
                         Column(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                                .background(surfaceColor.copy(alpha = 0.78f))
+                                .background(surfaceColor)
                                 .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
                                 .padding(14.dp),
                             verticalArrangement = Arrangement.spacedBy(11.dp)
@@ -3643,7 +3644,7 @@ fun SettingsAndThemeEditor(
                     item {
                         Column(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                                .background(surfaceColor.copy(alpha = 0.78f))
+                                .background(surfaceColor)
                                 .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
