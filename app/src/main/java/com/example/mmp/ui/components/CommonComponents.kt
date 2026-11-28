@@ -97,6 +97,7 @@ import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun MotionText(
     text: String,
@@ -128,7 +129,7 @@ fun MotionText(
             transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
             label = "motion-blur-radius"
         ) { state ->
-            if (state == displayedText) 0f else 2.4f
+            if (state == EnterExitState.Visible) 0f else 2.4f
         }
 
         Text(
