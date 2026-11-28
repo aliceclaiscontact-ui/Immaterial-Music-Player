@@ -41,13 +41,13 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 object ImmaU1Palette {
-    const val Accent: Long = 0xFFD9A1FAL
-    const val Secondary: Long = 0xFFAD86E8L
-    const val Background: Long = 0xFF2A1040L
-    const val Surface: Long = 0xFF3B2452L
-    const val LightBackground: Long = 0xFFF8F4FCL
-    const val LightSurface: Long = 0xFFECE4F3L
-    const val DarkText: Long = 0xFFF8F0FFL
+    const val Accent: Long = 0xFF79D6C3L
+    const val Secondary: Long = 0xFF4EAA9AL
+    const val Background: Long = 0xFF15191DL
+    const val Surface: Long = 0xFF222A2DL
+    const val LightBackground: Long = 0xFFF4F6F5L
+    const val LightSurface: Long = 0xFFE6ECEAL
+    const val DarkText: Long = 0xFFF1F5F4L
 }
 
 object MMPShapeRadii {
