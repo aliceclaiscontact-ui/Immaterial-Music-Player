@@ -1112,7 +1112,6 @@ fun SoundCloudScreen(
 }
 
 @Composable
-@Composable
 private fun ArtworkAtmosphere(
     bitmap: Bitmap?,
     accentColor: Color,
@@ -1167,6 +1166,7 @@ private fun ArtworkAtmosphere(
     }
 }
 
+@Composable
 fun CleanHeaderLayout(
     title: String,
     subtitle: String,
@@ -1797,6 +1797,7 @@ fun LibraryScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(18.dp))
+                                            .border(1.dp, textColor.copy(0.08f), RoundedCornerShape(18.dp))
                                             .clickable { onSetOpenedPlaylist(pl) }
                                     ) {
                                         Box(
@@ -1831,7 +1832,7 @@ fun LibraryScreen(
                                         )
                                         Text(
                                             "$plCount треков",
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
                                             color = textColor.copy(0.68f),
                                             fontSize = 12.sp,
                                             maxLines = 1,
