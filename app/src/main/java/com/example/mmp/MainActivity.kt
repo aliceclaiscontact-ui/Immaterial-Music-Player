@@ -3,6 +3,7 @@ package com.example.mmp
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.database.ContentObserver
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.audiofx.BassBoost
@@ -10,8 +11,11 @@ import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
+import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -99,6 +103,19 @@ fun MMPApp(
 
     var themeConfig by remember { mutableStateOf(StorageHelper.loadTheme(prefs)) }
     var rawDeviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var libraryRefreshJob by remember { mutableStateOf<Job?>(null) }
+
+    fun scheduleDeviceLibraryRefresh() {
+        libraryRefreshJob?.cancel()
+        libraryRefreshJob = scope.launch {
+            delay(850L)
+            try {
+                rawDeviceTracks = scanDeviceMusic(context)
+            } catch (_: Throwable) {
+                // Keep the last good library snapshot if a scan fails.
+            }
+        }
+    }
     var savedScTracks by remember { mutableStateOf<List<Track>>(StorageHelper.loadSoundCloudTracks(prefs)) }
     var likedScTracks by remember {
         val rawLiked = prefs.getString("liked_sc_tracks_v1", null)
@@ -181,7 +198,7 @@ fun MMPApp(
     var hasAudioPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasAudioPermission = granted
-        if (granted) scope.launch { delay(500); rawDeviceTracks = scanDeviceMusic(context) }
+        if (granted) scheduleDeviceLibraryRefresh()
     }
 
     val exoPlayer = remember {
@@ -310,6 +327,31 @@ fun MMPApp(
         rawDeviceTracks
             .filter { it.durationMs >= minDurationSec * 1000L && !excludedFolders.contains(it.folderPath) }
             .map { applyOverridesToTrack(it, tagOverrides) }
+    }
+
+    DisposableEffect(context, hasAudioPermission) {
+        if (!hasAudioPermission) {
+            onDispose { libraryRefreshJob?.cancel() }
+        } else {
+            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    scheduleDeviceLibraryRefresh()
+                }
+            }
+            try {
+                context.contentResolver.registerContentObserver(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    true,
+                    observer
+                )
+            } catch (_: Throwable) {
+                // Manual rescan remains available if the provider does not allow observation.
+            }
+            onDispose {
+                try { context.contentResolver.unregisterContentObserver(observer) } catch (_: Throwable) {}
+                libraryRefreshJob?.cancel()
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
