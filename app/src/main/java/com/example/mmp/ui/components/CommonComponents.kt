@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -95,6 +96,55 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+@Composable
+fun MotionText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip
+) {
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            (fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) +
+                slideInHorizontally(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                ) { width -> width / 10 }
+            ).togetherWith(
+                fadeOut(animationSpec = tween(150, easing = LinearOutSlowInEasing)) +
+                    slideOutHorizontally(
+                        animationSpec = tween(210, easing = FastOutSlowInEasing)
+                    ) { width -> -width / 10 }
+            )
+        },
+        contentAlignment = Alignment.CenterStart,
+        label = "motion-blur-text"
+    ) { displayedText ->
+        val blurRadius by transition.animateFloat(
+            transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
+            label = "motion-blur-radius"
+        ) { state ->
+            if (state == displayedText) 0f else 2.4f
+        }
+
+        Text(
+            text = displayedText,
+            modifier = modifier.blur(
+                radius = blurRadius.dp,
+                edgeTreatment = BlurredEdgeTreatment.Unbounded
+            ),
+            color = color,
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            maxLines = maxLines,
+            overflow = overflow
+        )
+    }
+}
 
 @Composable
 fun YouTubeMusicLogoBadge(sizeDp: Int = 44) {
