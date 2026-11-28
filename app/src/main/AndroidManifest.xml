@@ -30,12 +30,12 @@
         </activity>
 
         <service
-            android:name=".MediaPlaybackService"
+            android:name=".playback.MediaPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
         <receiver
-            android:name=".MMPWidgetProvider"
+            android:name=".playback.MMPWidgetProvider"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

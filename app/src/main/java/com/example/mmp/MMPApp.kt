@@ -59,6 +59,7 @@ import com.example.mmp.ui.onboarding.*
 import com.example.mmp.ui.online.*
 import com.example.mmp.ui.player.*
 import com.example.mmp.ui.settings.*
+import com.example.mmp.playback.*
 import com.example.mmp.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

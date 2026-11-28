@@ -1,4 +1,4 @@
-package com.example.mmp
+package com.example.mmp.playback
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -19,8 +19,8 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
-import com.example.mmp.data.local.*
-import com.example.mmp.domain.*
+import com.example.mmp.MainActivity
+import com.example.mmp.R
 import com.example.mmp.domain.model.*
 
 object PlayerBridge {
