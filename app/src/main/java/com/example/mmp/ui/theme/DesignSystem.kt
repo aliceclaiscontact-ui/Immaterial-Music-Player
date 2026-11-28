@@ -1,4 +1,4 @@
-package com.example.mmp
+package com.example.mmp.ui.theme
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.mmp.domain.model.ShapeStyle
 
 object ImmaU1Palette {
     const val Accent: Long = 0xFF79D6C3L

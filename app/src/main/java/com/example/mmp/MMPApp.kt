@@ -1,0 +1,1702 @@
+package com.example.mmp
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.media.audiofx.BassBoost
+import android.media.audiofx.Equalizer
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
+import android.os.Process
+import android.provider.MediaStore
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.example.mmp.data.local.*
+import com.example.mmp.data.remote.*
+import com.example.mmp.domain.*
+import com.example.mmp.domain.model.*
+import com.example.mmp.domain.model.RepeatMode
+import com.example.mmp.ui.components.*
+import com.example.mmp.ui.dialogs.*
+import com.example.mmp.ui.home.*
+import com.example.mmp.ui.library.*
+import com.example.mmp.ui.onboarding.*
+import com.example.mmp.ui.online.*
+import com.example.mmp.ui.player.*
+import com.example.mmp.ui.settings.*
+import com.example.mmp.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+
+@Composable
+fun MMPApp(
+    onThemeLightChanged: (Boolean) -> Unit = {},
+    onRestartApp: () -> Unit = {},
+    onKillAppIdle: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("mmp_prefs_v3", Context.MODE_PRIVATE) }
+    val firstLaunchDate = remember { StorageHelper.getOrInitFirstLaunchDate(context, prefs) }
+
+    var showOnboarding by remember { mutableStateOf(!StorageHelper.isOnboardingCompleted(prefs)) }
+    val activeStreamingProvider = remember { StorageHelper.loadStreamingProvider(prefs) }
+    var selectedProviderInUi by remember { mutableStateOf(activeStreamingProvider) }
+
+    var themeConfig by remember { mutableStateOf(StorageHelper.loadTheme(prefs)) }
+    var rawDeviceTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var libraryRefreshJob by remember { mutableStateOf<Job?>(null) }
+
+    suspend fun refreshDeviceLibraryNow() {
+        val mediaStoreResult = scanDeviceMusicResult(context)
+        if (mediaStoreResult.isComplete) {
+            rawDeviceTracks = mediaStoreResult.tracks
+            val mediaStoreSnapshot = rawDeviceTracks
+            withContext(Dispatchers.IO) {
+                StorageHelper.saveDeviceLibraryCache(context, mediaStoreSnapshot)
+            }
+        } else if (mediaStoreResult.tracks.isNotEmpty()) {
+            rawDeviceTracks = (rawDeviceTracks + mediaStoreResult.tracks).distinctBy {
+                it.filePath.ifBlank { it.uri.toString() }
+            }
+        }
+
+        // This slower compatibility pass runs only after the main MediaStore list is visible.
+        val unindexedDownloads = scanUnindexedDownloadTracks(context)
+        if (unindexedDownloads.isNotEmpty()) {
+            rawDeviceTracks = (rawDeviceTracks + unindexedDownloads).distinctBy {
+                it.filePath.ifBlank { it.uri.toString() }
+            }
+            val completeSnapshot = rawDeviceTracks
+            withContext(Dispatchers.IO) {
+                StorageHelper.saveDeviceLibraryCache(context, completeSnapshot)
+            }
+        }
+    }
+
+    fun scheduleDeviceLibraryRefresh() {
+        libraryRefreshJob?.cancel()
+        libraryRefreshJob = scope.launch {
+            delay(850L)
+            try {
+                refreshDeviceLibraryNow()
+            } catch (_: Throwable) {
+                // Keep the last good cache and current in-memory library on transient failures.
+            }
+        }
+    }
+    var savedScTracks by remember { mutableStateOf<List<Track>>(StorageHelper.loadSoundCloudTracks(prefs)) }
+    var likedScTracks by remember {
+        val rawLiked = prefs.getString("liked_sc_tracks_v1", null)
+        val initialList: List<Track> = if (rawLiked != null) {
+            StorageHelper.loadSoundCloudTracks(prefs).filter { trk -> rawLiked.contains(trk.id.toString()) }
+        } else {
+            emptyList()
+        }
+        mutableStateOf<List<Track>>(initialList)
+    }
+
+    var ytSearchQuery by remember { mutableStateOf(prefs.getString("yt_saved_query", "") ?: "") }
+    var ytSearchResults by remember { mutableStateOf<List<YtMusicTrack>>(emptyList()) }
+
+    var downloadingPlaylistTitle by remember { mutableStateOf<String?>(null) }
+    var downloadPlaylistCurrent by remember { mutableIntStateOf(0) }
+    var downloadPlaylistTotal by remember { mutableIntStateOf(0) }
+
+    var loopPointAMs by remember { mutableStateOf<Long?>(null) }
+    var loopPointBMs by remember { mutableStateOf<Long?>(null) }
+
+    var scSearchQuery by remember { mutableStateOf(prefs.getString("sc_saved_query", "") ?: "") }
+    var scSearchResults by remember {
+        val cachedJson = prefs.getString("sc_cached_results_json", null)
+        val list = mutableListOf<SoundCloudTrack>()
+        if (cachedJson != null) {
+            try {
+                val arr = JSONArray(cachedJson)
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    list.add(
+                        SoundCloudTrack(
+                            id = o.getLong("id"),
+                            title = o.getString("title"),
+                            artist = o.getString("artist"),
+                            artworkUrl = o.optString("artworkUrl", "").takeIf { it.isNotBlank() },
+                            durationMs = o.getLong("durationMs"),
+                            streamProgressiveUrl = o.optString("streamUrl", "").takeIf { it.isNotBlank() }
+                        )
+                    )
+                }
+            } catch (_: Throwable) {}
+        }
+        mutableStateOf<List<SoundCloudTrack>>(list)
+    }
+
+    fun saveScSearchResults(results: List<SoundCloudTrack>) {
+        try {
+            val arr = JSONArray()
+            for (item in results.take(40)) {
+                val o = JSONObject().apply {
+                    put("id", item.id)
+                    put("title", item.title)
+                    put("artist", item.artist)
+                    put("artworkUrl", item.artworkUrl ?: "")
+                    put("durationMs", item.durationMs)
+                    put("streamUrl", item.streamProgressiveUrl ?: "")
+                }
+                arr.put(o)
+            }
+            prefs.edit().putString("sc_cached_results_json", arr.toString()).apply()
+        } catch (_: Throwable) {}
+    }
+
+    var playbackSpeed by remember { mutableFloatStateOf(prefs.getFloat("saved_speed", 1.0f).coerceIn(0.5f, 3.0f)) }
+    var playbackPitch by remember { mutableFloatStateOf(prefs.getFloat("saved_pitch", 1.0f).coerceIn(0.1f, 5.0f)) }
+
+    var minDurationSec by remember { mutableStateOf(StorageHelper.loadMinDurationSec(prefs)) }
+    var excludedFolders by remember { mutableStateOf(StorageHelper.loadExcludedFolders(prefs)) }
+    var tagOverrides by remember { mutableStateOf(StorageHelper.loadTagOverrides(prefs)) }
+
+    var playlists by remember { mutableStateOf(StorageHelper.loadPlaylists(prefs)) }
+    val artistSecondsAllTime = remember { mutableStateMapOf<String, Int>().apply { putAll(StorageHelper.loadArtistSeconds(prefs)) } }
+    val trackPlaysAllTime = remember { mutableStateMapOf<Long, Int>().apply { putAll(StorageHelper.loadTrackPlayCounts(prefs)) } }
+    val dailyStats = remember { mutableStateMapOf<String, DailyStatRecord>().apply { putAll(StorageHelper.loadDailyStats(prefs)) } }
+    val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
+    var isBatteryIgnored by remember { mutableStateOf(prefs.getBoolean("battery_opt_dismissed", false) || powerManager.isIgnoringBatteryOptimizations(context.packageName)) }
+
+    val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+    var hasAudioPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED) }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasAudioPermission = granted
+        if (granted) scheduleDeviceLibraryRefresh()
+    }
+
+    val exoPlayer = remember {
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(YouTubeMusicClient.STREAM_USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(12000)
+            .setReadTimeoutMs(12000)
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+    }
+
+    var currentTrack by remember { mutableStateOf<Track?>(null) }
+    var currentPlaybackSource by remember { mutableStateOf(prefs.getString("last_playback_source", "Моя Медиатека") ?: "Моя Медиатека") }
+    var currentMetadata by remember { mutableStateOf(DetailedMetadata()) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var isMediaPlayerPrepared by remember { mutableStateOf(false) }
+    var currentPositionMs by remember { mutableStateOf(0L) }
+    var showFullPlayerSheet by remember { mutableStateOf(false) }
+    var currentTrackPlayedSeconds by remember { mutableStateOf(0) }
+    var currentTrackRecorded20Sec by remember { mutableStateOf(false) }
+    var listenedSecondsTotal by remember { mutableStateOf(prefs.getInt("listened_seconds_total", 0)) }
+    var streamRetryCount by remember { mutableIntStateOf(0) }
+
+    var currentQueue by remember { mutableStateOf(StorageHelper.loadLastQueue(prefs)) }
+    var isShuffleEnabled by remember { mutableStateOf(prefs.getBoolean("saved_shuffle_enabled", false)) }
+    var repeatMode by remember {
+        val ord = prefs.getInt("saved_repeat_mode", 0)
+        mutableStateOf(RepeatMode.entries.getOrElse(ord) { RepeatMode.OFF })
+    }
+    var showQueueSheet by remember { mutableStateOf(false) }
+    var trackToEditTags by remember { mutableStateOf<Track?>(null) }
+    var pendingTagCoverUri by remember { mutableStateOf<String?>(null) }
+
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
+    var sleepTimerRemainingSec by remember { mutableStateOf(0) }
+    var stopAfterCurrentTrack by remember { mutableStateOf(false) }
+    var isSearchingOnlineLyrics by remember { mutableStateOf(false) }
+
+    var openedPlaylist by remember { mutableStateOf<PlaylistItem?>(null) }
+    var openedArtist by remember { mutableStateOf<String?>(null) }
+    var openedAlbum by remember { mutableStateOf<String?>(null) }
+
+    var activePlayJob by remember { mutableStateOf<Job?>(null) }
+    var activeMetaJob by remember { mutableStateOf<Job?>(null) }
+    var crossfadeTriggeredForTrackId by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(isPlaying, downloadingPlaylistTitle) {
+        if (!isPlaying && downloadingPlaylistTitle == null) {
+            delay(7200_000L)
+            onKillAppIdle()
+        }
+    }
+
+    val globalEqRef = remember { mutableStateOf<Equalizer?>(null) }
+    val globalBassRef = remember { mutableStateOf<BassBoost?>(null) }
+    val boundSessionId = remember { mutableIntStateOf(-1) }
+
+    fun applySystemEqualizer(sessionId: Int) {
+        val targetSession = if (sessionId > 0) sessionId else 0
+        try {
+            val enabled = prefs.getBoolean("eq_enabled", false)
+            if (globalEqRef.value == null || boundSessionId.intValue != targetSession) {
+                try { globalEqRef.value?.release() } catch (_: Throwable) {}
+                try { globalBassRef.value?.release() } catch (_: Throwable) {}
+                globalEqRef.value = Equalizer(0, targetSession)
+                globalBassRef.value = BassBoost(0, targetSession)
+                boundSessionId.intValue = targetSession
+            }
+
+            val eq = globalEqRef.value
+            val bass = globalBassRef.value
+            eq?.enabled = enabled
+            bass?.enabled = enabled
+
+            if (enabled && eq != null) {
+                val range = eq.bandLevelRange
+                val minMb = range[0].toInt()
+                val maxMb = range[1].toInt()
+                val bands = listOf(
+                    prefs.getFloat("eq_b0", 0f),
+                    prefs.getFloat("eq_b1", 0f),
+                    prefs.getFloat("eq_b2", 0f),
+                    prefs.getFloat("eq_b3", 0f),
+                    prefs.getFloat("eq_b4", 0f)
+                )
+                val numBands = eq.numberOfBands.toInt()
+                for (b in 0 until numBands) {
+                    val db = bands.getOrElse(b) { 0f }
+                    val mb = (db * 100f).toInt().coerceIn(minMb, maxMb).toShort()
+                    eq.setBandLevel(b.toShort(), mb)
+                }
+            }
+            if (bass != null && bass.strengthSupported) {
+                val prefBass = if (enabled) prefs.getInt("bass_boost_level", 0) * 10 else 0
+                bass.setStrength(prefBass.coerceIn(0, 1000).toShort())
+            }
+        } catch (_: Throwable) {}
+    }
+
+    DisposableEffect(Unit) {
+        val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _: SharedPreferences?, key: String? ->
+            if (key != null && (key.startsWith("eq_") || key == "bass_boost_level")) {
+                applySystemEqualizer(exoPlayer.audioSessionId)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(prefListener)
+
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+            try { globalEqRef.value?.release() } catch (_: Throwable) {}
+            try { globalBassRef.value?.release() } catch (_: Throwable) {}
+        }
+    }
+
+    val deviceTracks = remember(rawDeviceTracks, minDurationSec, excludedFolders, tagOverrides) {
+        rawDeviceTracks
+            .filter { it.durationMs >= minDurationSec * 1000L && !excludedFolders.contains(it.folderPath) }
+            .map { applyOverridesToTrack(it, tagOverrides) }
+    }
+
+    DisposableEffect(context, hasAudioPermission) {
+        if (!hasAudioPermission) {
+            onDispose { libraryRefreshJob?.cancel() }
+        } else {
+            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    scheduleDeviceLibraryRefresh()
+                }
+            }
+            try {
+                context.contentResolver.registerContentObserver(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    true,
+                    observer
+                )
+            } catch (_: Throwable) {
+                // Manual rescan remains available if the provider does not allow observation.
+            }
+            onDispose {
+                try { context.contentResolver.unregisterContentObserver(observer) } catch (_: Throwable) {}
+                libraryRefreshJob?.cancel()
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(context, audioPermission) == PackageManager.PERMISSION_GRANTED
+        hasAudioPermission = granted
+        if (granted) {
+            val cachedTracks = withContext(Dispatchers.IO) {
+                StorageHelper.loadDeviceLibraryCache(context)
+            }
+            if (cachedTracks.isNotEmpty()) {
+                rawDeviceTracks = cachedTracks
+            }
+            refreshDeviceLibraryNow()
+        } else {
+            permissionLauncher.launch(audioPermission)
+        }
+
+        val lastSaved = StorageHelper.loadLastPlayedState(prefs)
+        if (lastSaved != null && currentTrack == null) {
+            val (savedTrack, savedPos) = lastSaved
+            val updatedTrack = applyOverridesToTrack(savedTrack, tagOverrides)
+            currentTrack = updatedTrack
+            currentPositionMs = savedPos
+            isMediaPlayerPrepared = false
+            currentMetadata = extractTrackMetadata(context, updatedTrack)
+        }
+    }
+
+    var isServiceStarted by remember { mutableStateOf(false) }
+
+    fun syncMediaService(track: Track?, meta: DetailedMetadata, playing: Boolean) {
+        if (track == null) return
+        try {
+            PlayerBridge.currentTitle = track.title
+            PlayerBridge.currentArtist = track.artist
+            PlayerBridge.currentBitmap = meta.coverArt?.takeIf { !it.isRecycled }
+            PlayerBridge.isPlaying = playing
+            PlayerBridge.currentPositionMs = currentPositionMs
+            PlayerBridge.durationMs = track.durationMs
+            PlayerBridge.isShuffleEnabled = isShuffleEnabled
+            PlayerBridge.repeatModeOrdinal = repeatMode.ordinal
+            MMPWidgetProvider.updateAllWidgets(context)
+            val intent = Intent(context, MediaPlaybackService::class.java).setAction("ACTION_UPDATE")
+            if (playing || !isServiceStarted) {
+                isServiceStarted = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } else {
+                context.startService(intent)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    fun searchAndCacheOnlineLyrics(track: Track, customQuery: String? = null, showFeedback: Boolean = false) {
+        scope.launch {
+            val offlineSaved = loadOfflineLyrics(context, track.artist, track.title)
+            if (!offlineSaved.isNullOrBlank()) {
+                val parsed = parseLrcText(offlineSaved)
+                if (currentTrack?.id == track.id) {
+                    currentMetadata = currentMetadata.copy(lyrics = parsed)
+                }
+                if (showFeedback) {
+                    Toast.makeText(context, "Текст загружен из памяти устройства", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            isSearchingOnlineLyrics = true
+            val foundLrc = fetchLyricsFromLrclib(track.artist, track.title, track.durationMs, customQuery)
+            isSearchingOnlineLyrics = false
+            if (!foundLrc.isNullOrBlank()) {
+                saveOfflineLyrics(context, track.artist, track.title, foundLrc)
+                val updatedMap = tagOverrides.toMutableMap()
+                val existing = updatedMap[track.id]
+                updatedMap[track.id] = TrackTagOverride(
+                    title = existing?.title ?: track.title,
+                    artist = existing?.artist ?: track.artist,
+                    album = existing?.album ?: track.album,
+                    coverUri = existing?.coverUri ?: track.customCoverUri,
+                    lyrics = foundLrc
+                )
+                tagOverrides = updatedMap
+                StorageHelper.saveTagOverrides(prefs, updatedMap)
+                val parsed = parseLrcText(foundLrc)
+                if (currentTrack?.id == track.id) {
+                    currentTrack = applyOverridesToTrack(track, updatedMap)
+                    currentMetadata = currentMetadata.copy(lyrics = parsed)
+                }
+                if (showFeedback) {
+                    Toast.makeText(context, "Текст сохранён для офлайн-доступа!", Toast.LENGTH_SHORT).show()
+                }
+            } else if (showFeedback) {
+                Toast.makeText(context, "Текст в базе не найден", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun playTrack(track: Track, newQueue: List<Track>? = null, startOffsetMs: Long = 0L, isRetry: Boolean = false, sourceLabel: String? = null) {
+        if (!isRetry) streamRetryCount = 0
+        if (!isRetry) {
+            val resolvedSource = sourceLabel ?: when (track.folderName) {
+                "YouTube Music" -> "YouTube Music"
+                "SoundCloud" -> "SoundCloud"
+                else -> null
+            }
+            if (!resolvedSource.isNullOrBlank()) {
+                currentPlaybackSource = resolvedSource
+                prefs.edit().putString("last_playback_source", resolvedSource).apply()
+            }
+        }
+        if (currentTrack?.id != track.id) {
+            loopPointAMs = null
+            loopPointBMs = null
+        }
+        if (newQueue != null) {
+            val builtQueue = if (isShuffleEnabled) {
+                listOf(track) + newQueue.filter { it.id != track.id }.shuffled()
+            } else {
+                newQueue
+            }
+            currentQueue = builtQueue
+            StorageHelper.saveLastQueue(prefs, builtQueue)
+        } else if (currentQueue.isEmpty()) {
+            currentQueue = deviceTracks
+            StorageHelper.saveLastQueue(prefs, deviceTracks)
+        }
+
+        activePlayJob?.cancel()
+        activeMetaJob?.cancel()
+
+        crossfadeTriggeredForTrackId = null
+        currentTrack = track
+        currentPositionMs = startOffsetMs
+        currentTrackPlayedSeconds = 0
+        currentTrackRecorded20Sec = false
+        StorageHelper.saveLastPlayedState(prefs, track, startOffsetMs)
+
+        activePlayJob = scope.launch {
+            try {
+                val rawUrl = track.filePath.ifBlank { track.uri.toString() }
+                val finalUri = when {
+                    rawUrl.startsWith("ytm://") -> {
+                        val vid = rawUrl.removePrefix("ytm://")
+                        val resolved = YouTubeMusicClient.resolveAudioStreamUrl(
+                            vid,
+                            forceRefresh = isRetry,
+                            fallbackArtist = track.artist,
+                            fallbackTitle = track.title
+                        )
+                        if (resolved != null) Uri.parse(resolved) else track.uri
+                    }
+                    rawUrl.contains("api-v2.soundcloud.com") -> {
+                        val resolved = SoundCloudClient.resolveStreamUrl(rawUrl, forceRefresh = isRetry)
+                        if (resolved != null) Uri.parse(resolved) else track.uri
+                    }
+                    else -> track.uri
+                }
+
+                val mediaItem = MediaItem.fromUri(finalUri)
+                exoPlayer.setMediaItem(mediaItem, startOffsetMs.coerceAtLeast(0L))
+                exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed, playbackPitch)
+
+                val cfSec = prefs.getInt("crossfade_sec", 0)
+                exoPlayer.volume = if (cfSec > 0 && startOffsetMs == 0L) 0.15f else 1f
+                exoPlayer.prepare()
+                exoPlayer.play()
+
+                isMediaPlayerPrepared = true
+                isPlaying = true
+                syncMediaService(track, currentMetadata, true)
+            } catch (e: Throwable) {
+                isPlaying = false
+                isMediaPlayerPrepared = false
+                Toast.makeText(context, "Ошибка воспроизведения", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        activeMetaJob = scope.launch {
+            val meta = extractTrackMetadata(context, track)
+            if (currentTrack?.id == track.id) {
+                currentMetadata = meta
+                syncMediaService(track, meta, isPlaying)
+                if (meta.lyrics.isEmpty()) {
+                    searchAndCacheOnlineLyrics(track, null, false)
+                }
+            }
+        }
+    }
+
+    fun playNextTrack() {
+        val cur = currentTrack ?: return
+        if (currentQueue.isEmpty()) currentQueue = deviceTracks
+        val idx = currentQueue.indexOfFirst { it.id == cur.id }
+        if (idx != -1 && idx + 1 < currentQueue.size) {
+            playTrack(currentQueue[idx + 1])
+        } else if (repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty()) {
+            playTrack(currentQueue.first())
+        }
+    }
+
+    fun playPrevTrack() {
+        val cur = currentTrack ?: return
+        if (currentPositionMs > 4000L && isMediaPlayerPrepared) {
+            try {
+                if (exoPlayer.playbackState == Player.STATE_READY) {
+                    exoPlayer.seekTo(0L)
+                    currentPositionMs = 0L
+                    syncMediaService(cur, currentMetadata, isPlaying)
+                    return
+                }
+            } catch (_: Throwable) {}
+        }
+        if (currentQueue.isEmpty()) currentQueue = deviceTracks
+        val idx = currentQueue.indexOfFirst { it.id == cur.id }
+        if (idx > 0) {
+            playTrack(currentQueue[idx - 1])
+        } else if (repeatMode == RepeatMode.ALL && currentQueue.isNotEmpty()) {
+            playTrack(currentQueue.last())
+        }
+    }
+
+    fun safeSeekTo(targetMs: Long) {
+        val cur = currentTrack ?: return
+        val maxDur = cur.durationMs.coerceAtLeast(1L)
+        val clamped = targetMs.coerceIn(0L, (maxDur - 300L).coerceAtLeast(0L))
+        currentPositionMs = clamped
+        StorageHelper.saveLastPlayedState(prefs, cur, clamped)
+
+        if (isMediaPlayerPrepared) {
+            try {
+                val st = exoPlayer.playbackState
+                if (st == Player.STATE_READY || st == Player.STATE_BUFFERING) {
+                    val playerDur = exoPlayer.duration
+                    val finalPos = if (playerDur > 0L) clamped.coerceIn(0L, (playerDur - 300L).coerceAtLeast(0L)) else clamped
+                    exoPlayer.seekTo(finalPos)
+                    syncMediaService(cur, currentMetadata, isPlaying)
+                } else if (st == Player.STATE_IDLE || st == Player.STATE_ENDED) {
+                    playTrack(cur, null, clamped)
+                }
+            } catch (_: Throwable) {}
+        } else {
+            playTrack(cur, null, clamped)
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+                val cur = currentTrack
+                if (cur != null) {
+                    syncMediaService(cur, currentMetadata, playing)
+                }
+            }
+
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                applySystemEqualizer(audioSessionId)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    isMediaPlayerPrepared = true
+                    streamRetryCount = 0
+                    applySystemEqualizer(exoPlayer.audioSessionId)
+                    currentTrack?.let { trk ->
+                        val realDur = exoPlayer.duration
+                        if (realDur > 1000L && trk.durationMs <= 0L) {
+                            currentTrack = trk.copy(durationMs = realDur)
+                        }
+                        syncMediaService(currentTrack, currentMetadata, isPlaying)
+                    }
+                } else if (playbackState == Player.STATE_ENDED) {
+                    if (stopAfterCurrentTrack) {
+                        stopAfterCurrentTrack = false
+                        isPlaying = false
+                        currentPositionMs = 0L
+                        syncMediaService(currentTrack, currentMetadata, false)
+                        return
+                    }
+                    when (repeatMode) {
+                        RepeatMode.ONE -> {
+                            try {
+                                exoPlayer.seekTo(0L)
+                                exoPlayer.volume = 1f
+                                exoPlayer.play()
+                                currentPositionMs = 0L
+                            } catch (_: Throwable) {}
+                        }
+                        RepeatMode.ALL -> {
+                            val cur = currentTrack
+                            val idx = currentQueue.indexOfFirst { it.id == cur?.id }
+                            if (idx != -1 && idx + 1 < currentQueue.size) {
+                                playTrack(currentQueue[idx + 1])
+                            } else if (currentQueue.isNotEmpty()) {
+                                playTrack(currentQueue.first())
+                            }
+                        }
+                        RepeatMode.OFF -> {
+                            val cur = currentTrack
+                            val idx = currentQueue.indexOfFirst { it.id == cur?.id }
+                            if (idx != -1 && idx + 1 < currentQueue.size) {
+                                playTrack(currentQueue[idx + 1])
+                            } else {
+                                isPlaying = false
+                                currentPositionMs = 0L
+                                syncMediaService(currentTrack, currentMetadata, false)
+                            }
+                        }
+                    }
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                isMediaPlayerPrepared = false
+                val cur = currentTrack
+                val isLocalOfflineFile = cur == null || cur.uri.scheme == "file" || cur.uri.scheme == "content"
+                if (isLocalOfflineFile) {
+                    isPlaying = false
+                    Toast.makeText(context, "Не удалось открыть локальный файл", Toast.LENGTH_SHORT).show()
+                    return
+                }
+
+                if (streamRetryCount < 1 && cur != null) {
+                    streamRetryCount += 1
+                    SoundCloudClient.clearCache()
+                    YouTubeMusicClient.clearCache()
+                    if (cur.filePath.startsWith("ytm://")) {
+                        scope.launch {
+                            val cleanTitle = cur.title.replace(Regex("\\([^)]*\\)"), "").trim()
+                            val scMatches = SoundCloudClient.searchTracks("${cur.artist} $cleanTitle".trim(), limit = 5)
+                            val best = scMatches.firstOrNull { it.streamProgressiveUrl != null }
+                            val resolved = best?.streamProgressiveUrl?.let { SoundCloudClient.resolveStreamUrl(it, forceRefresh = true) }
+                            if (resolved != null) {
+                                playTrack(cur.copy(uri = Uri.parse(resolved), filePath = resolved), null, currentPositionMs, isRetry = true)
+                            } else {
+                                playTrack(cur, null, currentPositionMs, isRetry = true)
+                            }
+                        }
+                    } else {
+                        playTrack(cur, null, currentPositionMs, isRetry = true)
+                    }
+                } else {
+                    isPlaying = false
+                    Toast.makeText(context, "Поток недоступен", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener) }
+    }
+
+    fun setPlayingState(wantPlay: Boolean) {
+        val cur = currentTrack
+        if (cur != null) {
+            if (!isMediaPlayerPrepared || exoPlayer.playbackState == Player.STATE_IDLE) {
+                if (wantPlay) playTrack(cur, null, currentPositionMs)
+                return
+            }
+            if (!wantPlay) {
+                isPlaying = false
+                try { exoPlayer.pause() } catch (_: Throwable) {}
+                StorageHelper.saveLastPlayedState(prefs, cur, currentPositionMs)
+                syncMediaService(cur, currentMetadata, false)
+            } else {
+                isPlaying = true
+                try {
+                    if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                        exoPlayer.seekTo(0L)
+                        currentPositionMs = 0L
+                    }
+                    exoPlayer.volume = 1f
+                    exoPlayer.play()
+                    syncMediaService(cur, currentMetadata, true)
+                } catch (_: Throwable) {}
+            }
+        } else if (wantPlay && deviceTracks.isNotEmpty()) {
+            playTrack(deviceTracks.first(), deviceTracks)
+        }
+    }
+
+    fun togglePlayPause() {
+        setPlayingState(!isPlaying)
+    }
+
+    fun setShuffleEnabled(enabled: Boolean) {
+        if (isShuffleEnabled == enabled) return
+        isShuffleEnabled = enabled
+        prefs.edit().putBoolean("saved_shuffle_enabled", enabled).apply()
+        val cur = currentTrack
+        if (enabled && currentQueue.size > 1) {
+            val shuffled = if (cur != null) {
+                listOf(cur) + currentQueue.filter { it.id != cur.id }.shuffled()
+            } else {
+                currentQueue.shuffled()
+            }
+            currentQueue = shuffled
+            StorageHelper.saveLastQueue(prefs, shuffled)
+        }
+        syncMediaService(cur, currentMetadata, isPlaying)
+    }
+
+    fun toggleShuffle() {
+        setShuffleEnabled(!isShuffleEnabled)
+    }
+
+    fun setRepeatMode(mode: RepeatMode) {
+        if (repeatMode == mode) return
+        repeatMode = mode
+        prefs.edit().putInt("saved_repeat_mode", mode.ordinal).apply()
+        syncMediaService(currentTrack, currentMetadata, isPlaying)
+    }
+
+    fun cycleRepeatMode() {
+        val nextMode = when (repeatMode) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        }
+        setRepeatMode(nextMode)
+    }
+
+    fun startMyWave5050() {
+        Toast.makeText(context, "Настраиваем «Мою волну»...", Toast.LENGTH_SHORT).show()
+        scope.launch {
+            val localPool = if (deviceTracks.isNotEmpty()) deviceTracks.shuffled().take(10) else emptyList()
+            val favoriteArtist = artistSecondsAllTime.maxByOrNull { it.value }?.key
+                ?: currentTrack?.let { splitArtists(it.artist).firstOrNull() }
+                ?: "Hyperpop"
+
+            val onlinePool: List<Track> = if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) {
+                val ytCandidates = YouTubeMusicClient.searchTracks(favoriteArtist, limit = 20)
+                ytCandidates.map { YouTubeMusicClient.toTrack(it, "ytm://${it.videoId}") }.shuffled().take(10)
+            } else {
+                val scCandidates = SoundCloudClient.searchTracks(favoriteArtist, limit = 25)
+                scCandidates.mapNotNull { scTrk ->
+                    val progUrl = scTrk.streamProgressiveUrl ?: return@mapNotNull null
+                    SoundCloudClient.toTrack(scTrk, progUrl)
+                }.shuffled().take(10)
+            }
+
+            val mixed = mutableListOf<Track>()
+            val maxLen = maxOf(localPool.size, onlinePool.size)
+            for (i in 0 until maxLen) {
+                if (i < localPool.size) mixed.add(localPool[i])
+                if (i < onlinePool.size) mixed.add(onlinePool[i])
+            }
+
+            if (mixed.isNotEmpty()) {
+                playTrack(mixed.first(), mixed, sourceLabel = "Моя волна")
+                Toast.makeText(context, "«Моя волна» играет!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Не удалось сформировать волну", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    SideEffect {
+        PlayerBridge.onPlay = { setPlayingState(true) }
+        PlayerBridge.onPause = { setPlayingState(false) }
+        PlayerBridge.onToggle = { togglePlayPause() }
+        PlayerBridge.onNext = { playNextTrack() }
+        PlayerBridge.onPrev = { playPrevTrack() }
+        PlayerBridge.onSeekTo = { pos -> safeSeekTo(pos) }
+        PlayerBridge.onToggleShuffle = { toggleShuffle() }
+        PlayerBridge.onCycleRepeat = { cycleRepeatMode() }
+        PlayerBridge.onSetShuffleEnabled = { enabled -> setShuffleEnabled(enabled) }
+        PlayerBridge.onSetRepeatMode = { ordinal ->
+            val mode = RepeatMode.entries.getOrNull(ordinal)
+            if (mode != null) setRepeatMode(mode)
+        }
+    }
+
+    LaunchedEffect(sleepTimerRemainingSec) {
+        if (sleepTimerRemainingSec > 0) {
+            delay(1000L)
+            sleepTimerRemainingSec -= 1
+            if (sleepTimerRemainingSec == 0 && isPlaying) {
+                setPlayingState(false)
+                Toast.makeText(context, "Таймер сна остановил музыку", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    LaunchedEffect(isPlaying, currentTrack, loopPointAMs, loopPointBMs) {
+        var tickCounter = 0
+        while (isPlaying && currentTrack != null) {
+            delay(40L)
+            if (isMediaPlayerPrepared && (try { exoPlayer.isPlaying } catch (_: Throwable) { false })) {
+                val trk = currentTrack ?: break
+                currentPositionMs = try { exoPlayer.currentPosition.coerceAtLeast(0L) } catch (_: Throwable) { currentPositionMs }
+                PlayerBridge.currentPositionMs = currentPositionMs
+
+                val ptA = loopPointAMs
+                val ptB = loopPointBMs
+                if (ptA != null && ptB != null && ptB > ptA + 400L) {
+                    if (currentPositionMs >= ptB) {
+                        exoPlayer.seekTo(ptA)
+                        currentPositionMs = ptA
+                    }
+                }
+
+                try {
+                    val cfSec = prefs.getInt("crossfade_sec", 0)
+                    val playerDur = exoPlayer.duration
+                    val dur = if (playerDur > 1000L) playerDur else trk.durationMs.coerceAtLeast(1L)
+                    if (cfSec > 0 && dur > cfSec * 2000L) {
+                        val cfMs = cfSec * 1000f
+                        val pos = currentPositionMs.toFloat()
+                        val rem = (dur - currentPositionMs).toFloat()
+                        val targetVol = when {
+                            pos < cfMs -> (pos / cfMs).coerceIn(0.15f, 1f)
+                            rem < cfMs -> (rem / cfMs).coerceIn(0.05f, 1f)
+                            else -> 1f
+                        }
+                        exoPlayer.volume = targetVol
+
+                        if (rem in 1f..350f && crossfadeTriggeredForTrackId != trk.id && !stopAfterCurrentTrack) {
+                            crossfadeTriggeredForTrackId = trk.id
+                            when (repeatMode) {
+                                RepeatMode.ONE -> {
+                                    exoPlayer.seekTo(0L)
+                                    currentPositionMs = 0L
+                                    crossfadeTriggeredForTrackId = null
+                                }
+                                RepeatMode.ALL -> {
+                                    val idx = currentQueue.indexOfFirst { it.id == trk.id }
+                                    if (idx != -1 && idx + 1 < currentQueue.size) playTrack(currentQueue[idx + 1])
+                                    else if (currentQueue.isNotEmpty()) playTrack(currentQueue.first())
+                                }
+                                RepeatMode.OFF -> {
+                                    val idx = currentQueue.indexOfFirst { it.id == trk.id }
+                                    if (idx != -1 && idx + 1 < currentQueue.size) playTrack(currentQueue[idx + 1])
+                                }
+                            }
+                        }
+                    } else if (exoPlayer.volume != 1f) {
+                        exoPlayer.volume = 1f
+                    }
+                } catch (_: Throwable) {}
+
+                tickCounter += 1
+                if (tickCounter >= 25) {
+                    tickCounter = 0
+                    listenedSecondsTotal += 1
+                    currentTrackPlayedSeconds += 1
+                    val today = StorageHelper.getTodayDateString()
+                    val todayRec = dailyStats.getOrPut(today) { DailyStatRecord() }
+
+                    val artistsList = splitArtists(trk.artist)
+                    for (art in artistsList) {
+                        artistSecondsAllTime[art] = (artistSecondsAllTime[art] ?: 0) + 1
+                        todayRec.artistSeconds[art] = (todayRec.artistSeconds[art] ?: 0) + 1
+                    }
+                    dailyStats[today] = todayRec
+
+                    if (currentTrackPlayedSeconds >= 20 && !currentTrackRecorded20Sec) {
+                        currentTrackRecorded20Sec = true
+                        trackPlaysAllTime[trk.id] = (trackPlaysAllTime[trk.id] ?: 0) + 1
+                        todayRec.trackPlays[trk.id] = (todayRec.trackPlays[trk.id] ?: 0) + 1
+                        dailyStats[today] = todayRec
+                        StorageHelper.saveTrackPlayCounts(prefs, trackPlaysAllTime.toMap())
+                    }
+
+                    if (listenedSecondsTotal % 5 == 0) {
+                        prefs.edit().putInt("listened_seconds_total", listenedSecondsTotal).apply()
+                        StorageHelper.saveArtistSeconds(prefs, artistSecondsAllTime.toMap())
+                        StorageHelper.saveDailyStats(prefs, dailyStats.toMap())
+                        StorageHelper.saveLastPlayedState(prefs, trk, currentPositionMs)
+                    }
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) { onDispose { try { exoPlayer.release() } catch (_: Throwable) {} } }
+
+    var selectedBottomTab by remember { mutableIntStateOf(0) }
+    var showCreateStep2Dialog by remember { mutableStateOf(false) }
+    var pendingPlaylistCoverUri by remember { mutableStateOf<String?>(null) }
+    var tracksToAddToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var playlistTrackPickerTarget by remember { mutableStateOf<PlaylistItem?>(null) }
+    var playlistToEdit by remember { mutableStateOf<PlaylistItem?>(null) }
+
+    val coverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let {
+            try { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Throwable) {}
+            pendingPlaylistCoverUri = it.toString()
+        }
+    }
+
+    val tagCoverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let {
+            try { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Throwable) {}
+            pendingTagCoverUri = it.toString()
+        }
+    }
+
+    val cardShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toCardShape() }
+    val expressiveShape = remember(themeConfig.shapeStyle) { themeConfig.shapeStyle.toExpressiveShape() }
+    val isAdaptiveMode = themeConfig.themeMode == ThemeMode.ADAPTIVE || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
+    val effectivePrimaryHex = remember(themeConfig.themeMode, themeConfig.primaryHex, currentMetadata.coverArt) {
+        if (isAdaptiveMode) extractDominantColor(currentMetadata.coverArt, themeConfig.primaryHex)
+        else themeConfig.primaryHex
+    }
+    val primaryColor by animateColorAsState(Color(effectivePrimaryHex), tween(320), label = "")
+    val secondaryColor = Color(if (isAdaptiveMode) effectivePrimaryHex else themeConfig.secondaryHex)
+    val isLightMode = themeConfig.themeMode == ThemeMode.LIGHT || themeConfig.themeMode == ThemeMode.ADAPTIVE_LIGHT
+    LaunchedEffect(isLightMode) { onThemeLightChanged(isLightMode) }
+    val neutralBackgroundHex = when (themeConfig.themeMode) {
+        ThemeMode.ADAPTIVE -> 0xFF15191D
+        ThemeMode.ADAPTIVE_LIGHT -> 0xFFF4F6F5
+        else -> themeConfig.bgHex
+    }
+    val bgColor by animateColorAsState(
+        if (isLightMode) Color(0xFFF4F6F5) else Color(neutralBackgroundHex),
+        tween(320),
+        label = ""
+    )
+    val textColor = if (isLightMode) Color(0xFF18201F) else Color(0xFFF1F5F4)
+    val surfaceColor = if (isLightMode) Color(0xFFE6ECEA) else Color(0xFF222A2D)
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        uri?.let { context.contentResolver.openOutputStream(it)?.use { out -> out.write(themeConfig.toJson().toByteArray()) }; Toast.makeText(context, "Тема сохранена!", Toast.LENGTH_SHORT).show() }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { r -> r.readText() }
+            content?.let { jsonStr ->
+                MMPThemeConfig.fromJson(jsonStr)?.let { loaded -> themeConfig = loaded; StorageHelper.saveTheme(prefs, loaded); Toast.makeText(context, "Тема применена!", Toast.LENGTH_SHORT).show() }
+            }
+        }
+    }
+
+    fun requestIgnoreBatteryOptimizations() {
+        prefs.edit().putBoolean("battery_opt_dismissed", true).apply()
+        isBatteryIgnored = true
+        try { if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) { context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = Uri.parse("package:${context.packageName}") }) } } catch (_: Throwable) {}
+    }
+
+    val allMergedTracks = remember(deviceTracks, savedScTracks) { (deviceTracks + savedScTracks).distinctBy { it.filePath.ifBlank { it.id.toString() } } }
+
+    MaterialTheme(colorScheme = if (isLightMode) lightColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor) else darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)) {
+        Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
+            val hideDock = selectedBottomTab == 1 && (openedPlaylist != null || openedArtist != null || openedAlbum != null)
+
+            Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = if (hideDock) 82.dp else 152.dp)) {
+                AnimatedContent(targetState = selectedBottomTab, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) }, label = "") { tab ->
+                    when (tab) {
+                        0, 3 -> HomeScreen(
+                            allRawTracks = rawDeviceTracks,
+                            deviceTracks = deviceTracks,
+                            trackPlaysAllTime = trackPlaysAllTime,
+                            artistSecondsAllTime = artistSecondsAllTime,
+                            dailyStats = dailyStats,
+                            listenedMinutesTotal = listenedSecondsTotal / 60,
+                            firstLaunchDate = firstLaunchDate,
+                            hasPermission = hasAudioPermission,
+                            isBatteryIgnored = isBatteryIgnored,
+                            minDurationSec = minDurationSec,
+                            excludedFolders = excludedFolders,
+                            activeStreamingProvider = selectedProviderInUi,
+                            cardShape = cardShape,
+                            expressiveShape = expressiveShape,
+                            themeConfig = themeConfig,
+                            primaryColor = primaryColor,
+                            textColor = textColor,
+                            surfaceColor = surfaceColor,
+                            onRequestPermission = { permissionLauncher.launch(audioPermission) },
+                            onRequestBatteryIgnore = { requestIgnoreBatteryOptimizations() },
+                            onMinDurationChange = {
+                                minDurationSec = it
+                                StorageHelper.saveMinDurationSec(prefs, it)
+                            },
+                            onToggleFolderExclusion = { folder ->
+                                val next = if (excludedFolders.contains(folder)) excludedFolders - folder else excludedFolders + folder
+                                excludedFolders = next
+                                StorageHelper.saveExcludedFolders(prefs, next)
+                            },
+                            onStreamingProviderSelected = { chosen ->
+                                selectedProviderInUi = chosen
+                                StorageHelper.saveStreamingProvider(prefs, chosen)
+                            },
+                            onRestartAppClick = { onRestartApp() },
+                            onThemeChange = { themeConfig = it; StorageHelper.saveTheme(prefs, it) },
+                            onTrackClick = { playTrack(it, deviceTracks, sourceLabel = "Моя Медиатека") },
+                            onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
+                            onStartMyWaveClick = { startMyWave5050() },
+                            onExportTheme = { exportLauncher.launch("${themeConfig.themeName}.mmpui") },
+                            onImportTheme = { importLauncher.launch(arrayOf("*/*")) },
+                            settingsOnly = tab == 3
+                        )
+                        1 -> LibraryScreen(
+                            tracks = allMergedTracks,
+                            playlists = playlists,
+                            cardShape = cardShape,
+                            expressiveShape = expressiveShape,
+                            primaryColor = primaryColor,
+                            textColor = textColor,
+                            surfaceColor = surfaceColor,
+                            bgColor = bgColor,
+                            currentTrack = currentTrack,
+                            isPlaying = isPlaying,
+                            isShuffleEnabled = isShuffleEnabled,
+                            openedPlaylist = openedPlaylist,
+                            openedArtist = openedArtist,
+                            openedAlbum = openedAlbum,
+                            onPlayContext = { queue, track ->
+                                val source = openedPlaylist?.name?.let { "Плейлист • $it" }
+                                    ?: openedArtist?.let { "Исполнитель • $it" }
+                                    ?: openedAlbum?.let { "Альбом • $it" }
+                                    ?: "Моя Медиатека"
+                                playTrack(track, queue, sourceLabel = source)
+                            },
+                            onTogglePlay = { togglePlayPause() },
+                            onToggleShuffle = { toggleShuffle() },
+                            albumRepeatEnabled = repeatMode != RepeatMode.OFF,
+                            onToggleAlbumRepeat = { setRepeatMode(if (repeatMode == RepeatMode.OFF) RepeatMode.ALL else RepeatMode.OFF) },
+                            onAddTrackToPlaylistClick = { tracksToAddToPlaylist = listOf(it) },
+                            onAddMultipleTracksToPlaylist = { tracksToAddToPlaylist = it },
+                            onOpenPlaylistTrackPicker = { playlistTrackPickerTarget = it },
+                            onToggleTrackInPlaylist = { target, track ->
+                                val updated = playlists.map { pl ->
+                                    if (pl.name != target.name) pl else {
+                                        val exists = pl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && pl.trackFilePaths.contains(track.filePath))
+                                        val ids = if (exists) pl.trackIds - track.id else (pl.trackIds + track.id).distinct()
+                                        val paths = if (exists) pl.trackFilePaths - track.filePath else if (track.filePath.isNotBlank()) (pl.trackFilePaths + track.filePath).distinct() else pl.trackFilePaths
+                                        pl.copy(trackIds = ids, trackFilePaths = paths)
+                                    }
+                                }
+                                playlists = updated
+                                StorageHelper.savePlaylists(prefs, updated)
+                            },
+                            onSetOpenedPlaylist = { openedPlaylist = it },
+                            onSetOpenedArtist = { openedArtist = it },
+                            onSetOpenedAlbum = { openedAlbum = it },
+                            onEditPlaylist = { pl ->
+                                pendingPlaylistCoverUri = pl.coverUri
+                                playlistToEdit = pl
+                            },
+                            onCreateNewPlaylistClick = {
+                                pendingPlaylistCoverUri = null
+                                showCreateStep2Dialog = true
+                            },
+                            onRescanClick = {
+                                Toast.makeText(context, "Обновляем медиатеку...", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    refreshDeviceLibraryNow()
+                                    Toast.makeText(context, "Медиатека обновлена!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
+                        2 -> if (activeStreamingProvider == StreamingProvider.YOUTUBE_MUSIC) {
+                            YouTubeMusicScreen(
+                                cardShape = cardShape,
+                                expressiveShape = expressiveShape,
+                                primaryColor = primaryColor,
+                                textColor = textColor,
+                                surfaceColor = surfaceColor,
+                                likedTracks = likedScTracks,
+                                searchResults = ytSearchResults,
+                                searchQuery = ytSearchQuery,
+                                onQueryChange = {
+                                    ytSearchQuery = it
+                                    prefs.edit().putString("yt_saved_query", it).apply()
+                                },
+                                onSearchCommit = { q ->
+                                    scope.launch {
+                                        ytSearchResults = YouTubeMusicClient.searchTracks(q)
+                                    }
+                                },
+                                onPlayYtTrack = { ytTrack, allResults ->
+                                    scope.launch {
+                                        val direct = YouTubeMusicClient.resolveAudioStreamUrl(
+                                            ytTrack.videoId,
+                                            fallbackArtist = ytTrack.artist,
+                                            fallbackTitle = ytTrack.title
+                                        )
+                                        if (direct != null) {
+                                            val playable = YouTubeMusicClient.toTrack(ytTrack, direct)
+                                            val queueTracks = allResults.map { item ->
+                                                if (item.videoId == ytTrack.videoId) playable else YouTubeMusicClient.toTrack(item, "ytm://${item.videoId}")
+                                            }
+                                            if (savedScTracks.none { trk -> trk.id == playable.id }) {
+                                                val updated = savedScTracks + playable
+                                                savedScTracks = updated
+                                                StorageHelper.saveSoundCloudTracks(prefs, updated)
+                                            }
+                                            playTrack(playable, queueTracks.ifEmpty { listOf(playable) }, sourceLabel = "YouTube Music")
+                                        } else {
+                                            Toast.makeText(context, "Не удалось получить аудиопоток", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                onPlaySavedTrack = { savedTrk ->
+                                    playTrack(savedTrk, likedScTracks.ifEmpty { listOf(savedTrk) }, sourceLabel = if (savedTrk.folderName == "YouTube Music") "YouTube Music" else "SoundCloud")
+                                },
+                                onDownloadYtTrack = { ytTrack ->
+                                    Toast.makeText(context, "Скачиваем «${ytTrack.title}»...", Toast.LENGTH_SHORT).show()
+                                    scope.launch {
+                                        val file = YouTubeMusicClient.downloadTrackToDevice(context, ytTrack)
+                                        if (file != null) {
+                                            Toast.makeText(context, "Сохранено: ${file.name}", Toast.LENGTH_LONG).show()
+                                            delay(700)
+                                            refreshDeviceLibraryNow()
+                                        } else {
+                                            Toast.makeText(context, "Ошибка скачивания", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                onToggleLikeYtTrack = { ytTrack ->
+                                    val trkObj = YouTubeMusicClient.toTrack(ytTrack, "ytm://${ytTrack.videoId}")
+                                    if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
+                                        val upd = savedScTracks + trkObj
+                                        savedScTracks = upd
+                                        StorageHelper.saveSoundCloudTracks(prefs, upd)
+                                    }
+                                    val exists = likedScTracks.any { trk -> trk.id == trkObj.id }
+                                    val nextLiked = if (exists) likedScTracks.filterNot { trk -> trk.id == trkObj.id } else likedScTracks + trkObj
+                                    likedScTracks = nextLiked
+                                    prefs.edit().putString("liked_sc_tracks_v1", nextLiked.joinToString(",") { trk -> trk.id.toString() }).apply()
+                                },
+                                onAddYtToPlaylist = { ytTrack ->
+                                    val trkObj = YouTubeMusicClient.toTrack(ytTrack, "ytm://${ytTrack.videoId}")
+                                    if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
+                                        val upd = savedScTracks + trkObj
+                                        savedScTracks = upd
+                                        StorageHelper.saveSoundCloudTracks(prefs, upd)
+                                    }
+                                    tracksToAddToPlaylist = listOf(trkObj)
+                                }
+                            )
+                        } else {
+                            SoundCloudScreen(
+                                cardShape = cardShape,
+                                expressiveShape = expressiveShape,
+                                primaryColor = primaryColor,
+                                textColor = textColor,
+                                surfaceColor = surfaceColor,
+                                likedScTracks = likedScTracks,
+                                searchResults = scSearchResults,
+                                searchQuery = scSearchQuery,
+                                onQueryChange = {
+                                    scSearchQuery = it
+                                    prefs.edit().putString("sc_saved_query", it).apply()
+                                },
+                                onSearchCommit = { q, _ ->
+                                    scope.launch {
+                                        val found = SoundCloudClient.searchTracks(q)
+                                        scSearchResults = found
+                                        saveScSearchResults(found)
+                                    }
+                                },
+                                onPlaySoundCloudTrack = { scTrack, allResults ->
+                                    val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
+                                    scope.launch {
+                                        val directUrl = SoundCloudClient.resolveStreamUrl(progUrl)
+                                        if (directUrl != null) {
+                                            val playable = SoundCloudClient.toTrack(scTrack, progUrl).copy(uri = Uri.parse(directUrl))
+                                            val queueTracks = allResults.mapNotNull { item ->
+                                                val itemUrl = item.streamProgressiveUrl ?: return@mapNotNull null
+                                                if (item.id == scTrack.id) playable else SoundCloudClient.toTrack(item, itemUrl)
+                                            }
+                                            if (savedScTracks.none { trk -> trk.id == playable.id }) {
+                                                val updated = savedScTracks + playable
+                                                savedScTracks = updated
+                                                StorageHelper.saveSoundCloudTracks(prefs, updated)
+                                            }
+                                            playTrack(playable, queueTracks.ifEmpty { listOf(playable) })
+                                        } else {
+                                            Toast.makeText(context, "Не удалось получить аудиопоток", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                onPlaySavedScTrack = { savedTrk ->
+                                    scope.launch {
+                                        val metaUrl = savedTrk.filePath.ifBlank { savedTrk.uri.toString() }
+                                        val freshDirect = if (metaUrl.contains("api-v2.soundcloud.com")) SoundCloudClient.resolveStreamUrl(metaUrl) else metaUrl
+                                        if (freshDirect != null) {
+                                            val readyTrack = savedTrk.copy(uri = Uri.parse(freshDirect))
+                                            playTrack(readyTrack, likedScTracks.ifEmpty { listOf(readyTrack) })
+                                        } else {
+                                            Toast.makeText(context, "Ошибка обновления ссылки", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                onDownloadScTrack = { scTrack ->
+                                    val progUrl = scTrack.streamProgressiveUrl ?: return@SoundCloudScreen
+                                    Toast.makeText(context, "Скачиваем «${scTrack.title}»...", Toast.LENGTH_SHORT).show()
+                                    scope.launch {
+                                        val file = SoundCloudClient.downloadTrackToDevice(context, scTrack.title, scTrack.artist, progUrl)
+                                        if (file != null) {
+                                            Toast.makeText(context, "Сохранено: ${file.name}", Toast.LENGTH_LONG).show()
+                                            delay(700)
+                                            refreshDeviceLibraryNow()
+                                        } else {
+                                            Toast.makeText(context, "Не удалось скачать трек", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                onDownloadScPlaylist = { scPl ->
+                                    if (downloadingPlaylistTitle != null) {
+                                        Toast.makeText(context, "Дождитесь завершения текущего скачивания", Toast.LENGTH_SHORT).show()
+                                        return@SoundCloudScreen
+                                    }
+                                    downloadingPlaylistTitle = scPl.title
+                                    downloadPlaylistCurrent = 0
+                                    downloadPlaylistTotal = scPl.trackCount
+
+                                    val cleanPlName = scPl.title.replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ _-]"), "").trim().ifBlank { "Playlist_${scPl.id}" }
+                                    var createdPl = playlists.find { it.name == cleanPlName }
+                                    if (createdPl == null) {
+                                        createdPl = PlaylistItem(name = cleanPlName, coverUri = scPl.artworkUrl, trackIds = emptyList(), description = "SoundCloud: ${scPl.author}", trackFilePaths = emptyList())
+                                        playlists = playlists + createdPl
+                                        StorageHelper.savePlaylists(prefs, playlists)
+                                    }
+
+                                    scope.launch {
+                                        Toast.makeText(context, "Скачивание плейлиста началось...", Toast.LENGTH_SHORT).show()
+                                        val count = SoundCloudClient.downloadEntirePlaylist(context, scPl) { newTrk, cur, tot ->
+                                            downloadPlaylistCurrent = cur
+                                            downloadPlaylistTotal = tot
+                                            val currentList = StorageHelper.loadPlaylists(prefs)
+                                            val updated = currentList.map { pl ->
+                                                if (pl.name == cleanPlName) {
+                                                    val mergedIds = (pl.trackIds + newTrk.id).distinct()
+                                                    val mergedPaths = if (newTrk.filePath.isNotBlank()) (pl.trackFilePaths + newTrk.filePath).distinct() else pl.trackFilePaths
+                                                    pl.copy(trackIds = mergedIds, trackFilePaths = mergedPaths, coverUri = pl.coverUri ?: newTrk.customCoverUri)
+                                                } else pl
+                                            }
+                                            playlists = updated
+                                            StorageHelper.savePlaylists(prefs, updated)
+                                            rawDeviceTracks = (rawDeviceTracks + newTrk).distinctBy { it.filePath.ifBlank { it.id.toString() } }
+                                        }
+                                        downloadingPlaylistTitle = null
+                                        Toast.makeText(context, "Плейлист сохранён: $count треков в Медиатеке!", Toast.LENGTH_LONG).show()
+                                        delay(800)
+                                        refreshDeviceLibraryNow()
+                                    }
+                                },
+                                downloadingPlaylistTitle = downloadingPlaylistTitle,
+                                downloadPlaylistCurrent = downloadPlaylistCurrent,
+                                downloadPlaylistTotal = downloadPlaylistTotal,
+                                onToggleLikeScTrack = { scTrack ->
+                                    val progUrl = scTrack.streamProgressiveUrl ?: ""
+                                    val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
+                                    if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
+                                        val upd = savedScTracks + trkObj
+                                        savedScTracks = upd
+                                        StorageHelper.saveSoundCloudTracks(prefs, upd)
+                                    }
+                                    val exists = likedScTracks.any { trk -> trk.id == trkObj.id }
+                                    val nextLiked = if (exists) likedScTracks.filterNot { trk -> trk.id == trkObj.id } else likedScTracks + trkObj
+                                    likedScTracks = nextLiked
+                                    prefs.edit().putString("liked_sc_tracks_v1", nextLiked.joinToString(",") { trk -> trk.id.toString() }).apply()
+                                },
+                                onAddScToPlaylist = { scTrack ->
+                                    val progUrl = scTrack.streamProgressiveUrl ?: ""
+                                    val trkObj = SoundCloudClient.toTrack(scTrack, progUrl)
+                                    if (savedScTracks.none { trk -> trk.id == trkObj.id }) {
+                                        val upd = savedScTracks + trkObj
+                                        savedScTracks = upd
+                                        StorageHelper.saveSoundCloudTracks(prefs, upd)
+                                    }
+                                    tracksToAddToPlaylist = listOf(trkObj)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).windowInsetsPadding(WindowInsets.navigationBars), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MiniPlayerBar(
+                    track = currentTrack,
+                    metadata = currentMetadata,
+                    isPlaying = isPlaying,
+                    currentPosMs = currentPositionMs,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onBarClick = { if (currentTrack != null) showFullPlayerSheet = true },
+                    onPlayPause = { togglePlayPause() },
+                    onSwipeNext = { playNextTrack() },
+                    onSwipePrev = { playPrevTrack() }
+                )
+
+                if (!hideDock) {
+                    FrostedDockBar(
+                        selectedTab = selectedBottomTab,
+                        primaryColor = primaryColor,
+                        textColor = textColor,
+                        surfaceColor = surfaceColor,
+                        isLightMode = isLightMode,
+                        onTabSelected = { selectedBottomTab = it }
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = showFullPlayerSheet && currentTrack != null,
+                enter = slideInVertically(initialOffsetY = { it }, animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(250)),
+                exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(260)) + fadeOut(tween(200))
+            ) {
+                currentTrack?.let { activeTrack ->
+                    val qIdx = currentQueue.indexOfFirst { it.id == activeTrack.id }
+                    FullScreenPlayerOverlay(
+                        track = activeTrack,
+                        playbackSource = currentPlaybackSource,
+                        metadata = currentMetadata,
+                        isPlaying = isPlaying,
+                        currentPosMs = currentPositionMs,
+                        queueIndex = qIdx,
+                        queueSize = currentQueue.size,
+                        playbackSpeed = playbackSpeed,
+                        playbackPitch = playbackPitch,
+                        onSpeedPitchChange = { spd, ptc ->
+                            playbackSpeed = spd
+                            playbackPitch = ptc
+                            prefs.edit().putFloat("saved_speed", spd).putFloat("saved_pitch", ptc).apply()
+                            try { exoPlayer.playbackParameters = PlaybackParameters(spd, ptc) } catch (_: Throwable) {}
+                        },
+                        isShuffleEnabled = isShuffleEnabled,
+                        repeatMode = repeatMode,
+                        sleepTimerRemainingSec = sleepTimerRemainingSec,
+                        stopAfterCurrentTrack = stopAfterCurrentTrack,
+                        isSearchingOnlineLyrics = isSearchingOnlineLyrics,
+                        loopPointAMs = loopPointAMs,
+                        loopPointBMs = loopPointBMs,
+                        onSetLoopPointA = { loopPointAMs = it },
+                        onSetLoopPointB = { loopPointBMs = it },
+                        cardShape = cardShape,
+                        expressiveShape = expressiveShape,
+                        primaryColor = primaryColor,
+                        secondaryColor = secondaryColor,
+                        bgColor = bgColor,
+                        textColor = textColor,
+                        surfaceColor = surfaceColor,
+                        onDismiss = { showFullPlayerSheet = false },
+                        onAddToPlaylistClick = {
+                            if ((activeTrack.folderName == "SoundCloud" || activeTrack.folderName == "YouTube Music") && savedScTracks.none { trk -> trk.id == activeTrack.id }) {
+                                val upd = savedScTracks + activeTrack
+                                savedScTracks = upd
+                                StorageHelper.saveSoundCloudTracks(prefs, upd)
+                            }
+                            tracksToAddToPlaylist = listOf(activeTrack)
+                        },
+                        onEditTagsClick = {
+                            pendingTagCoverUri = activeTrack.customCoverUri
+                            trackToEditTags = activeTrack
+                        },
+                        onOpenSleepTimerClick = { showSleepTimerDialog = true },
+                        onDownloadCurrentScTrack = {
+                            val rawFp = activeTrack.filePath
+                            Toast.makeText(context, "Скачиваем трек...", Toast.LENGTH_SHORT).show()
+                            scope.launch {
+                                val file = if (rawFp.startsWith("ytm://")) {
+                                    val vid = rawFp.removePrefix("ytm://")
+                                    YouTubeMusicClient.downloadTrackToDevice(
+                                        context,
+                                        YtMusicTrack(vid, activeTrack.title, activeTrack.artist, activeTrack.customCoverUri, activeTrack.durationMs)
+                                    )
+                                } else {
+                                    val savedMatch = savedScTracks.firstOrNull { it.id == activeTrack.id || (it.title == activeTrack.title && it.artist == activeTrack.artist) }
+                                    val candidateUrl = listOf(
+                                        savedMatch?.filePath,
+                                        activeTrack.filePath,
+                                        activeTrack.uri.toString()
+                                    ).firstOrNull { !it.isNullOrBlank() && it.contains("api-v2.soundcloud.com") }
+                                        ?: savedMatch?.filePath?.takeIf { it.isNotBlank() }
+                                        ?: activeTrack.filePath.ifBlank { activeTrack.uri.toString() }
+                                    SoundCloudClient.downloadTrackToDevice(context, activeTrack.title, activeTrack.artist, candidateUrl)
+                                }
+                                if (file != null) {
+                                    Toast.makeText(context, "Трек сохранён: ${file.name}", Toast.LENGTH_LONG).show()
+                                    delay(700)
+                                    refreshDeviceLibraryNow()
+                                } else {
+                                    Toast.makeText(context, "Ошибка скачивания", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        onSearchOnlineLyricsClick = { customQuery ->
+                            searchAndCacheOnlineLyrics(activeTrack, customQuery, true)
+                        },
+                        onOpenQueueClick = { showQueueSheet = true },
+                        onToggleShuffle = { toggleShuffle() },
+                        onToggleRepeat = { cycleRepeatMode() },
+                        onPlayPause = { togglePlayPause() },
+                        onSeek = { newPos -> safeSeekTo(newPos) },
+                        onNext = { playNextTrack() },
+                        onPrev = { playPrevTrack() }
+                    )
+                }
+            }
+
+            if (showSleepTimerDialog) {
+                CurvedSleepTimerDialog(
+                    currentMinutes = (sleepTimerRemainingSec + 59) / 60,
+                    stopAfterCurrentTrack = stopAfterCurrentTrack,
+                    cardShape = cardShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onDismiss = { showSleepTimerDialog = false },
+                    onApplyTimer = { mins, stopEnd ->
+                        sleepTimerRemainingSec = mins * 60
+                        stopAfterCurrentTrack = stopEnd
+                        showSleepTimerDialog = false
+                        val msg = when {
+                            mins > 0 -> "Таймер сна запущен на $mins мин"
+                            stopEnd -> "Плеер остановится после конца трека"
+                            else -> "Таймер сна отключён"
+                        }
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+
+            AnimatedVisibility(
+                visible = showQueueSheet,
+                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 3 }, animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy)),
+                exit = fadeOut(tween(170)) + slideOutVertically(targetOffsetY = { it / 3 })
+            ) {
+                QueueManagementSheet(
+                    queue = currentQueue,
+                    currentTrack = currentTrack,
+                    cardShape = cardShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onDismiss = { showQueueSheet = false },
+                    onSelectTrack = { playTrack(it); showQueueSheet = false },
+                    onMoveTrack = { from, to ->
+                        if (from in currentQueue.indices && to in currentQueue.indices && from != to) {
+                            val mutable = currentQueue.toMutableList()
+                            val item = mutable.removeAt(from)
+                            mutable.add(to, item)
+                            currentQueue = mutable
+                            StorageHelper.saveLastQueue(prefs, mutable)
+                        }
+                    },
+                    onRemoveTrack = { idx ->
+                        val target = currentQueue.getOrNull(idx)
+                        if (target != null && target.id != currentTrack?.id) {
+                            val mutable = currentQueue.toMutableList()
+                            mutable.removeAt(idx)
+                            currentQueue = mutable
+                            StorageHelper.saveLastQueue(prefs, mutable)
+                        }
+                    }
+                )
+            }
+
+            if (trackToEditTags != null) {
+                val target = trackToEditTags!!
+                EditTrackTagsDialog(
+                    track = target,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    selectedCoverUri = pendingTagCoverUri,
+                    onPickCoverClick = { tagCoverPickerLauncher.launch(arrayOf("image/*")) },
+                    onDismiss = { trackToEditTags = null },
+                    onSave = { newTitle, newArtist, newAlbum, newCover, newLyrics ->
+                        val updatedMap = tagOverrides.toMutableMap()
+                        updatedMap[target.id] = TrackTagOverride(newTitle, newArtist, newAlbum, newCover, newLyrics)
+                        tagOverrides = updatedMap
+                        StorageHelper.saveTagOverrides(prefs, updatedMap)
+                        CoverCache.remove(target.id)
+                        val updatedTrack = applyOverridesToTrack(target, updatedMap)
+                        if (currentTrack?.id == target.id) {
+                            currentTrack = updatedTrack
+                            scope.launch { currentMetadata = extractTrackMetadata(context, updatedTrack) }
+                        }
+                        currentQueue = currentQueue.map { if (it.id == target.id) updatedTrack else it }
+                        StorageHelper.saveLastQueue(prefs, currentQueue)
+                        trackToEditTags = null
+                        Toast.makeText(context, "Сведения о треке обновлены!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+
+            if (playlistToEdit != null) {
+                val targetPl = playlistToEdit!!
+                EditPlaylistDialog(
+                    playlist = targetPl,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    selectedCoverUri = pendingPlaylistCoverUri,
+                    onPickCoverClick = { coverPickerLauncher.launch(arrayOf("image/*")) },
+                    onDismiss = { playlistToEdit = null },
+                    onSave = { newName, newDesc, newCover ->
+                        val updated = playlists.map { pl ->
+                            if (pl.name == targetPl.name) pl.copy(name = newName, description = newDesc, coverUri = newCover) else pl
+                        }
+                        playlists = updated
+                        StorageHelper.savePlaylists(prefs, updated)
+                        if (openedPlaylist?.name == targetPl.name) {
+                            openedPlaylist = targetPl.copy(name = newName, description = newDesc, coverUri = newCover)
+                        }
+                        playlistToEdit = null
+                        Toast.makeText(context, "Плейлист обновлён!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+
+            AnimatedVisibility(
+                visible = playlistTrackPickerTarget != null,
+                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 3 }, animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy)),
+                exit = fadeOut(tween(170)) + slideOutVertically(targetOffsetY = { it / 3 })
+            ) {
+                playlistTrackPickerTarget?.let { target ->
+                    PlaylistTrackPickerSheet(
+                        playlist = playlists.find { it.name == target.name } ?: target,
+                        allTracks = allMergedTracks,
+                        currentTracks = resolvePlaylistTracks(playlists.find { it.name == target.name } ?: target, allMergedTracks),
+                        cardShape = cardShape, expressiveShape = expressiveShape, primaryColor = primaryColor,
+                        textColor = textColor, surfaceColor = surfaceColor,
+                        onDismiss = { playlistTrackPickerTarget = null },
+                        onToggleTrack = { track ->
+                            val updated = playlists.map { pl ->
+                                if (pl.name != target.name) pl else {
+                                    val exists = pl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && pl.trackFilePaths.contains(track.filePath))
+                                    val ids = if (exists) pl.trackIds - track.id else (pl.trackIds + track.id).distinct()
+                                    val paths = if (exists) pl.trackFilePaths - track.filePath else if (track.filePath.isNotBlank()) (pl.trackFilePaths + track.filePath).distinct() else pl.trackFilePaths
+                                    pl.copy(trackIds = ids, trackFilePaths = paths)
+                                }
+                            }
+                            playlists = updated
+                            StorageHelper.savePlaylists(prefs, updated)
+                        }
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = tracksToAddToPlaylist.isNotEmpty(),
+                enter = fadeIn(tween(220)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
+                exit = fadeOut(tween(180)) + slideOutVertically(targetOffsetY = { it / 2 })
+            ) {
+                AddToPlaylistSheet(
+                    tracks = tracksToAddToPlaylist,
+                    allTracks = allMergedTracks,
+                    playlists = playlists,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
+                    primaryColor = primaryColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onDismiss = { tracksToAddToPlaylist = emptyList() },
+                    onSelectPlaylist = { selectedPl ->
+                        val selectedTracks = tracksToAddToPlaylist
+                        val alreadyContainsAll = selectedTracks.isNotEmpty() && selectedTracks.all { track ->
+                            selectedPl.trackIds.contains(track.id) || (track.filePath.isNotBlank() && selectedPl.trackFilePaths.contains(track.filePath))
+                        }
+                        val newIds = selectedTracks.map { it.id }
+                        val newPaths = selectedTracks.mapNotNull { it.filePath.takeIf { p -> p.isNotBlank() } }
+                        val updatedList = playlists.map { pl ->
+                            if (pl.name != selectedPl.name) pl else if (alreadyContainsAll) {
+                                pl.copy(
+                                    trackIds = pl.trackIds.filterNot { it in newIds },
+                                    trackFilePaths = pl.trackFilePaths.filterNot { it in newPaths }
+                                )
+                            } else {
+                                pl.copy(
+                                    trackIds = (pl.trackIds + newIds).distinct(),
+                                    trackFilePaths = (pl.trackFilePaths + newPaths).distinct()
+                                )
+                            }
+                        }
+                        playlists = updatedList
+                        StorageHelper.savePlaylists(prefs, updatedList)
+                        Toast.makeText(
+                            context,
+                            if (alreadyContainsAll) "Удалено из «${selectedPl.name}»" else "Добавлено в «${selectedPl.name}»!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        tracksToAddToPlaylist = emptyList()
+                    },
+                    onCreateNewPlaylistClick = {
+                        pendingPlaylistCoverUri = null
+                        showCreateStep2Dialog = true
+                    }
+                )
+            }
+
+            if (showCreateStep2Dialog) {
+                CreatePlaylistDetailsDialog(cardShape, expressiveShape, primaryColor, textColor, surfaceColor, pendingPlaylistCoverUri, { coverPickerLauncher.launch(arrayOf("image/*")) }, { showCreateStep2Dialog = false }, { name, desc, coverUri ->
+                    if (name.isNotBlank()) {
+                        val initIds = tracksToAddToPlaylist.map { it.id }
+                        val initPaths = tracksToAddToPlaylist.mapNotNull { it.filePath.takeIf { p -> p.isNotBlank() } }
+                        val newPl = PlaylistItem(name.trim(), coverUri, initIds, desc.trim(), initPaths)
+                        val updated = playlists + newPl
+                        playlists = updated
+                        StorageHelper.savePlaylists(prefs, updated)
+                        if (initIds.isNotEmpty()) {
+                            Toast.makeText(context, "Плейлист «${name.trim()}» создан, треки добавлены!", Toast.LENGTH_SHORT).show()
+                        }
+                        tracksToAddToPlaylist = emptyList()
+                    }
+                    showCreateStep2Dialog = false
+                })
+            }
+
+            if (showOnboarding) {
+                AimpStyleOnboardingOverlay(
+                    selectedProvider = selectedProviderInUi,
+                    cardShape = cardShape,
+                    expressiveShape = expressiveShape,
+                    primaryColor = primaryColor,
+                    bgColor = bgColor,
+                    textColor = textColor,
+                    surfaceColor = surfaceColor,
+                    onSelectProvider = { chosen ->
+                        selectedProviderInUi = chosen
+                        StorageHelper.saveStreamingProvider(prefs, chosen)
+                    },
+                    onFinishOnboarding = {
+                        StorageHelper.setOnboardingCompleted(prefs, true)
+                        showOnboarding = false
+                        if (selectedProviderInUi != activeStreamingProvider) {
+                            onRestartApp()
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
