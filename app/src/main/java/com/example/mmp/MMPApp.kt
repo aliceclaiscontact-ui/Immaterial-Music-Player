@@ -29,6 +29,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1006,7 +1007,52 @@ fun MMPApp(
 
     val allMergedTracks = remember(deviceTracks, savedScTracks) { (deviceTracks + savedScTracks).distinctBy { it.filePath.ifBlank { it.id.toString() } } }
 
-    MaterialTheme(colorScheme = if (isLightMode) lightColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor) else darkColorScheme(primary = primaryColor, secondary = secondaryColor, background = bgColor)) {
+    val appColorScheme = if (isLightMode) {
+        lightColorScheme(
+            primary = primaryColor,
+            onPrimary = Color(0xFF10201D),
+            secondary = secondaryColor,
+            onSecondary = Color(0xFF10201D),
+            tertiary = Color(0xFF6C648F),
+            onTertiary = Color.White,
+            background = bgColor,
+            onBackground = textColor,
+            surface = surfaceColor,
+            onSurface = textColor,
+            surfaceVariant = surfaceColor.copy(0.78f),
+            onSurfaceVariant = textColor.copy(0.72f),
+            outline = textColor.copy(0.28f),
+            outlineVariant = textColor.copy(0.14f),
+            surfaceTint = primaryColor
+        )
+    } else {
+        darkColorScheme(
+            primary = primaryColor,
+            onPrimary = Color(0xFF081512),
+            secondary = secondaryColor,
+            onSecondary = Color(0xFF081512),
+            tertiary = Color(0xFFB8A8E8),
+            onTertiary = Color(0xFF251C3A),
+            background = bgColor,
+            onBackground = textColor,
+            surface = surfaceColor,
+            onSurface = textColor,
+            surfaceVariant = surfaceColor.copy(1f),
+            onSurfaceVariant = textColor.copy(0.72f),
+            outline = textColor.copy(0.28f),
+            outlineVariant = textColor.copy(0.14f),
+            surfaceTint = primaryColor
+        )
+    }
+    val expressiveShapes = Shapes(
+        extraSmall = RoundedCornerShape(8.dp),
+        small = RoundedCornerShape(14.dp),
+        medium = RoundedCornerShape(20.dp),
+        large = RoundedCornerShape(28.dp),
+        extraLarge = RoundedCornerShape(36.dp)
+    )
+
+    MaterialTheme(colorScheme = appColorScheme, shapes = expressiveShapes) {
         Box(modifier = Modifier.fillMaxSize().background(bgColor)) {
             val hideDock = selectedBottomTab == 1 && (openedPlaylist != null || openedArtist != null || openedAlbum != null)
 
