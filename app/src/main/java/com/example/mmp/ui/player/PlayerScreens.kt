@@ -1050,10 +1050,6 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                                 else -> (0.45f - distance * 0.08f).coerceIn(0.2f, 0.45f)
                             }
 
-                            val blurRadius = if (blurLyricsEnabled && !isCurrent && !isLyricLoopSelectionMode) {
-                                (distance * 1.0f).coerceAtMost(3.0f)
-                            } else 0f
-
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1084,51 +1080,54 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                                             onSeek(line.timeMs)
                                         }
                                     }
-                                    .let { mod ->
-                                        if (blurRadius > 0.2f) mod.blur(blurRadius.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                                        else mod
-                                    }
                                     .padding(vertical = 6.dp, horizontal = 10.dp)
                             ) {
-                                if (isCurrent && line.words.isNotEmpty() && !isLyricLoopSelectionMode) {
-                                    val wordAnnotated = buildAnnotatedString {
-                                        for (w in line.words) {
-                                            val isWordActive = syncedPosMs >= w.timeMs
-                                            withStyle(
-                                                SpanStyle(
-                                                    color = if (isWordActive) primaryColor else Color.White.copy(alpha = 0.5f),
-                                                    fontWeight = if (isWordActive) FontWeight.Black else FontWeight.Bold
-                                                )
-                                            ) {
-                                                append(w.text)
+                                AnimatedContent(
+                                    targetState = isCurrent && !isLyricLoopSelectionMode,
+                                    transitionSpec = {
+                                        (fadeIn(tween(260, easing = FastOutSlowInEasing)) +
+                                            slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 8 })
+                                            .togetherWith(
+                                                fadeOut(tween(170)) +
+                                                    slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { -it / 10 }
+                                            )
+                                    },
+                                    label = "lyrics-motion-blur"
+                                ) { activeLine ->
+                                    val lyricBlur by transition.animateFloat(
+                                        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
+                                        label = "lyrics-motion-blur-radius"
+                                    ) { active -> if (active) 0f else if (blurLyricsEnabled) 2.6f else 0f }
+
+                                    if (activeLine && line.words.isNotEmpty()) {
+                                        val wordAnnotated = buildAnnotatedString {
+                                            for (word in line.words) {
+                                                val isWordActive = syncedPosMs >= word.timeMs
+                                                withStyle(
+                                                    SpanStyle(
+                                                        color = if (isWordActive) primaryColor else Color.White.copy(alpha = 0.5f),
+                                                        fontWeight = if (isWordActive) FontWeight.Black else FontWeight.Bold
+                                                    )
+                                                ) { append(word.text) }
                                             }
                                         }
+                                        Text(
+                                            text = wordAnnotated,
+                                            fontSize = 22.sp,
+                                            lineHeight = 30.sp,
+                                            modifier = Modifier.fillMaxWidth().blur(lyricBlur.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = line.text,
+                                            color = if (isInSelectedLoop) primaryColor else Color.White.copy(alpha = if (activeLine) 1f else rawAlpha),
+                                            fontSize = 22.sp,
+                                            fontWeight = if (activeLine || isInSelectedLoop) FontWeight.Black else FontWeight.Bold,
+                                            lineHeight = 30.sp,
+                                            modifier = Modifier.fillMaxWidth().blur(lyricBlur.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                                        )
                                     }
-                                    Text(
-                                        text = wordAnnotated,
-                                        fontSize = 22.sp,
-                                        lineHeight = 30.sp,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                } else if (isCurrent && !isLyricLoopSelectionMode) {
-                                    MotionText(
-                                        text = line.text,
-                                        color = if (isInSelectedLoop) primaryColor else Color.White,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Black,
-                                        maxLines = 3,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                } else {
-                                    Text(
-                                        text = line.text,
-                                        color = if (isInSelectedLoop) primaryColor else Color.White.copy(alpha = rawAlpha),
-                                        fontSize = 22.sp,
-                                        fontWeight = if (isCurrent || isInSelectedLoop) FontWeight.Black else FontWeight.Bold,
-                                        lineHeight = 30.sp,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
+                                }              }
                             }
                         }
                     }
