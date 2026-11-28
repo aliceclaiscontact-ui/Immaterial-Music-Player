@@ -150,7 +150,7 @@ fun MiniPlayerBar(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            MotionText(text = track?.title ?: "Выбери трек", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = track?.title ?: "Выбери трек", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 if (track != null) "${track.artist} • ${metadata.formatName} • ${formatMillis(currentPosMs)}" else "Свайп вверх — плеер, влево/вправо — трек",
                 color = textColor.copy(0.65f),
@@ -267,7 +267,7 @@ fun FullScreenPlayerOverlay(
                     Icon(Icons.Filled.KeyboardArrowDown, "Свернуть", tint = textColor, modifier = Modifier.size(28.dp))
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                    MotionText(
+                    Text(
                         text = playbackSource.ifBlank { "Моя Медиатека" },
                         color = textColor,
                         fontSize = 15.sp,
@@ -276,7 +276,7 @@ fun FullScreenPlayerOverlay(
                         overflow = TextOverflow.Ellipsis
                     )
                     if (queueSize > 0 && queueIndex >= 0) {
-                        MotionText(
+                        Text(
                             text = "Трек ${queueIndex + 1} из $queueSize",
                             color = textColor.copy(0.55f),
                             fontSize = 12.sp,
@@ -877,7 +877,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text("ТЕКСТ ПЕСНИ", color = Color.White.copy(alpha = 0.62f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-                            MotionText(track.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(onClick = onClose, modifier = Modifier.size(34.dp)) {
                             Icon(Icons.Filled.Close, "Закрыть", tint = Color.White.copy(alpha = 0.8f))
@@ -1110,6 +1110,15 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                                         lineHeight = 30.sp,
                                         modifier = Modifier.fillMaxWidth()
                                     )
+                                } else if (isCurrent && !isLyricLoopSelectionMode) {
+                                    MotionText(
+                                        text = line.text,
+                                        color = if (isInSelectedLoop) primaryColor else Color.White,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Black,
+                                        maxLines = 3,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 } else {
                                     Text(
                                         text = line.text,
@@ -1155,7 +1164,7 @@ fun FullScreenLyricsOverlayWithMiniPlayer(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            MotionText(track.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text("${track.artist} • ${formatMillis(currentPosMs)}", color = Color.White.copy(0.65f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
